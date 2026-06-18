@@ -359,7 +359,7 @@ button {
         </label>
       </section>
 
-      <p id="status" class="status">Lista para escanear. El OCR funciona en el navegador y necesita conexión la primera vez.</p>
+      <p id="status" class="status">Lista para escanear. El OCR funciona en el navegador y necesita conexion la primera vez.</p>
 
       <form id="contractForm" class="form">
         <section>
@@ -457,15 +457,11 @@ button {
           </label>
           <label>Conductor joven - Total <input class="charge-total" name="young_driver_total" inputmode="decimal" /></label>
           <label>Extra 1 - Concepto <input name="extra_1_concept" /></label>
-          <label>Extra 1 - Uds. <input name="extra_1_units" inputmode="decimal" /></label>
           <label>Extra 1 - Total <input class="charge-total" name="extra_1_total" inputmode="decimal" /></label>
           <label>Extra 2 - Concepto <input name="extra_2_concept" /></label>
-          <label>Extra 2 - Uds. <input name="extra_2_units" inputmode="decimal" /></label>
           <label>Extra 2 - Total <input class="charge-total" name="extra_2_total" inputmode="decimal" /></label>
-          <label>% Descuento - Uds. <input name="discount_units" inputmode="decimal" /></label>
-          <label>% Descuento - Total <input class="charge-total" name="discount_total" inputmode="decimal" readonly /></label>
+          <label>Descuento <input class="charge-total" name="discount_total" inputmode="decimal" /></label>
           <label>% IVA - Uds. <input name="vat_units" inputmode="decimal" value="21" /></label>
-          <label>% IVA - Total <input class="charge-total" name="vat_total" inputmode="decimal" /></label>
           <label>Sub total <input name="subtotal" inputmode="decimal" readonly /></label>
           <label>Forma de pago
             <select name="payment_method">
@@ -832,6 +828,13 @@ function ocrDates(text) {
     .filter((date) => date && !seen.has(date) && seen.add(date));
 }
 
+function dateFromYymmdd(value) {
+  if (!/^\d{6}$/.test(value || "")) return "";
+  const yy = Number(value.slice(0, 2));
+  const year = yy > 35 ? 1900 + yy : 2000 + yy;
+  return `${value.slice(4, 6)}/${value.slice(2, 4)}/${year}`;
+}
+
 function expectedDniLetter(number) {
   return "TRWAGMYFPDXBNJZSQVHLCKE"[Number(number) % 23] || "";
 }
@@ -855,6 +858,13 @@ function ocrFindDocument(text) {
   return spanishDocument ? "" : (candidates[0] || "");
 }
 
+function ocrFindLicenseNumber(text) {
+  const normalized = normalizeOcrText(text).replace(/[-\s]/g, "");
+  const labelMatch = normalized.match(/\b5[.)]?\s*([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])/);
+  if (labelMatch && validSpanishDocument(labelMatch[1])) return labelMatch[1];
+  return ocrFindDocument(text);
+}
+
 function ocrFindPlate(text) {
   const match = normalizeOcrText(text).match(/\b\d{4}\s?[A-Z]{3}\b/);
   return match ? match[0].replace(/\s+/, " ") : "";
@@ -870,6 +880,21 @@ function ocrLineAfterNumber(lines, number) {
   return "";
 }
 
+function ocrLineAfterLabel(lines, labels) {
+  const keys = labels.map((label) => normalizeOcrText(label));
+  for (let index = 0; index < lines.length; index += 1) {
+    const normalized = normalizeOcrText(lines[index]);
+    for (const key of keys) {
+      const pos = normalized.indexOf(key);
+      if (pos === -1) continue;
+      const after = lines[index].slice(pos + key.length).replace(/^[:.\-\s]+/, "");
+      if (clean(after)) return clean(after);
+      if (lines[index + 1]) return clean(lines[index + 1]);
+    }
+  }
+  return "";
+}
+
 function cleanOcrName(value) {
   return normalizeOcrText(value)
     .replace(/[01]/g, (char) => (char === "0" ? "O" : "I"))
@@ -881,6 +906,15 @@ function cleanOcrName(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function isLikelyPersonName(value) {
+  const normalized = normalizeOcrText(value);
+  const words = normalized.split(" ").filter(Boolean);
+  if (words.length < 2 || words.length > 5) return false;
+  if (/[0-9]/.test(normalized)) return false;
+  if (normalized.length < 7 || normalized.length > 38) return false;
+  return words.every((word) => /^[A-Z]{3,}$/.test(word));
+}
+
 function ocrCandidateName(text) {
   const blocked = /PERMISO|CONDUC|ESPANA|SPAIN|DNI|PASAPORTE|NACIONAL|NACIM|FECHA|VALID|LICEN|DRIVING|DOCUMENTO|IDENTIDAD|DOMICILIO|UNION|EUROPEA|MATRICULA|MARCA|MODELO/i;
   const lines = String(text || "")
@@ -889,17 +923,76 @@ function ocrCandidateName(text) {
     .filter((line) => line.length >= 3 && line.length <= 50);
   const surname = cleanOcrName(ocrLineAfterNumber(lines, 1));
   const name = cleanOcrName(ocrLineAfterNumber(lines, 2));
-  if (name || surname) return clean(`${name} ${surname}`);
-  return cleanOcrName(lines.find((line) => line.length >= 7 && !blocked.test(line) && /^[A-ZÁÉÍÓÚÑÜ0-9' ]+$/i.test(line)) || "");
+  const numberedName = clean(`${name} ${surname}`);
+  if (isLikelyPersonName(numberedName)) return numberedName;
+  const labelName = cleanOcrName(`${ocrLineAfterLabel(lines, ["nombre"])} ${ocrLineAfterLabel(lines, ["apellidos"])}`);
+  if (isLikelyPersonName(labelName)) return labelName;
+  const candidate = cleanOcrName(lines.find((line) => line.length >= 7 && !blocked.test(line) && /^[A-ZÁÉÍÓÚÑÜ' ]+$/i.test(line)) || "");
+  return isLikelyPersonName(candidate) ? candidate : "";
 }
 
 function ocrVehicleModel(text) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((line) => clean(line).toUpperCase())
-    .filter(Boolean);
-  const blocked = /MATRICULA|BASTIDOR|TITULAR|PERMISO|CIRCULACION|SERVICIO|CLASE|MARCA|MODELO|FECHA|ESPANA/i;
-  return lines.find((line) => line.length >= 5 && line.length <= 30 && !blocked.test(line) && /[A-Z]/.test(line)) || "";
+  const normalized = normalizeOcrText(text);
+  const known = [
+    "CITROEN C3",
+    "CITROEN C4",
+    "SEAT IBIZA",
+    "SEAT ARONA",
+    "PEUGEOT 208",
+    "PEUGEOT 308",
+    "FIAT 500",
+    "RENAULT CLIO",
+    "OPEL CORSA",
+    "HYUNDAI I10",
+    "HYUNDAI I20",
+    "KIA PICANTO",
+    "KIA RIO",
+    "NISSAN MICRA",
+    "TOYOTA YARIS",
+    "DACIA SANDERO",
+  ];
+  const found = known.find((model) => normalized.includes(model));
+  if (found) return found;
+  const plateNearby = normalized.match(/\b(?:CITROEN|SEAT|PEUGEOT|FIAT|RENAULT|OPEL|HYUNDAI|KIA|NISSAN|TOYOTA|DACIA)\s+[A-Z0-9]{1,12}\b/);
+  return plateNearby ? plateNearby[0] : "";
+}
+
+function parseSpanishDriverLicense(text, fields) {
+  const normalized = normalizeOcrText(text);
+  const lines = String(text || "").split(/\r?\n/).map(clean).filter(Boolean);
+  const surname = cleanOcrName(ocrLineAfterNumber(lines, 1));
+  const name = cleanOcrName(ocrLineAfterNumber(lines, 2));
+  const fullName = clean(`${name} ${surname}`);
+  if (isLikelyPersonName(fullName)) fields.renter = fullName;
+  const license = ocrFindLicenseNumber(text);
+  if (license && validSpanishDocument(license)) fields.license_number = license;
+  if (/ESPANA|SPAIN|REINO DE ESPANA/.test(normalized)) fields.license_country = "ESPANA";
+
+  const birth = normalized.match(/\b3[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
+  if (birth) fields.birth_date = normalizeOcrDate(`${birth[1]}/${birth[2]}/${birth[3]}`);
+  const issue = normalized.match(/\b4A[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
+  if (issue) fields.license_issue = normalizeOcrDate(`${issue[1]}/${issue[2]}/${issue[3]}`);
+  const expiry = normalized.match(/\b4B[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
+  if (expiry) fields.license_expiry = normalizeOcrDate(`${expiry[1]}/${expiry[2]}/${expiry[3]}`);
+}
+
+function parseSpanishId(text, fields) {
+  const normalized = normalizeOcrText(text);
+  const lines = String(text || "").split(/\r?\n/).map(clean).filter(Boolean);
+  const documentNumber = ocrFindDocument(text);
+  if (documentNumber && validSpanishDocument(documentNumber)) fields.passport_id = documentNumber;
+  const name = cleanOcrName(ocrLineAfterLabel(lines, ["nombre"]));
+  const surname = cleanOcrName(ocrLineAfterLabel(lines, ["apellidos"]));
+  const fullName = clean(`${name} ${surname}`);
+  if (isLikelyPersonName(fullName)) fields.renter = fullName;
+  if (/ESP|ESPANA|SPAIN/.test(normalized)) fields.nationality = "ESP";
+
+  const mrz = normalized.match(/([0-9]{6})[0-9A-Z]?M([0-9]{6})[0-9A-Z]?ESP/);
+  if (mrz) fields.birth_date = dateFromYymmdd(mrz[1]);
+  const birth = normalized.match(/\bNACIMIENTO[^\d]*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
+  if (birth) fields.birth_date = normalizeOcrDate(`${birth[1]}/${birth[2]}/${birth[3]}`);
+  const address = ocrLineAfterLabel(lines, ["domicilio"]);
+  if (address && normalizeOcrText(address).length >= 8) fields.address = address;
 }
 
 function ocrFindCreditCardNumber(text) {
@@ -943,19 +1036,21 @@ function parseBrowserOcrFields(text, scanType) {
   const documentNumber = ocrFindDocument(text);
   const name = ocrCandidateName(text);
   if (scanType === "driver") {
-    fields.renter = name;
-    fields.license_number = documentNumber;
-    fields.license_country = /ESP|ESPANA|SPAIN/.test(normalized) ? "ESPANA" : "";
-    fields.license_issue = dates[0] || "";
-    fields.license_expiry = dates[1] || "";
+    parseSpanishDriverLicense(text, fields);
+    if (!fields.renter && name) fields.renter = name;
+    if (!fields.license_number && documentNumber && validSpanishDocument(documentNumber)) fields.license_number = documentNumber;
+    if (!fields.license_country && /ESP|ESPANA|SPAIN/.test(normalized)) fields.license_country = "ESPANA";
+    if (!fields.license_issue) fields.license_issue = dates[0] || "";
+    if (!fields.license_expiry) fields.license_expiry = dates[1] || "";
     return fields;
   }
 
   if (scanType === "id") {
-    fields.renter = name;
-    fields.passport_id = documentNumber;
-    fields.nationality = /ESP|ESPANA|SPAIN/.test(normalized) ? "ESP" : "";
-    fields.birth_date = dates[0] || "";
+    parseSpanishId(text, fields);
+    if (!fields.renter && name) fields.renter = name;
+    if (!fields.passport_id && documentNumber && validSpanishDocument(documentNumber)) fields.passport_id = documentNumber;
+    if (!fields.nationality && /ESP|ESPANA|SPAIN/.test(normalized)) fields.nationality = "ESP";
+    if (!fields.birth_date) fields.birth_date = dates[0] || "";
     return fields;
   }
 
@@ -1095,19 +1190,13 @@ function updateCategoryCalculations() {
 
 function updateSubtotal() {
   const data = Object.fromEntries(new FormData(form).entries());
-  const discountRate = parseAmount(data.discount_units);
-  if (form.elements.discount_total) {
-    form.elements.discount_total.value = discountRate ? formatAmount(parseAmount(data.rent_days_total) * discountRate / 100) : "";
-    data.discount_total = form.elements.discount_total.value;
-  }
   const subtotal =
     parseAmount(data.rent_days_total) +
     parseAmount(data.insurance_total) +
     parseAmount(data.young_driver_total) +
     parseAmount(data.extra_1_total) +
     parseAmount(data.extra_2_total) -
-    parseAmount(data.discount_total) +
-    parseAmount(data.vat_total);
+    parseAmount(data.discount_total);
 
   form.elements.subtotal.value = formatAmount(subtotal);
 }
@@ -1346,14 +1435,11 @@ function fillSample() {
     young_driver_units: "NO",
     young_driver_total: "",
     extra_1_concept: "Silla nino",
-    extra_1_units: "1",
     extra_1_total: "5.00",
     extra_2_concept: "",
-    extra_2_units: "",
     extra_2_total: "",
-    discount_units: "10",
+    discount_total: "",
     vat_units: "21",
-    vat_total: "9.63",
     payment_method: "Tarjeta",
     credit_card_number: "4111 1111 1111 1111",
     credit_card_expiry: "12/28",
@@ -1475,7 +1561,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
   input.addEventListener("change", () => handlePhoto(input));
 });
 
-document.querySelectorAll(".charge-total, [name='discount_units'], [name='discount_total'], [name='vat_total']").forEach((input) => {
+document.querySelectorAll(".charge-total, [name='discount_total']").forEach((input) => {
   input.addEventListener("input", updateSubtotal);
 });
 
