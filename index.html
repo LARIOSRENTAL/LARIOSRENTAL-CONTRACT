@@ -127,7 +127,8 @@ h2 {
 
 .form section,
 .photos,
-.tool-panel {
+.tool-panel,
+.scan-review {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -151,7 +152,10 @@ label {
 .tool-panel h2,
 .damage-board,
 .signature-pad,
-.tool-actions {
+.tool-actions,
+.scan-review__bar,
+.scan-review__body,
+.scan-review__actions {
   grid-column: 1 / -1;
 }
 
@@ -258,6 +262,60 @@ textarea:focus {
   border: 1px solid var(--line);
 }
 
+.scan-review {
+  margin-top: 14px;
+}
+
+.scan-review__bar,
+.scan-review__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scan-review__bar p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.scan-review__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.scan-preview {
+  max-height: 68svh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111;
+}
+
+.scan-preview img {
+  display: block;
+  width: 100%;
+  min-width: 360px;
+  height: auto;
+}
+
+.scan-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.scan-review__actions {
+  justify-content: end;
+}
+
+.scan-review__actions button {
+  min-width: 150px;
+  padding: 0 14px;
+}
+
 .actions {
   position: fixed;
   right: 0;
@@ -310,12 +368,23 @@ button {
   }
 
   .scan-row,
-  .form section {
+  .form section,
+  .scan-review__body {
     grid-template-columns: 1fr;
   }
 
   .photo-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .scan-review__bar,
+  .scan-review__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scan-review__actions button {
+    width: 100%;
   }
 }
 
@@ -359,7 +428,7 @@ button {
         </label>
       </section>
 
-      <p id="status" class="status">Lista para escanear. El OCR recorta el documento y mejora el contraste antes de leer.</p>
+      <p id="status" class="status">Lista para escanear. La foto abre una revisión rápida para aplicar solo los datos correctos.</p>
 
       <form id="contractForm" class="form">
         <section>
@@ -516,6 +585,26 @@ button {
         <div id="photoGrid" class="photo-grid"></div>
       </section>
 
+      <section class="scan-review" id="scanReview" hidden>
+        <div class="scan-review__bar">
+          <div>
+            <h2 id="scanReviewTitle">Revisar documento</h2>
+            <p id="scanReviewHint">Escribe solo los datos que se vean claros en la foto.</p>
+          </div>
+          <button id="closeScanReviewBtn" class="ghost" type="button">Cerrar</button>
+        </div>
+        <div class="scan-review__body">
+          <div class="scan-preview">
+            <img id="scanReviewImage" alt="Documento escaneado" />
+          </div>
+          <div class="scan-fields" id="scanReviewFields"></div>
+        </div>
+        <div class="scan-review__actions">
+          <button id="applyScanReviewBtn" class="primary" type="button">Aplicar al contrato</button>
+          <button id="clearScanReviewBtn" class="secondary" type="button">Limpiar campos</button>
+        </div>
+      </section>
+
       <footer class="actions">
         <button id="sampleBtn" class="secondary" type="button">Cargar ejemplo</button>
         <button id="generateBtn" class="primary" type="button">Generar contrato PDF</button>
@@ -562,6 +651,14 @@ const damageCanvas = document.querySelector("#damageCanvas");
 const signatureCanvas = document.querySelector("#signatureCanvas");
 const clearDamageBtn = document.querySelector("#clearDamageBtn");
 const clearSignatureBtn = document.querySelector("#clearSignatureBtn");
+const scanReview = document.querySelector("#scanReview");
+const scanReviewTitle = document.querySelector("#scanReviewTitle");
+const scanReviewHint = document.querySelector("#scanReviewHint");
+const scanReviewImage = document.querySelector("#scanReviewImage");
+const scanReviewFields = document.querySelector("#scanReviewFields");
+const applyScanReviewBtn = document.querySelector("#applyScanReviewBtn");
+const clearScanReviewBtn = document.querySelector("#clearScanReviewBtn");
+const closeScanReviewBtn = document.querySelector("#closeScanReviewBtn");
 
 let deferredInstallPrompt = null;
 let damageHasInk = false;
@@ -569,6 +666,7 @@ let signatureHasInk = false;
 let lastAutoReturnDate = "";
 let lastAutoReturnTime = "";
 let lastAutoReturnPlace = "";
+let scanReviewState = { scanType: "", fields: [] };
 
 const firstContractNumber = 82600;
 const contractCounterKey = "larios_contract_next_number";
@@ -716,6 +814,62 @@ const fuelBoxes = {
   diesel: { x: 482, y: 667 },
 };
 
+const scanReviewConfigs = {
+  driver: {
+    title: "Carnet principal",
+    hint: "Rellena los datos visibles del permiso. La foto queda guardada como referencia.",
+    fields: [
+      ["renter", "Arrendatario", "text"],
+      ["license_number", "Nº permiso conducir", "text"],
+      ["license_country", "País permiso", "text"],
+      ["license_issue", "Fecha expedición", "text"],
+      ["license_expiry", "Fecha caducidad", "text"],
+      ["birth_date", "Fecha nacimiento", "text"],
+    ],
+  },
+  id: {
+    title: "DNI / Pasaporte",
+    hint: "Usa esta pantalla para copiar los datos del documento sin esperar al OCR.",
+    fields: [
+      ["renter", "Nombre completo", "text"],
+      ["passport_id", "DNI / Pasaporte", "text"],
+      ["nationality", "Nacionalidad", "text"],
+      ["birth_date", "Fecha nacimiento", "text"],
+      ["address", "Domicilio", "textarea"],
+    ],
+  },
+  additional: {
+    title: "Carnet adicional",
+    hint: "Estos datos se aplican al segundo conductor.",
+    fields: [
+      ["additional_name", "Nombre", "text"],
+      ["additional_license_number", "Nº permiso conducir", "text"],
+      ["additional_license_country", "País permiso", "text"],
+      ["additional_license_issue", "Fecha expedición", "text"],
+      ["additional_license_expiry", "Fecha caducidad", "text"],
+      ["additional_birth_date", "Fecha nacimiento", "text"],
+    ],
+  },
+  car: {
+    title: "Vehículo",
+    hint: "Copia matrícula, modelo y combustible desde la ficha, llavero o foto del coche.",
+    fields: [
+      ["vehicle_model", "Modelo", "text"],
+      ["vehicle_plate", "Matrícula", "text"],
+      ["vehicle_color", "Color", "text"],
+      ["fuel_type", "Combustible", "fuel"],
+    ],
+  },
+  card: {
+    title: "Tarjeta",
+    hint: "Introduce solo numeración y caducidad. No se aplica nada hasta pulsar el botón.",
+    fields: [
+      ["credit_card_number", "Número tarjeta", "text"],
+      ["credit_card_expiry", "Caducidad", "text"],
+    ],
+  },
+};
+
 function readNextContractNumber() {
   const stored = Number.parseInt(localStorage.getItem(contractCounterKey) || "", 10);
   return Number.isFinite(stored) && stored >= firstContractNumber ? stored : firstContractNumber;
@@ -735,474 +889,6 @@ function setStatus(message) {
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadExternalScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) return resolve();
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
-async function ensureBrowserOcr() {
-  if (window.Tesseract) return true;
-  const sources = [
-    "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
-    "https://unpkg.com/tesseract.js@5/dist/tesseract.min.js",
-  ];
-  for (const src of sources) {
-    try {
-      setStatus("Cargando OCR en el navegador...");
-      await loadExternalScript(src);
-      if (window.Tesseract) return true;
-    } catch (_error) {
-      // Try the next source.
-    }
-  }
-  return false;
-}
-
-async function imageFileToDataUrl(file, maxSide = 1600, quality = 0.78) {
-  const originalUrl = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = originalUrl;
-    await img.decode();
-
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-    const width = Math.max(1, Math.round(img.naturalWidth * scale));
-    const height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(img, 0, 0, width, height);
-    const crop = detectDocumentCrop(ctx, width, height);
-    const processed = preprocessOcrCanvas(canvas, crop);
-    return processed.toDataURL("image/png");
-  } catch (_error) {
-    return fileToDataUrl(file);
-  } finally {
-    URL.revokeObjectURL(originalUrl);
-  }
-}
-
-function detectDocumentCrop(ctx, width, height) {
-  const sample = 4;
-  const image = ctx.getImageData(0, 0, width, height).data;
-  let left = width;
-  let top = height;
-  let right = 0;
-  let bottom = 0;
-  let hits = 0;
-
-  for (let y = 0; y < height; y += sample) {
-    for (let x = 0; x < width; x += sample) {
-      const index = (y * width + x) * 4;
-      const r = image[index];
-      const g = image[index + 1];
-      const b = image[index + 2];
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const saturation = max - min;
-      const darkInk = max < 105;
-      const coloredCard = saturation > 18 && max > 60 && max < 245;
-      if (!darkInk && !coloredCard) continue;
-      left = Math.min(left, x);
-      top = Math.min(top, y);
-      right = Math.max(right, x);
-      bottom = Math.max(bottom, y);
-      hits += 1;
-    }
-  }
-
-  if (hits < 80 || right <= left || bottom <= top) return { x: 0, y: 0, width, height };
-  const padX = Math.round(width * 0.035);
-  const padY = Math.round(height * 0.035);
-  const crop = {
-    x: Math.max(0, left - padX),
-    y: Math.max(0, top - padY),
-    width: Math.min(width, right + padX) - Math.max(0, left - padX),
-    height: Math.min(height, bottom + padY) - Math.max(0, top - padY),
-  };
-  if (crop.width * crop.height < width * height * 0.08) return { x: 0, y: 0, width, height };
-  return crop;
-}
-
-function preprocessOcrCanvas(source, crop) {
-  const targetWidth = 1800;
-  const ratio = targetWidth / crop.width;
-  const targetHeight = Math.max(1, Math.round(crop.height * ratio));
-  const canvas = document.createElement("canvas");
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(source, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-
-  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = image.data;
-  for (let index = 0; index < data.length; index += 4) {
-    const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-    const boosted = gray < 170 ? Math.max(0, gray - 28) : Math.min(255, gray + 18);
-    const value = boosted < 178 ? 0 : 255;
-    data[index] = value;
-    data[index + 1] = value;
-    data[index + 2] = value;
-    data[index + 3] = 255;
-  }
-  ctx.putImageData(image, 0, 0);
-  return canvas;
-}
-
-function normalizeOcrText(text) {
-  return String(text || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
-}
-
-function normalizeOcrDate(value) {
-  const match = String(value || "").match(/(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
-  if (!match) return "";
-  const dayNumber = Number(match[1]);
-  const monthNumber = Number(match[2]);
-  if (dayNumber < 1 || dayNumber > 31 || monthNumber < 1 || monthNumber > 12) return "";
-  let year = match[3];
-  if (year.length === 2) year = Number(year) > 35 ? `19${year}` : `20${year}`;
-  return `${String(dayNumber).padStart(2, "0")}/${String(monthNumber).padStart(2, "0")}/${year}`;
-}
-
-function ocrDates(text) {
-  const seen = new Set();
-  return (String(text || "").match(/\b\d{1,2}[.\-/\s]\d{1,2}[.\-/\s]\d{2,4}\b/g) || [])
-    .map(normalizeOcrDate)
-    .filter((date) => date && !seen.has(date) && seen.add(date));
-}
-
-function dateFromYymmdd(value) {
-  if (!/^\d{6}$/.test(value || "")) return "";
-  const yy = Number(value.slice(0, 2));
-  const year = yy > 35 ? 1900 + yy : 2000 + yy;
-  return `${value.slice(4, 6)}/${value.slice(2, 4)}/${year}`;
-}
-
-function expectedDniLetter(number) {
-  return "TRWAGMYFPDXBNJZSQVHLCKE"[Number(number) % 23] || "";
-}
-
-function validSpanishDocument(candidate) {
-  const value = normalizeOcrText(candidate).replace(/[^A-Z0-9]/g, "");
-  if (/^\d{8}[A-Z]$/.test(value)) return expectedDniLetter(value.slice(0, 8)) === value[8];
-  if (/^[XYZ]\d{7}[A-Z]$/.test(value)) {
-    const prefix = { X: "0", Y: "1", Z: "2" }[value[0]];
-    return expectedDniLetter(prefix + value.slice(1, 8)) === value[8];
-  }
-  return false;
-}
-
-function ocrFindDocument(text) {
-  const compact = normalizeOcrText(text).replace(/[^A-Z0-9]/g, "");
-  const spanishDocument = /IDESP|DOCUMENTONACIONAL|DNI/.test(compact);
-  const candidates = compact.match(/[XYZ]\d{7}[A-Z]|\d{8}[A-Z]/g) || [];
-  const valid = candidates.find(validSpanishDocument);
-  if (valid) return valid;
-  return spanishDocument ? "" : (candidates[0] || "");
-}
-
-function ocrFindLicenseNumber(text) {
-  const normalized = normalizeOcrText(text).replace(/[-\s]/g, "");
-  const labelMatch = normalized.match(/\b5[.)]?\s*([0-9]{8}[A-Z]|[XYZ][0-9]{7}[A-Z])/);
-  if (labelMatch && validSpanishDocument(labelMatch[1])) return labelMatch[1];
-  return ocrFindDocument(text);
-}
-
-function ocrFindPlate(text) {
-  const match = normalizeOcrText(text).match(/\b\d{4}\s?[A-Z]{3}\b/);
-  return match ? match[0].replace(/\s+/, " ") : "";
-}
-
-function ocrLineAfterNumber(lines, number) {
-  const pattern = new RegExp(`^\\s*${number}\\s*[.)]?\\s*(.+)$`, "i");
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(pattern);
-    if (match?.[1]) return clean(match[1]);
-    if (normalizeOcrText(lines[index]) === String(number) && lines[index + 1]) return clean(lines[index + 1]);
-  }
-  return "";
-}
-
-function ocrLineAfterLabel(lines, labels) {
-  const keys = labels.map((label) => normalizeOcrText(label));
-  for (let index = 0; index < lines.length; index += 1) {
-    const normalized = normalizeOcrText(lines[index]);
-    for (const key of keys) {
-      const pos = normalized.indexOf(key);
-      if (pos === -1) continue;
-      const after = lines[index].slice(pos + key.length).replace(/^[:.\-\s]+/, "");
-      if (clean(after)) return clean(after);
-      if (lines[index + 1]) return clean(lines[index + 1]);
-    }
-  }
-  return "";
-}
-
-function cleanOcrName(value) {
-  return normalizeOcrText(value)
-    .replace(/[01]/g, (char) => (char === "0" ? "O" : "I"))
-    .replace(/[^A-Z ]/g, " ")
-    .replace(/\b(?:ESPANA|SPAIN|PERMISO|CONDUCIR|DRIVING|LICENCE|DNI|NOMBRE|APELLIDOS)\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function isLikelyPersonName(value) {
-  const normalized = normalizeOcrText(value);
-  const words = normalized.split(" ").filter(Boolean);
-  if (words.length < 2 || words.length > 5) return false;
-  if (/[0-9]/.test(normalized)) return false;
-  if (normalized.length < 7 || normalized.length > 38) return false;
-  return words.every((word) => /^[A-Z]{3,}$/.test(word));
-}
-
-function ocrCandidateName(text) {
-  const blocked = /PERMISO|CONDUC|ESPANA|SPAIN|DNI|PASAPORTE|NACIONAL|NACIM|FECHA|VALID|LICEN|DRIVING|DOCUMENTO|IDENTIDAD|DOMICILIO|UNION|EUROPEA|MATRICULA|MARCA|MODELO/i;
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((line) => clean(line))
-    .filter((line) => line.length >= 3 && line.length <= 50);
-  const surname = cleanOcrName(ocrLineAfterNumber(lines, 1));
-  const name = cleanOcrName(ocrLineAfterNumber(lines, 2));
-  const numberedName = clean(`${name} ${surname}`);
-  if (isLikelyPersonName(numberedName)) return numberedName;
-  const labelName = cleanOcrName(`${ocrLineAfterLabel(lines, ["nombre"])} ${ocrLineAfterLabel(lines, ["apellidos"])}`);
-  if (isLikelyPersonName(labelName)) return labelName;
-  const candidate = cleanOcrName(lines.find((line) => line.length >= 7 && !blocked.test(line) && /^[A-ZÁÉÍÓÚÑÜ' ]+$/i.test(line)) || "");
-  return isLikelyPersonName(candidate) ? candidate : "";
-}
-
-function ocrVehicleModel(text) {
-  const normalized = normalizeOcrText(text);
-  const known = [
-    "CITROEN C3",
-    "CITROEN C4",
-    "SEAT IBIZA",
-    "SEAT ARONA",
-    "PEUGEOT 208",
-    "PEUGEOT 308",
-    "FIAT 500",
-    "RENAULT CLIO",
-    "OPEL CORSA",
-    "HYUNDAI I10",
-    "HYUNDAI I20",
-    "KIA PICANTO",
-    "KIA RIO",
-    "NISSAN MICRA",
-    "TOYOTA YARIS",
-    "DACIA SANDERO",
-  ];
-  const found = known.find((model) => normalized.includes(model));
-  if (found) return found;
-  const plateNearby = normalized.match(/\b(?:CITROEN|SEAT|PEUGEOT|FIAT|RENAULT|OPEL|HYUNDAI|KIA|NISSAN|TOYOTA|DACIA)\s+[A-Z0-9]{1,12}\b/);
-  return plateNearby ? plateNearby[0] : "";
-}
-
-function parseSpanishDriverLicense(text, fields) {
-  const normalized = normalizeOcrText(text);
-  const lines = String(text || "").split(/\r?\n/).map(clean).filter(Boolean);
-  const surname = cleanOcrName(ocrLineAfterNumber(lines, 1));
-  const name = cleanOcrName(ocrLineAfterNumber(lines, 2));
-  const fullName = clean(`${name} ${surname}`);
-  if (isLikelyPersonName(fullName)) fields.renter = fullName;
-  const license = ocrFindLicenseNumber(text);
-  if (license && validSpanishDocument(license)) fields.license_number = license;
-  if (/ESPANA|SPAIN|REINO DE ESPANA/.test(normalized)) fields.license_country = "ESPANA";
-
-  const birth = normalized.match(/\b3[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
-  if (birth) fields.birth_date = normalizeOcrDate(`${birth[1]}/${birth[2]}/${birth[3]}`);
-  const issue = normalized.match(/\b4A[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
-  if (issue) fields.license_issue = normalizeOcrDate(`${issue[1]}/${issue[2]}/${issue[3]}`);
-  const expiry = normalized.match(/\b4B[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
-  if (expiry) fields.license_expiry = normalizeOcrDate(`${expiry[1]}/${expiry[2]}/${expiry[3]}`);
-}
-
-function parseSpanishId(text, fields) {
-  const normalized = normalizeOcrText(text);
-  const lines = String(text || "").split(/\r?\n/).map(clean).filter(Boolean);
-  const documentNumber = ocrFindDocument(text);
-  if (documentNumber && validSpanishDocument(documentNumber)) fields.passport_id = documentNumber;
-  const name = cleanOcrName(ocrLineAfterLabel(lines, ["nombre"]));
-  const surname = cleanOcrName(ocrLineAfterLabel(lines, ["apellidos"]));
-  const fullName = clean(`${name} ${surname}`);
-  if (isLikelyPersonName(fullName)) fields.renter = fullName;
-  if (/ESP|ESPANA|SPAIN/.test(normalized)) fields.nationality = "ESP";
-
-  const mrz = normalized.match(/([0-9]{6})[0-9A-Z]?M([0-9]{6})[0-9A-Z]?ESP/);
-  if (mrz) fields.birth_date = dateFromYymmdd(mrz[1]);
-  const birth = normalized.match(/\bNACIMIENTO[^\d]*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{2,4})/);
-  if (birth) fields.birth_date = normalizeOcrDate(`${birth[1]}/${birth[2]}/${birth[3]}`);
-  const address = ocrLineAfterLabel(lines, ["domicilio"]);
-  if (address && normalizeOcrText(address).length >= 8) fields.address = address;
-}
-
-function ocrFindCreditCardNumber(text) {
-  const candidates = [];
-  String(text || "").split(/\r?\n/).forEach((line) => {
-    const digits = line.replace(/[^\d]/g, "");
-    if (digits.length >= 13 && digits.length <= 19) candidates.push(digits);
-  });
-  (String(text || "").match(/\b(?:\d[ -]?){13,19}\b/g) || []).forEach((raw) => {
-    const digits = raw.replace(/[^\d]/g, "");
-    if (digits.length >= 13 && digits.length <= 19) candidates.push(digits);
-  });
-  const value = candidates.find((candidate) => new Set(candidate).size > 1) || "";
-  return value ? value.replace(/(.{4})/g, "$1 ").trim() : "";
-}
-
-function ocrFindCreditCardExpiry(text) {
-  const match = String(text || "").match(/\b(0[1-9]|1[0-2])\s*[./-]\s*(\d{2}|\d{4})\b/);
-  return match ? `${match[1]}/${match[2].slice(-2)}` : "";
-}
-
-function parseBrowserOcrFields(text, scanType) {
-  const normalized = normalizeOcrText(text);
-  const dates = ocrDates(text);
-  const fields = {};
-
-  if (scanType === "car") {
-    fields.vehicle_plate = ocrFindPlate(text);
-    fields.vehicle_model = ocrVehicleModel(text);
-    if (/DIESEL|GASOLEO/.test(normalized)) fields.fuel_type = "diesel";
-    if (/GASOLINA|PETROL|95/.test(normalized)) fields.fuel_type = "gasolina";
-    return fields;
-  }
-
-  if (scanType === "card") {
-    fields.credit_card_number = ocrFindCreditCardNumber(text);
-    fields.credit_card_expiry = ocrFindCreditCardExpiry(text);
-    return fields;
-  }
-
-  const documentNumber = ocrFindDocument(text);
-  const name = ocrCandidateName(text);
-  if (scanType === "driver") {
-    parseSpanishDriverLicense(text, fields);
-    if (!fields.renter && name) fields.renter = name;
-    if (!fields.license_number && documentNumber && validSpanishDocument(documentNumber)) fields.license_number = documentNumber;
-    if (!fields.license_country && /ESP|ESPANA|SPAIN/.test(normalized)) fields.license_country = "ESPANA";
-    if (!fields.license_issue) fields.license_issue = dates[0] || "";
-    if (!fields.license_expiry) fields.license_expiry = dates[1] || "";
-    return fields;
-  }
-
-  if (scanType === "id") {
-    parseSpanishId(text, fields);
-    if (!fields.renter && name) fields.renter = name;
-    if (!fields.passport_id && documentNumber && validSpanishDocument(documentNumber)) fields.passport_id = documentNumber;
-    if (!fields.nationality && /ESP|ESPANA|SPAIN/.test(normalized)) fields.nationality = "ESP";
-    if (!fields.birth_date) fields.birth_date = dates[0] || "";
-    return fields;
-  }
-
-  return fields;
-}
-
-async function browserOcr(image, scanType) {
-  if (!(await ensureBrowserOcr())) {
-    throw new Error("No se pudo cargar el OCR del navegador. Comprueba la conexion.");
-  }
-  const result = await Tesseract.recognize(image, "eng", {
-    tessedit_pageseg_mode: scanType === "card" ? "7" : "6",
-    preserve_interword_spaces: "1",
-    logger: (event) => {
-      if (event.status === "recognizing text" && event.progress) {
-        setStatus(`Leyendo documento... ${Math.round(event.progress * 100)}%`);
-      }
-    },
-  });
-  const text = result.data.text || "";
-  return { text, fields: parseBrowserOcrFields(text, scanType) };
-}
-
-async function postJson(url, payload, timeoutMs = 35000) {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.error) {
-      throw new Error(data.error || "No hay servidor OCR activo en esta URL.");
-    }
-    return data;
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("El OCR ha tardado demasiado. Haz la foto mas cerca, con buena luz y sin fondo.");
-    }
-    return browserOcr(payload.image, payload.scan_type);
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
-function applyFields(fields, scanType) {
-  const mappedFields = {};
-  Object.entries(fields || {}).forEach(([key, value]) => {
-    if (!value) return;
-    if (scanType === "additional") {
-      const additionalMap = {
-        renter: "additional_name",
-        birth_date: "additional_birth_date",
-        license_number: "additional_license_number",
-        license_issue: "additional_license_issue",
-        license_country: "additional_license_country",
-        license_expiry: "additional_license_expiry",
-      };
-      if (additionalMap[key]) mappedFields[additionalMap[key]] = value;
-      return;
-    }
-    mappedFields[key] = value;
-  });
-
-  Object.entries(mappedFields).forEach(([key, value]) => {
-    const field = form.elements[key];
-    if (!field) return;
-    const currentValue = clean(field.value);
-    const nextValue = clean(value);
-    if (key === "passport_id" && currentValue && nextValue && currentValue !== nextValue) return;
-    field.value = value;
-  });
-
-  updateCategoryCalculations();
-  updateReturnDefaults();
-  updateSubtotal();
 }
 
 function parseAmount(value) {
@@ -1539,32 +1225,100 @@ function fillSample() {
   setStatus("Ejemplo cargado. Puedes generar el PDF o sustituir los datos por los reales.");
 }
 
+function openScanReview(scanType, imageUrl) {
+  const config = scanReviewConfigs[scanType] || scanReviewConfigs.driver;
+  scanReviewState = { scanType, fields: config.fields.map(([name]) => name) };
+  scanReviewTitle.textContent = config.title;
+  scanReviewHint.textContent = config.hint;
+  scanReviewImage.src = imageUrl;
+  scanReviewFields.replaceChildren();
+
+  config.fields.forEach(([name, labelText, type]) => {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+
+    let field;
+    if (type === "textarea") {
+      field = document.createElement("textarea");
+      field.rows = 3;
+    } else if (type === "fuel") {
+      field = document.createElement("select");
+      [
+        ["", "Sin seleccionar"],
+        ["gasolina", "Gasolina 95"],
+        ["diesel", "Diésel"],
+      ].forEach(([value, text]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        field.appendChild(option);
+      });
+    } else {
+      field = document.createElement("input");
+      field.type = type || "text";
+    }
+
+    field.dataset.field = name;
+    field.value = form.elements[name]?.value || "";
+    label.appendChild(field);
+    scanReviewFields.appendChild(label);
+  });
+
+  scanReview.hidden = false;
+  scanReview.scrollIntoView({ behavior: "smooth", block: "start" });
+  const firstField = scanReviewFields.querySelector("input, textarea, select");
+  window.setTimeout(() => firstField?.focus({ preventScroll: true }), 250);
+}
+
+function closeScanReview() {
+  scanReview.hidden = true;
+  scanReviewFields.replaceChildren();
+  scanReviewState = { scanType: "", fields: [] };
+}
+
+function clearScanReviewFields() {
+  scanReviewFields.querySelectorAll("input, textarea, select").forEach((field) => {
+    field.value = "";
+  });
+}
+
+function applyScanReviewFields() {
+  const fields = {};
+  scanReviewFields.querySelectorAll("[data-field]").forEach((field) => {
+    const value = clean(field.value);
+    if (value) fields[field.dataset.field] = value;
+  });
+
+  Object.entries(fields).forEach(([key, value]) => {
+    const target = form.elements[key];
+    if (!target) return;
+    target.value = value;
+  });
+
+  updateCategoryCalculations();
+  updateReturnDefaults();
+  updateSubtotal();
+
+  const count = Object.keys(fields).length;
+  closeScanReview();
+  setStatus(count ? `Datos aplicados manualmente: ${count} campos. Revisa el contrato antes de generar el PDF.` : "No se aplico ningun campo porque estaban vacios.");
+}
+
 async function handlePhoto(input) {
   const file = input.files?.[0];
   if (!file) return;
 
+  const scanType = input.dataset.scan || "";
+  const imageUrl = URL.createObjectURL(file);
   const img = document.createElement("img");
   img.alt = input.dataset.scan || "Documento";
-  img.src = URL.createObjectURL(file);
+  img.src = imageUrl;
   photoGrid.appendChild(img);
   photos.hidden = false;
 
-  const scanType = input.dataset.scan || "";
-  const apiScanType = scanType === "additional" ? "driver" : scanType;
-
-  try {
-    setStatus(`Preparando ${img.alt} para OCR...`);
-    const image = await imageFileToDataUrl(file);
-    setStatus(`Leyendo ${img.alt}...`);
-    const result = await postJson("/api/ocr", { image, scan_type: apiScanType });
-    applyFields(result.fields || {}, scanType);
-    const count = Object.keys(result.fields || {}).length;
-    setStatus(count ? `Escaneo terminado: ${count} campos rellenados. Revisa los datos antes de generar el PDF.` : "Escaneo terminado, pero no he encontrado datos claros. Prueba otra foto mas cerca y con menos reflejos.");
-  } catch (error) {
-    setStatus(`Foto guardada como referencia, pero no se pudo leer automaticamente: ${error.message}`);
-  } finally {
-    input.value = "";
-  }
+  openScanReview(scanType, imageUrl);
+  setStatus("Foto guardada. Rellena la revision rapida y pulsa Aplicar al contrato.");
+  input.value = "";
 }
 
 function setupCanvas(canvas, options = {}) {
@@ -1673,6 +1427,9 @@ clearDamageBtn.addEventListener("click", () => damagePad.clear());
 clearSignatureBtn.addEventListener("click", () => signaturePad.clear());
 generateBtn.addEventListener("click", generatePdf);
 sampleBtn.addEventListener("click", fillSample);
+applyScanReviewBtn.addEventListener("click", applyScanReviewFields);
+clearScanReviewBtn.addEventListener("click", clearScanReviewFields);
+closeScanReviewBtn.addEventListener("click", closeScanReview);
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
