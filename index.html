@@ -933,7 +933,7 @@ function imageFromFile(file) {
   });
 }
 
-async function prepareOcrImage(file) {
+async function prepareOcrImages(file) {
   const { image, url } = await imageFromFile(file);
   try {
     const targetWidth = 2200;
@@ -948,7 +948,29 @@ async function prepareOcrImage(file) {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const softCanvas = document.createElement("canvas");
+    softCanvas.width = canvas.width;
+    softCanvas.height = canvas.height;
+    const softCtx = softCanvas.getContext("2d", { alpha: false });
+    softCtx.drawImage(canvas, 0, 0);
+    const softImage = softCtx.getImageData(0, 0, softCanvas.width, softCanvas.height);
+    const softData = softImage.data;
+    for (let index = 0; index < softData.length; index += 4) {
+      const gray = softData[index] * 0.299 + softData[index + 1] * 0.587 + softData[index + 2] * 0.114;
+      const value = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 136));
+      softData[index] = value;
+      softData[index + 1] = value;
+      softData[index + 2] = value;
+      softData[index + 3] = 255;
+    }
+    softCtx.putImageData(softImage, 0, 0);
+
+    const hardCanvas = document.createElement("canvas");
+    hardCanvas.width = canvas.width;
+    hardCanvas.height = canvas.height;
+    const hardCtx = hardCanvas.getContext("2d", { alpha: false });
+    hardCtx.drawImage(canvas, 0, 0);
+    const imageData = hardCtx.getImageData(0, 0, hardCanvas.width, hardCanvas.height);
     const data = imageData.data;
     for (let index = 0; index < data.length; index += 4) {
       const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
@@ -959,8 +981,8 @@ async function prepareOcrImage(file) {
       data[index + 2] = value;
       data[index + 3] = 255;
     }
-    ctx.putImageData(imageData, 0, 0);
-    return canvas.toDataURL("image/png");
+    hardCtx.putImageData(imageData, 0, 0);
+    return [softCanvas.toDataURL("image/png"), hardCanvas.toDataURL("image/png")];
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -1044,9 +1066,16 @@ function findDocumentNumber(text) {
   return matches.find((value) => !blocked.test(value)) || "";
 }
 
+function numberedValue(text, number) {
+  const normalized = normalizeOcrText(text);
+  const escaped = String(number).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = normalized.match(new RegExp(`\\b${escaped}[.)]?\\s*([A-Z0-9, .\\-/]{2,42})`));
+  return match ? cleanOcrValue(match[1].replace(/\b(?:1|2|3|4A|4B|4C|5|7|8|9)[.)]?.*$/, "")) : "";
+}
+
 function findLicenseNumber(text) {
   const normalized = normalizeOcrText(text);
-  const label = normalized.match(/\b5[.)]?\s*([A-Z0-9 ]{5,14})/);
+  const label = normalized.match(/\b5[.)]?\s*([A-Z0-9 ]{5,16})/);
   if (label) {
     const value = cleanOcrValue(label[1]).replace(/\s+/g, "");
     if (/^[A-Z0-9]{5,14}$/.test(value)) return value;
@@ -1060,15 +1089,17 @@ function parseOcrFields(text, scanType) {
   const dates = ocrDates(text);
   const fields = {};
   const isHungary = /HUNGARY|MAGYAR|HUN\b|MAGYARORSZAG/.test(normalized);
+  const isGermany = /DEUTSCHLAND|BUNDESREPUBLIK|FUHRERSCHEIN|GERMANY/.test(normalized);
 
   if (scanType === "driver" || scanType === "additional") {
-    const name1 = normalized.match(/\b1[.)]?\s*([A-Z]{3,})/);
-    const name2 = normalized.match(/\b2[.)]?\s*([A-Z]{3,})/);
-    const composedName = name1 && name2 ? titleName(`${name2[1]} ${name1[1]}`) : findName(lines);
+    const surname = numberedValue(text, "1");
+    const given = numberedValue(text, "2");
+    const composedName = surname && given ? titleName(`${given} ${surname}`) : findName(lines);
     if (composedName) fields.renter = composedName;
     const number = findLicenseNumber(text);
     if (number) fields.license_number = number;
     if (isHungary) fields.license_country = "HUNGRIA";
+    if (isGermany) fields.license_country = "ALEMANIA";
 
     const birth = normalized.match(/\b3[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/) || normalized.match(/\b3[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
     if (birth) fields.birth_date = birth[1].length === 4 ? formatOcrDate(birth[3], birth[2], birth[1]) : formatOcrDate(birth[1], birth[2], birth[3]);
@@ -1117,6 +1148,20 @@ function fillScanReviewFields(fields) {
   return count;
 }
 
+async function readOcrImage(image, label) {
+  setStatus(`Leyendo documento${label ? ` (${label})` : ""}...`);
+  const result = await Tesseract.recognize(image, "eng", {
+    tessedit_pageseg_mode: "6",
+    preserve_interword_spaces: "1",
+    logger: (event) => {
+      if (event.status === "recognizing text" && event.progress) {
+        setStatus(`Leyendo documento${label ? ` (${label})` : ""}... ${Math.round(event.progress * 100)}%`);
+      }
+    },
+  });
+  return result.data.text || "";
+}
+
 async function recognizeScanReview() {
   if (!scanReviewState.file) return;
   autoScanReviewBtn.disabled = true;
@@ -1125,18 +1170,14 @@ async function recognizeScanReview() {
   try {
     if (!(await ensureBrowserOcr())) throw new Error("No se pudo cargar el lector OCR.");
     setStatus("Mejorando imagen para leer el documento...");
-    const image = await prepareOcrImage(scanReviewState.file);
-    setStatus("Leyendo documento... puede tardar unos segundos.");
-    const result = await Tesseract.recognize(image, "eng", {
-      tessedit_pageseg_mode: "6",
-      preserve_interword_spaces: "1",
-      logger: (event) => {
-        if (event.status === "recognizing text" && event.progress) {
-          setStatus(`Leyendo documento... ${Math.round(event.progress * 100)}%`);
-        }
-      },
-    });
-    const fields = parseOcrFields(result.data.text || "", scanReviewState.scanType);
+    const images = await prepareOcrImages(scanReviewState.file);
+    let text = await readOcrImage(images[0], "1/2");
+    let fields = parseOcrFields(text, scanReviewState.scanType);
+    if (Object.keys(fields).length < 2) {
+      const fallbackText = await readOcrImage(images[1], "2/2");
+      fields = { ...parseOcrFields(fallbackText, scanReviewState.scanType), ...fields };
+      text = `${text}\n${fallbackText}`;
+    }
     const count = fillScanReviewFields(fields);
     setStatus(count ? `Lectura terminada: ${count} campos detectados. Revisa y pulsa Aplicar al contrato.` : "No he encontrado datos claros. La foto queda abierta para copiarlos manualmente.");
   } catch (error) {
