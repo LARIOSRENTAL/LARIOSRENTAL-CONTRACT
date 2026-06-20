@@ -1109,6 +1109,40 @@ function findLicenseNumber(text) {
   return findDocumentNumber(text);
 }
 
+function findVehiclePlate(text) {
+  const match = normalizeOcrText(text).match(/\b\d{4}\s?[A-Z]{3}\b/);
+  return match ? match[0].replace(/\s+/, " ") : "";
+}
+
+function findVehicleModel(text) {
+  const normalized = normalizeOcrText(text)
+    .replace(/\bCITRO[EÉ]N\b/g, "CITROEN")
+    .replace(/\bC\s*3\b/g, "C3")
+    .replace(/\bC\s*4\b/g, "C4");
+  const known = [
+    "CITROEN C3",
+    "CITROEN C4",
+    "SEAT IBIZA",
+    "SEAT ARONA",
+    "PEUGEOT 208",
+    "PEUGEOT 308",
+    "FIAT 500",
+    "RENAULT CLIO",
+    "OPEL CORSA",
+    "HYUNDAI I10",
+    "HYUNDAI I20",
+    "KIA PICANTO",
+    "KIA RIO",
+    "NISSAN MICRA",
+    "TOYOTA YARIS",
+    "DACIA SANDERO",
+  ];
+  const found = known.find((model) => normalized.includes(model));
+  if (found) return found;
+  const brandModel = normalized.match(/\b(?:CITROEN|SEAT|PEUGEOT|FIAT|RENAULT|OPEL|HYUNDAI|KIA|NISSAN|TOYOTA|DACIA)\s+[A-Z0-9]{1,12}\b/);
+  return brandModel ? brandModel[0] : "";
+}
+
 function parseOcrFields(text, scanType) {
   const normalized = normalizeOcrText(text);
   const lines = ocrLines(text);
@@ -1116,6 +1150,16 @@ function parseOcrFields(text, scanType) {
   const fields = {};
   const isHungary = /HUNGARY|MAGYAR|HUN\b|MAGYARORSZAG/.test(normalized);
   const isGermany = /DEUTSCHLAND|BUNDESREPUBLIK|FUHRERSCHEIN|GERMANY/.test(normalized);
+
+  if (scanType === "car") {
+    const model = findVehicleModel(text);
+    const plate = findVehiclePlate(text);
+    if (model) fields.vehicle_model = model;
+    if (plate) fields.vehicle_plate = plate;
+    if (/DIESEL|GASOLEO|GASOIL/.test(normalized)) fields.fuel_type = "diesel";
+    if (/GASOLINA|PETROL|UNLEADED|95/.test(normalized)) fields.fuel_type = "gasolina";
+    return fields;
+  }
 
   if (scanType === "driver" || scanType === "additional") {
     const surname = numberedValue(text, "1");
@@ -1176,8 +1220,9 @@ function fillScanReviewFields(fields) {
 
 async function readOcrImage(image, label) {
   setStatus(`Leyendo documento${label ? ` (${label})` : ""}...`);
+  const pageSegMode = scanReviewState.scanType === "car" ? "11" : "6";
   const result = await Tesseract.recognize(image, "eng", {
-    tessedit_pageseg_mode: "6",
+    tessedit_pageseg_mode: pageSegMode,
     preserve_interword_spaces: "1",
     logger: (event) => {
       if (event.status === "recognizing text" && event.progress) {
@@ -1221,7 +1266,8 @@ function parseAmount(value) {
 }
 
 function formatAmount(value) {
-  return value ? value.toFixed(2) : "";
+  if (!value) return "";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
 function formatEuro(value) {
@@ -1261,13 +1307,13 @@ function calculateRentalTotal(category, days) {
   const carTariff = carTariffs[category];
   if (carTariff) {
     const total = days <= 7 ? carTariff.days[days - 1] || 0 : carTariff.days[6] + (days - 7) * carTariff.extra;
-    return total * multiplier;
+    return Math.round(total * multiplier);
   }
 
   const dayRates = dayRateTariffs[category];
   if (dayRates) {
     const rate = dayRates.find((tier) => days <= tier.max)?.price || 0;
-    return days * rate * quantity * multiplier;
+    return Math.round(days * rate * quantity * multiplier);
   }
 
   return 0;
