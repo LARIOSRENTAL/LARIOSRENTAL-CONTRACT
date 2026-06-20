@@ -1052,6 +1052,35 @@ function ocrDates(text) {
   return dates;
 }
 
+function ocrMonthNumber(value) {
+  const key = normalizeOcrText(value).slice(0, 3);
+  return {
+    ENE: 1, JAN: 1,
+    FEB: 2, FEV: 2,
+    MAR: 3,
+    ABR: 4, APR: 4,
+    MAY: 5, MAI: 5,
+    JUN: 6,
+    JUL: 7,
+    AGO: 8, AUG: 8,
+    SEP: 9,
+    OCT: 10, OKT: 10,
+    NOV: 11,
+    DEC: 12, DIC: 12,
+  }[key] || 0;
+}
+
+function textDateNearLabel(text, labelPattern) {
+  const normalized = normalizeOcrText(text);
+  const labelIndex = normalized.search(labelPattern);
+  if (labelIndex < 0) return "";
+  const slice = normalized.slice(labelIndex, labelIndex + 120);
+  const textMonth = slice.match(/\b(\d{1,2})\s+([A-Z]{3,})\s+(19\d{2}|20\d{2})\b/);
+  if (textMonth) return formatOcrDate(textMonth[1], ocrMonthNumber(textMonth[2]), textMonth[3]);
+  const numeric = slice.match(/\b(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](19\d{2}|20\d{2})\b/);
+  return numeric ? formatOcrDate(numeric[1], numeric[2], numeric[3]) : "";
+}
+
 function ocrLines(text) {
   return String(text || "")
     .split(/\r?\n/)
@@ -1066,10 +1095,11 @@ function titleName(value) {
 }
 
 function likelyName(value) {
-  const blocked = /MAGYAR|HUNGARY|ESPANA|REINO|DOCUMENT|IDENTITY|CARD|PERMISO|CONDU|VEZETO|ENGEDELY|NATIONALITY|SIGNATURE|DATE|BIRTH|EXPIRY|FERFI|BELUGY|MINISZTERIUM|EUROPAI|UNIOS/;
+  const blocked = /BELGIE|BELGIQUE|BELGIEN|BELGIUM|MAGYAR|HUNGARY|ESPANA|REINO|DOCUMENT|IDENTITY|CARD|PERMISO|CONDU|VEZETO|ENGEDELY|NATIONALITY|SIGNATURE|DATE|BIRTH|EXPIRY|FERFI|BELUGY|MINISZTERIUM|EUROPAI|UNIOS|MATRICULA|MARCA|MODELO|FUEL|GASOLINA|DIESEL/;
   const cleanName = cleanOcrValue(value);
   const words = cleanName.split(" ").filter(Boolean);
   if (blocked.test(cleanName) || words.length < 2 || words.length > 4) return false;
+  if (cleanName.length < 8) return false;
   return words.every((word) => /^[A-Z]{3,}$/.test(word));
 }
 
@@ -1086,7 +1116,10 @@ function findName(lines) {
 }
 
 function findDocumentNumber(text) {
-  const normalized = normalizeOcrText(text).replace(/\s+/g, "");
+  const normalizedWithSymbols = normalizeOcrText(text);
+  const card = normalizedWithSymbols.match(/\b(?:CARD\s*NO|KAARTNR)[^A-Z0-9]*(\d{3}[- ]?\d{7}[- ]?\d{2})\b/);
+  if (card) return card[1].replace(/\s+/g, "-");
+  const normalized = normalizedWithSymbols.replace(/\s+/g, "");
   const matches = normalized.match(/\b[A-Z]{1,3}\d{5,9}[A-Z]{0,3}\b|\b\d{6,9}[A-Z]{1,3}\b|\b\d{8}[A-Z]\b/g) || [];
   const blocked = /2019|2020|2021|2022|2023|2024|2025|2026|2027|2028|1971|1994/;
   return matches.find((value) => !blocked.test(value)) || "";
@@ -1104,13 +1137,22 @@ function findLicenseNumber(text) {
   const label = normalized.match(/\b5[.)]?\s*([A-Z0-9 ]{5,16})/);
   if (label) {
     const value = cleanOcrValue(label[1]).replace(/\s+/g, "");
-    if (/^[A-Z0-9]{5,14}$/.test(value)) return value;
+    if (/^[A-Z0-9-]{5,14}$/.test(value) && /\d/.test(value)) return value;
   }
   return findDocumentNumber(text);
 }
 
+function valueAfterLabel(text, labels, stops) {
+  const normalized = normalizeOcrText(text);
+  const labelGroup = labels.join("|");
+  const stopGroup = stops.join("|");
+  const match = normalized.match(new RegExp(`(?:${labelGroup})\\s*[:\\-]?\\s*([A-Z0-9ÁÉÍÓÚÜÑ .\\-/]+?)(?=\\s+(?:${stopGroup})\\b|$)`));
+  return match ? cleanOcrValue(match[1]) : "";
+}
+
 function findVehiclePlate(text) {
-  const match = normalizeOcrText(text).match(/\b\d{4}\s?[A-Z]{3}\b/);
+  const labeled = valueAfterLabel(text, ["MATRICULA", "MATR[IÍ]CULA"], ["MARCA", "MODELO", "FUEL", "COMBUSTIBLE"]);
+  const match = (labeled || normalizeOcrText(text)).match(/\b\d{4}\s?[A-Z]{3}\b/);
   return match ? match[0].replace(/\s+/, " ") : "";
 }
 
@@ -1119,9 +1161,21 @@ function findVehicleModel(text) {
     .replace(/\bCITRO[EÉ]N\b/g, "CITROEN")
     .replace(/\bC\s*3\b/g, "C3")
     .replace(/\bC\s*4\b/g, "C4");
+  const brand = valueAfterLabel(text, ["MARCA"], ["MODELO", "MATRICULA", "FUEL", "COMBUSTIBLE"]);
+  const modelValue = valueAfterLabel(text, ["MODELO"], ["FUEL", "COMBUSTIBLE", "MATRICULA", "MARCA"]);
+  if (brand || modelValue) {
+    const labeled = cleanOcrValue(`${brand} ${modelValue}`);
+    if (labeled.includes("VOLKSWAGEN") && labeled.includes("TAIGO")) return "VOLKSWAGEN TAIGO";
+    if (labeled.includes("CITROEN") && labeled.includes("C3")) return "CITROEN C3";
+    if (labeled.includes("CITROEN") && labeled.includes("C4")) return "CITROEN C4";
+    if (brand && modelValue && /^[A-Z0-9 ]{3,28}$/.test(labeled)) return titleName(labeled).toUpperCase();
+  }
   const known = [
     "CITROEN C3",
     "CITROEN C4",
+    "VOLKSWAGEN TAIGO",
+    "VOLKSWAGEN POLO",
+    "VOLKSWAGEN T-ROC",
     "SEAT IBIZA",
     "SEAT ARONA",
     "PEUGEOT 208",
@@ -1139,7 +1193,7 @@ function findVehicleModel(text) {
   ];
   const found = known.find((model) => normalized.includes(model));
   if (found) return found;
-  const brandModel = normalized.match(/\b(?:CITROEN|SEAT|PEUGEOT|FIAT|RENAULT|OPEL|HYUNDAI|KIA|NISSAN|TOYOTA|DACIA)\s+[A-Z0-9]{1,12}\b/);
+  const brandModel = normalized.match(/\b(?:CITROEN|VOLKSWAGEN|SEAT|PEUGEOT|FIAT|RENAULT|OPEL|HYUNDAI|KIA|NISSAN|TOYOTA|DACIA)\s+[A-Z0-9-]{1,12}\b/);
   return brandModel ? brandModel[0] : "";
 }
 
@@ -1150,6 +1204,7 @@ function parseOcrFields(text, scanType) {
   const fields = {};
   const isHungary = /HUNGARY|MAGYAR|HUN\b|MAGYARORSZAG/.test(normalized);
   const isGermany = /DEUTSCHLAND|BUNDESREPUBLIK|FUHRERSCHEIN|GERMANY/.test(normalized);
+  const isSpain = /ESPANA|ESPAÑA|REINO DE ESPANA|REINO DE ESPAÑA/.test(normalized);
 
   if (scanType === "car") {
     const model = findVehicleModel(text);
@@ -1165,9 +1220,10 @@ function parseOcrFields(text, scanType) {
     const surname = numberedValue(text, "1");
     const given = numberedValue(text, "2");
     const composedName = surname && given ? titleName(`${given} ${surname}`) : findName(lines);
-    if (composedName) fields.renter = composedName;
+    if (composedName && likelyName(composedName)) fields.renter = composedName;
     const number = findLicenseNumber(text);
-    if (number) fields.license_number = number;
+    if (number && (!isSpain || /^\d{6,8}[A-Z]$/.test(number.replace(/[^A-Z0-9]/g, "")))) fields.license_number = number;
+    if (isSpain) fields.license_country = "ESPANA";
     if (isHungary) fields.license_country = "HUNGRIA";
     if (isGermany) fields.license_country = "ALEMANIA";
 
@@ -1184,12 +1240,19 @@ function parseOcrFields(text, scanType) {
   }
 
   if (scanType === "id") {
-    const name = findName(lines);
+    const surname = valueAfterLabel(text, ["NAAM\\s*/?\\s*NAME", "NAME"], ["VOORNAMEN", "GIVEN", "GEBOORTE", "PLACE", "NATIONALITEIT", "NATIONALITY", "KAARTNR", "CARD"]);
+    const given = valueAfterLabel(text, ["VOORNAMEN\\s*/?\\s*GIVEN\\s*NAMES", "GIVEN\\s*NAMES"], ["GEBOORTE", "PLACE", "NATIONALITEIT", "NATIONALITY", "KAARTNR", "CARD", "GELDIG", "VALID"]);
+    const labelName = cleanOcrValue(`${given} ${surname}`);
+    const name = likelyName(labelName) ? titleName(labelName) : findName(lines);
     if (name) fields.renter = name;
     const documentNumber = findDocumentNumber(text);
     if (documentNumber) fields.passport_id = documentNumber;
+    const nationality = valueAfterLabel(text, ["NATIONALITEIT", "NATIONALITY", "ALLAMPOLGARSAG"], ["KAARTNR", "CARD", "GELDIG", "VALID", "SZULETESI", "DATE"]);
+    if (nationality) fields.nationality = nationality.split(" ")[0];
     if (isHungary) fields.nationality = "HUN";
-    if (dates[0]) fields.birth_date = dates[0];
+    if (isSpain) fields.nationality = "ESP";
+    fields.birth_date = textDateNearLabel(text, /GEBOORTE|BIRTH|NACIMIENTO|SZULETESI/) || "";
+    if (!fields.birth_date && !/VALID|GELDIG|EXPIRY/.test(normalized) && dates[0]) fields.birth_date = dates[0];
     return fields;
   }
 
