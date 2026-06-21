@@ -818,9 +818,9 @@ const fieldSpecs = {
   vat_units: { x: 405, y: 326, width: 22, size: 6.2, align: "center" },
   vat_total: { x: 504, y: 326, width: 44, size: 6.2, align: "center" },
   subtotal: { x: 504, y: 306, width: 44, size: 6.8, align: "center" },
-  payment_method: { x: 350, y: 137, width: 70, size: 7.1, align: "left" },
-  deposit: { x: 382, y: 184, width: 70, size: 8.0, align: "left" },
-  damage_excess: { x: 498, y: 184, width: 50, size: 8.0, align: "center" },
+  payment_method: { x: 350, y: 204, width: 70, size: 7.1, align: "left" },
+  deposit: { x: 382, y: 190, width: 70, size: 8.0, align: "left" },
+  damage_excess: { x: 498, y: 190, width: 50, size: 8.0, align: "center" },
 
   billing_notes_1: { x: 45, y: 221, width: 245, size: 7.2, align: "left" },
   billing_notes_2: { x: 45, y: 207, width: 245, size: 7.2, align: "left" },
@@ -1166,6 +1166,7 @@ function findVehicleModel(text) {
   if (brand || modelValue) {
     const labeled = cleanOcrValue(`${brand} ${modelValue}`);
     if (labeled.includes("VOLKSWAGEN") && labeled.includes("TAIGO")) return "VOLKSWAGEN TAIGO";
+    if (labeled.includes("VOLKSWAGEN") && /\b(?:TAIGO|TA1GO|TAI6O|TAIG0|TNG)\b/.test(labeled)) return "VOLKSWAGEN TAIGO";
     if (labeled.includes("CITROEN") && labeled.includes("C3")) return "CITROEN C3";
     if (labeled.includes("CITROEN") && labeled.includes("C4")) return "CITROEN C4";
     if (brand && modelValue && /^[A-Z0-9 ]{3,28}$/.test(labeled)) return titleName(labeled).toUpperCase();
@@ -1284,7 +1285,8 @@ function fillScanReviewFields(fields) {
 async function readOcrImage(image, label) {
   setStatus(`Leyendo documento${label ? ` (${label})` : ""}...`);
   const pageSegMode = scanReviewState.scanType === "car" ? "11" : "6";
-  const result = await Tesseract.recognize(image, "eng", {
+  const language = scanReviewState.scanType === "car" ? "eng" : "spa+eng";
+  const result = await Tesseract.recognize(image, language, {
     tessedit_pageseg_mode: pageSegMode,
     preserve_interword_spaces: "1",
     logger: (event) => {
@@ -1566,17 +1568,6 @@ function drawCreditCardDetails(page, font, bold, data) {
   }
   if (cardExpiry) {
     page.drawText(cardExpiry.slice(0, 7), { x: 252, y: 704, size: 7.0, font, color: rgb(0.04, 0.04, 0.04) });
-  }
-
-  page.drawRectangle({ x: 344, y: 100, width: 204, height: 14, color: rgb(1, 1, 1), borderWidth: 0 });
-  page.drawText("Tarjeta:", { x: 348, y: 104, size: 6.3, font: bold, color: rgb(0.04, 0.04, 0.04) });
-  if (cardNumber) {
-    const value = cardNumber.slice(0, 32);
-    page.drawText(value, { x: 375, y: 104, size: 6.3, font, color: rgb(0.04, 0.04, 0.04) });
-  }
-  page.drawText("Cad:", { x: 496, y: 104, size: 6.3, font: bold, color: rgb(0.04, 0.04, 0.04) });
-  if (cardExpiry) {
-    page.drawText(cardExpiry.slice(0, 7), { x: 513, y: 104, size: 6.3, font, color: rgb(0.04, 0.04, 0.04) });
   }
 }
 
