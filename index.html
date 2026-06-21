@@ -960,6 +960,47 @@ function imageFromFile(file) {
   });
 }
 
+function detectOcrCrop(ctx, width, height) {
+  const data = ctx.getImageData(0, 0, width, height).data;
+  const sample = 6;
+  let left = width;
+  let top = height;
+  let right = 0;
+  let bottom = 0;
+  let hits = 0;
+
+  for (let y = 0; y < height; y += sample) {
+    for (let x = 0; x < width; x += sample) {
+      const index = (y * width + x) * 4;
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const gray = (r + g + b) / 3;
+      const saturation = max - min;
+      const isInk = gray < 115;
+      const isDocumentColor = saturation > 10 && gray > 45 && gray < 245;
+      if (!isInk && !isDocumentColor) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+      hits += 1;
+    }
+  }
+
+  if (hits < 120 || right <= left || bottom <= top) return { x: 0, y: 0, width, height };
+  const padX = Math.round(width * 0.04);
+  const padY = Math.round(height * 0.04);
+  const x = Math.max(0, left - padX);
+  const y = Math.max(0, top - padY);
+  const cropWidth = Math.min(width, right + padX) - x;
+  const cropHeight = Math.min(height, bottom + padY) - y;
+  if (cropWidth * cropHeight < width * height * 0.04) return { x: 0, y: 0, width, height };
+  return { x, y, width: cropWidth, height: cropHeight };
+}
+
 async function prepareOcrImages(file) {
   const { image, url } = await imageFromFile(file);
   try {
@@ -975,11 +1016,23 @@ async function prepareOcrImages(file) {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
+    const crop = detectOcrCrop(ctx, canvas.width, canvas.height);
+    const croppedCanvas = document.createElement("canvas");
+    const cropRatio = targetWidth / crop.width;
+    croppedCanvas.width = targetWidth;
+    croppedCanvas.height = Math.max(1, Math.round(crop.height * cropRatio));
+    const croppedCtx = croppedCanvas.getContext("2d", { alpha: false });
+    croppedCtx.fillStyle = "#fff";
+    croppedCtx.fillRect(0, 0, croppedCanvas.width, croppedCanvas.height);
+    croppedCtx.imageSmoothingEnabled = true;
+    croppedCtx.imageSmoothingQuality = "high";
+    croppedCtx.drawImage(canvas, crop.x, crop.y, crop.width, crop.height, 0, 0, croppedCanvas.width, croppedCanvas.height);
+
     const softCanvas = document.createElement("canvas");
-    softCanvas.width = canvas.width;
-    softCanvas.height = canvas.height;
+    softCanvas.width = croppedCanvas.width;
+    softCanvas.height = croppedCanvas.height;
     const softCtx = softCanvas.getContext("2d", { alpha: false });
-    softCtx.drawImage(canvas, 0, 0);
+    softCtx.drawImage(croppedCanvas, 0, 0);
     const softImage = softCtx.getImageData(0, 0, softCanvas.width, softCanvas.height);
     const softData = softImage.data;
     for (let index = 0; index < softData.length; index += 4) {
@@ -993,10 +1046,10 @@ async function prepareOcrImages(file) {
     softCtx.putImageData(softImage, 0, 0);
 
     const hardCanvas = document.createElement("canvas");
-    hardCanvas.width = canvas.width;
-    hardCanvas.height = canvas.height;
+    hardCanvas.width = croppedCanvas.width;
+    hardCanvas.height = croppedCanvas.height;
     const hardCtx = hardCanvas.getContext("2d", { alpha: false });
-    hardCtx.drawImage(canvas, 0, 0);
+    hardCtx.drawImage(croppedCanvas, 0, 0);
     const imageData = hardCtx.getImageData(0, 0, hardCanvas.width, hardCanvas.height);
     const data = imageData.data;
     for (let index = 0; index < data.length; index += 4) {
