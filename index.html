@@ -1143,11 +1143,20 @@ function findLicenseNumber(text) {
   return findDocumentNumber(text);
 }
 
+function findExplicitLicenseNumber(text) {
+  const normalized = normalizeOcrText(text);
+  const label = normalized.match(/\b5[.)]?\s*([A-Z0-9 -]{5,18})/);
+  if (!label) return "";
+  const value = cleanOcrValue(label[1]).replace(/\s+/g, "");
+  return /^[A-Z0-9-]{5,14}$/.test(value) && /\d/.test(value) ? value : "";
+}
+
 function findCountryFromLicense(text) {
   const normalized = normalizeOcrText(text);
   const countries = [
-    [/REINO DE ESPANA|REINO DE ESPAÑA|ESPANA|ESPAÑA|\bE\b/, "ESPANA"],
-    [/DEUTSCHLAND|GERMANY|\bD\b/, "ALEMANIA"],
+    [/OSTERREICH|ÖSTERREICH|AUSTRIA|FUHRERSCHEIN.*\bA\b/, "AUSTRIA"],
+    [/REINO DE ESPANA|REINO DE ESPAÑA|ESPANA|ESPAÑA/, "ESPANA"],
+    [/DEUTSCHLAND|GERMANY|FUHRERSCHEIN.*\bD\b/, "ALEMANIA"],
     [/FRANCE|\bF\b/, "FRANCIA"],
     [/ITALIA|ITALY|\bI\b/, "ITALIA"],
     [/PORTUGAL|\bP\b/, "PORTUGAL"],
@@ -1221,6 +1230,8 @@ function findVehicleModel(text) {
 
 function parseOcrFields(text, scanType) {
   const normalized = normalizeOcrText(text);
+  const appUiHits = (normalized.match(/ARRENDATARIO|PERMISO CONDUCIR|PAIS PERMISO|FECHA EXPEDICION|APLICAR AL CONTRATO|GENERAR CONTRATO/g) || []).length;
+  if (appUiHits >= 3) return {};
   const lines = ocrLines(text);
   const dates = ocrDates(text);
   const fields = {};
@@ -1243,7 +1254,7 @@ function parseOcrFields(text, scanType) {
     const given = numberedValue(text, "2");
     const composedName = surname && given ? titleName(`${given} ${surname}`) : findName(lines);
     if (composedName && likelyName(composedName)) fields.renter = composedName;
-    let number = findLicenseNumber(text);
+    let number = findExplicitLicenseNumber(text);
     const value4b = numberedValue(text, "4B");
     if (!number && value4b && !ocrDates(value4b).length && /\d/.test(value4b)) number = value4b.replace(/\s+/g, "");
     if (number && (!isSpain || /^\d{6,8}[A-Z]$/.test(number.replace(/[^A-Z0-9]/g, "")))) fields.license_number = number;
