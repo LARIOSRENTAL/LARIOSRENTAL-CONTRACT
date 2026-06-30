@@ -79,6 +79,9 @@ def vision_prompt(scan_type):
             "Nombre/First name, Fecha de Nac./Date of birth, Otorgamiento/Date of issue, "
             "Vencimiento/Expires, N Licencia/License N y Domicilio/Address. "
             "El arrendatario debe ser Nombre + Apellidos, por ejemplo Nombre/First name seguido de Apellido/Last name. "
+            "No uses como nombre textos de cabecera como Licencia Nacional de Conducir, Republica, Ciudad, Seguridad Vial, "
+            "Ministerio, Clase o pais. En una licencia argentina, Apellido=QUEIROT y Nombre=FERNANDO DANIEL debe devolver "
+            "renter='FERNANDO DANIEL QUEIROT'. "
             "Identifica pais del permiso por cabecera o codigo. Devuelve JSON con keys: "
             "renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
         )

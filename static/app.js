@@ -452,6 +452,11 @@ function detectDocumentContour(sourceCanvas, scanType) {
 
   const mask = new Uint8Array(sampleWidth * sampleHeight);
   const diffThreshold = scanType === "car" ? 22 : 30;
+  let globalMinX = sampleWidth;
+  let globalMinY = sampleHeight;
+  let globalMaxX = 0;
+  let globalMaxY = 0;
+  let globalHits = 0;
   for (let y = 0; y < sampleHeight; y += 1) {
     for (let x = 0; x < sampleWidth; x += 1) {
       const index = (y * sampleWidth + x) * 4;
@@ -464,8 +469,49 @@ function detectDocumentContour(sourceCanvas, scanType) {
       const saturation = max - min;
       const backgroundDiff = (Math.abs(r - background.r) + Math.abs(g - background.g) + Math.abs(b - background.b)) / 3;
       const likelyObject = backgroundDiff > diffThreshold || saturation > 38 || gray < 115;
-      if (likelyObject) mask[y * sampleWidth + x] = 1;
+      if (likelyObject) {
+        mask[y * sampleWidth + x] = 1;
+        globalMinX = Math.min(globalMinX, x);
+        globalMinY = Math.min(globalMinY, y);
+        globalMaxX = Math.max(globalMaxX, x);
+        globalMaxY = Math.max(globalMaxY, y);
+        globalHits += 1;
+      }
     }
+  }
+
+  function scaledBoxToPoints(minX, minY, maxX, maxY, padding) {
+    const padX = Math.round((maxX - minX + 1) * padding);
+    const padY = Math.round((maxY - minY + 1) * padding);
+    const left = clamp(minX - padX, 0, sampleWidth - 1);
+    const top = clamp(minY - padY, 0, sampleHeight - 1);
+    const right = clamp(maxX + padX, 0, sampleWidth - 1);
+    const bottom = clamp(maxY + padY, 0, sampleHeight - 1);
+    const scaleBack = sourceCanvas.width / sampleWidth;
+    return [
+      { x: left * scaleBack, y: top * scaleBack },
+      { x: right * scaleBack, y: top * scaleBack },
+      { x: right * scaleBack, y: bottom * scaleBack },
+      { x: left * scaleBack, y: bottom * scaleBack },
+    ].map((point) => ({
+      x: clamp(point.x, 0, sourceCanvas.width - 1),
+      y: clamp(point.y, 0, sourceCanvas.height - 1),
+    }));
+  }
+
+  const globalWidth = globalMaxX - globalMinX + 1;
+  const globalHeight = globalMaxY - globalMinY + 1;
+  const globalBoxArea = globalWidth * globalHeight;
+  const imageArea = sampleWidth * sampleHeight;
+  const globalAspect = globalWidth / Math.max(1, globalHeight);
+  const documentAspectOk = scanType === "car" ? globalAspect < 5.5 : globalAspect > 1.15 && globalAspect < 2.4;
+  if (
+    globalHits > imageArea * 0.012 &&
+    globalBoxArea > imageArea * 0.035 &&
+    globalBoxArea < imageArea * 0.7 &&
+    documentAspectOk
+  ) {
+    return scaledBoxToPoints(globalMinX, globalMinY, globalMaxX, globalMaxY, scanType === "car" ? 0.12 : 0.08);
   }
 
   const visited = new Uint8Array(mask.length);
@@ -503,8 +549,10 @@ function detectDocumentContour(sourceCanvas, scanType) {
     const boxWidth = maxX - minX + 1;
     const boxHeight = maxY - minY + 1;
     const boxArea = boxWidth * boxHeight;
-    const imageArea = sampleWidth * sampleHeight;
+    const aspect = boxWidth / Math.max(1, boxHeight);
     if (area < imageArea * 0.018 || boxArea < imageArea * 0.06 || boxArea > imageArea * 0.92) continue;
+    if (scanType !== "car" && (aspect < 1.15 || aspect > 2.4)) continue;
+    if (scanType === "car" && aspect > 5.5) continue;
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
     const centerPenalty = Math.hypot(centerX - sampleWidth / 2, centerY - sampleHeight / 2) / Math.hypot(sampleWidth / 2, sampleHeight / 2);
@@ -513,22 +561,7 @@ function detectDocumentContour(sourceCanvas, scanType) {
   }
 
   if (!best) return null;
-  const pad = scanType === "car" ? 0.08 : 0.045;
-  const left = clamp(best.minX - Math.round(sampleWidth * pad), 0, sampleWidth - 1);
-  const top = clamp(best.minY - Math.round(sampleHeight * pad), 0, sampleHeight - 1);
-  const right = clamp(best.maxX + Math.round(sampleWidth * pad), 0, sampleWidth - 1);
-  const bottom = clamp(best.maxY + Math.round(sampleHeight * pad), 0, sampleHeight - 1);
-  const corners = [
-    { x: left, y: top },
-    { x: right, y: top },
-    { x: right, y: bottom },
-    { x: left, y: bottom },
-  ];
-  const scaleBack = sourceCanvas.width / sampleWidth;
-  const points = corners.map((point) => ({
-    x: clamp(point.x * scaleBack, 0, sourceCanvas.width - 1),
-    y: clamp(point.y * scaleBack, 0, sourceCanvas.height - 1),
-  }));
+  const points = scaledBoxToPoints(best.minX, best.minY, best.maxX, best.maxY, scanType === "car" ? 0.12 : 0.08);
   if (polygonArea(points) < sourceCanvas.width * sourceCanvas.height * 0.05) return null;
   return points;
 }
@@ -965,9 +998,10 @@ function parseOcrFields(text, scanType) {
 }
 
 function fillScanReviewFields(fields) {
+  const safeFields = sanitizeDetectedFields(fields, scanReviewState.scanType);
   let count = 0;
   scanReviewFields.querySelectorAll("[data-field]").forEach((field) => {
-    let value = fields[field.dataset.field];
+    let value = safeFields[field.dataset.field];
     if (value && scanReviewState.scanType === "id" && ["renter", "address", "birth_date"].includes(field.dataset.field)) {
       const existingValue = clean(form.elements[field.dataset.field]?.value);
       if (existingValue) return;
@@ -981,13 +1015,32 @@ function fillScanReviewFields(fields) {
         additional_license_expiry: "license_expiry",
         additional_birth_date: "birth_date",
       };
-      value = fields[additionalSource[field.dataset.field]];
+      value = safeFields[additionalSource[field.dataset.field]];
     }
     if (!value) return;
     field.value = value;
     count += 1;
   });
   return count;
+}
+
+function sanitizeDetectedFields(fields, scanType) {
+  const safe = { ...(fields || {}) };
+  if (scanType === "driver" || scanType === "additional") {
+    const badName = /LICENCIA|LICENSE|CONDUCIR|REPUBLICA|REP[UÚ]BLICA|CIUDAD|SEGURIDAD|MINISTERIO|TRANSPORTE|CLASE|CLASS|VIAL|AFGEN|ARGEN$|ITALIA$/i;
+    if (safe.renter && badName.test(safe.renter)) delete safe.renter;
+    if (safe.additional_name && badName.test(safe.additional_name)) delete safe.additional_name;
+    ["license_number", "additional_license_number"].forEach((key) => {
+      if (safe[key]) {
+        const compact = clean(safe[key]).replace(/[^A-Z0-9]/gi, "");
+        if (compact.length < 5 || compact.length > 16 || !/\d/.test(compact)) delete safe[key];
+      }
+    });
+  }
+  if (scanType === "car") {
+    if (safe.vehicle_plate && !/\d/.test(safe.vehicle_plate)) delete safe.vehicle_plate;
+  }
+  return safe;
 }
 
 async function readOcrImage(image, label) {
