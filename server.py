@@ -64,6 +64,8 @@ def compact_fields(fields):
 def vision_prompt(scan_type):
     base = (
         "Eres un extractor de datos para contratos de alquiler de coches de Larios Rental. "
+        "Puedes recibir una foto original y un recorte/enderezado del mismo documento. "
+        "Compara ambas imagenes y usa la que se lea mejor. Ignora mesa, dedos, fondo, pantalla y texto de la app. "
         "Lee la imagen con cuidado y devuelve SOLO JSON valido, sin markdown. "
         "Si un dato no se ve claro, devuelve cadena vacia. No inventes nada. "
         "Fechas siempre en formato dd/mm/aaaa. "
@@ -73,6 +75,10 @@ def vision_prompt(scan_type):
             "Tipo: permiso de conducir. En permisos europeos usa los campos: "
             "1 apellidos, 2 nombre, 3 fecha nacimiento, 4a fecha expedicion, "
             "4b fecha caducidad, 5 numero de carnet. Si 4b no es fecha y parece documento, usalo como numero. "
+            "En permisos latinoamericanos o no europeos tambien reconoce etiquetas como Apellido/Last name, "
+            "Nombre/First name, Fecha de Nac./Date of birth, Otorgamiento/Date of issue, "
+            "Vencimiento/Expires, N Licencia/License N y Domicilio/Address. "
+            "El arrendatario debe ser Nombre + Apellidos, por ejemplo Nombre/First name seguido de Apellido/Last name. "
             "Identifica pais del permiso por cabecera o codigo. Devuelve JSON con keys: "
             "renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
         )
@@ -109,19 +115,25 @@ def extract_json_object(text):
     return json.loads(text)
 
 
-def run_vision_ocr(data_url, scan_type=""):
+def run_vision_ocr(images, scan_type=""):
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("Falta OPENAI_API_KEY en el servidor.")
+    if isinstance(images, str):
+        image_urls = [images]
+    else:
+        image_urls = [image for image in images if isinstance(image, str) and image.startswith("data:image")]
+    if not image_urls:
+        raise RuntimeError("No se recibio ninguna imagen valida.")
+    image_urls = image_urls[:3]
+    content = [{"type": "input_text", "text": vision_prompt(scan_type)}]
+    content.extend({"type": "input_image", "image_url": image_url} for image_url in image_urls)
     request_body = {
         "model": OPENAI_MODEL,
         "input": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": vision_prompt(scan_type)},
-                    {"type": "input_image", "image_url": data_url},
-                ],
+                "content": content,
             }
         ],
         "temperature": 0,
@@ -564,7 +576,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             if self.path == "/api/vision-ocr":
                 scan_type = payload.get("scan_type", "")
-                fields = run_vision_ocr(payload["image"], scan_type)
+                fields = run_vision_ocr(payload.get("images") or payload.get("image"), scan_type)
                 self.send_json({"fields": fields})
                 return
             self.send_error(404)

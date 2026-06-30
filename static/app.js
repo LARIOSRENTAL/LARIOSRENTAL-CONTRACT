@@ -675,7 +675,7 @@ function cleanOcrValue(value) {
 
 function formatOcrDate(day, month, year) {
   const d = Number(day);
-  const m = Number(month);
+  const m = /^\d+$/.test(String(month || "")) ? Number(month) : ocrMonthNumber(month);
   let y = String(year || "");
   if (y.length === 2) y = Number(y) > 35 ? `19${y}` : `20${y}`;
   if (d < 1 || d > 31 || m < 1 || m > 12 || y.length !== 4) return "";
@@ -760,6 +760,12 @@ function findName(lines) {
   return "";
 }
 
+function findLabelValue(text, labelPattern, stopPattern = /(?:\d[.)]?|FECHA|DATE|DOMICILIO|ADDRESS|FIRMA|SIGNATURE|CLASES|CLASS|VENCIMIENTO|EXPIRES|OTORGAMIENTO)/) {
+  const normalized = normalizeOcrText(text);
+  const match = normalized.match(new RegExp(`${labelPattern}\\s*[:\\-/]*\\s*([A-Z0-9 ]{2,42}?)(?=\\s+${stopPattern.source}\\b|$)`));
+  return match ? cleanOcrValue(match[1]) : "";
+}
+
 function findDocumentNumber(text) {
   const normalizedWithSymbols = normalizeOcrText(text);
   const card = normalizedWithSymbols.match(/\b(?:CARD\s*NO|KAARTNR)[^A-Z0-9]*(\d{3}[- ]?\d{7}[- ]?\d{2})\b/);
@@ -779,6 +785,8 @@ function numberedValue(text, number) {
 
 function findLicenseNumber(text) {
   const normalized = normalizeOcrText(text);
+  const explicit = normalized.match(/\b(?:N\s*LICENCIA|LICENCIA|LICENSE\s*N)[^A-Z0-9]*(\d{5,12})\b/);
+  if (explicit) return explicit[1];
   const label = normalized.match(/\b5[.)]?\s*([A-Z0-9 ]{5,16})/);
   if (label) {
     const value = cleanOcrValue(label[1]).replace(/\s+/g, "");
@@ -789,6 +797,8 @@ function findLicenseNumber(text) {
 
 function findExplicitLicenseNumber(text) {
   const normalized = normalizeOcrText(text);
+  const explicit = normalized.match(/\b(?:N\s*LICENCIA|LICENCIA|LICENSE\s*N)[^A-Z0-9]*(\d{5,12})\b/);
+  if (explicit) return explicit[1];
   const label = normalized.match(/\b5[.)]?\s*([A-Z0-9 -]{5,18})/);
   if (!label) return "";
   const value = cleanOcrValue(label[1]).replace(/\s+/g, "");
@@ -798,6 +808,7 @@ function findExplicitLicenseNumber(text) {
 function findCountryFromLicense(text) {
   const normalized = normalizeOcrText(text);
   const countries = [
+    [/ARGENTINA|BUENOS AIRES|LICENCIA NACIONAL DE CONDUCIR/, "ARGENTINA"],
     [/OSTERREICH|ÖSTERREICH|AUSTRIA|FUHRERSCHEIN.*\bA\b/, "AUSTRIA"],
     [/REINO DE ESPANA|REINO DE ESPAÑA|ESPANA|ESPAÑA/, "ESPANA"],
     [/DEUTSCHLAND|GERMANY|FUHRERSCHEIN.*\bD\b/, "ALEMANIA"],
@@ -896,7 +907,11 @@ function parseOcrFields(text, scanType) {
   if (scanType === "driver" || scanType === "additional") {
     const surname = numberedValue(text, "1");
     const given = numberedValue(text, "2");
-    const composedName = surname && given ? titleName(`${given} ${surname}`) : findName(lines);
+    const labeledSurname = findLabelValue(text, "(?:APELLIDO|LAST\\s*NAME)");
+    const labeledGiven = findLabelValue(text, "(?:NOMBRE|FIRST\\s*NAME)");
+    const composedName = (labeledSurname && labeledGiven)
+      ? titleName(`${labeledGiven} ${labeledSurname}`)
+      : (surname && given ? titleName(`${given} ${surname}`) : findName(lines));
     if (composedName && likelyName(composedName)) fields.renter = composedName;
     let number = findExplicitLicenseNumber(text);
     const value4b = numberedValue(text, "4B");
@@ -909,11 +924,17 @@ function parseOcrFields(text, scanType) {
     const address = findAddress(text);
     if (address && scanType === "driver") fields.address = address;
 
-    const birth = normalized.match(/\b3[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/) || normalized.match(/\b3[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
+    const birth = normalized.match(/\b(?:FECHA\s*DE\s*NAC|DATE\s*OF\s*BIRTH)[^0-9]*(\d{1,2})\s+([A-Z]{3,})\s+(\d{4})/)
+      || normalized.match(/\b3[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/)
+      || normalized.match(/\b3[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
     if (birth) fields.birth_date = birth[1].length === 4 ? formatOcrDate(birth[3], birth[2], birth[1]) : formatOcrDate(birth[1], birth[2], birth[3]);
-    const issue = normalized.match(/\b4A[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/) || normalized.match(/\b4A[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
+    const issue = normalized.match(/\b(?:OTORGAMIENTO|DATE\s*OF\s*ISSUE)[^0-9]*(\d{1,2})\s+([A-Z]{3,})\s+(\d{4})/)
+      || normalized.match(/\b4A[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/)
+      || normalized.match(/\b4A[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
     if (issue) fields.license_issue = issue[1].length === 4 ? formatOcrDate(issue[3], issue[2], issue[1]) : formatOcrDate(issue[1], issue[2], issue[3]);
-    const expiry = normalized.match(/\b4B[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/) || normalized.match(/\b4B[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
+    const expiry = normalized.match(/\b(?:VENCIMIENTO|EXPIRES)[^0-9]*(\d{1,2})\s+([A-Z]{3,})\s+(\d{4})/)
+      || normalized.match(/\b4B[.)]?\s*(\d{4})[.\-/\s](\d{1,2})[.\-/\s](\d{1,2})/)
+      || normalized.match(/\b4B[.)]?\s*(\d{1,2})[.\-/\s](\d{1,2})[.\-/\s](\d{4})/);
     if (expiry) fields.license_expiry = expiry[1].length === 4 ? formatOcrDate(expiry[3], expiry[2], expiry[1]) : formatOcrDate(expiry[1], expiry[2], expiry[3]);
     if (!fields.birth_date && dates[0]) fields.birth_date = dates[0];
     if (!fields.license_issue && dates[1]) fields.license_issue = dates[1];
@@ -1005,7 +1026,11 @@ async function recognizeScanReview() {
       }
       try {
         setStatus(`Leyendo con vision ${index + 1}/${scanReviewState.files.length}...`);
-        const result = await postJson("/api/vision-ocr", { image: prepared.vision, scan_type: scanReviewState.scanType });
+        const originalImage = await fileToDataUrl(scanReviewState.files[index]);
+        const result = await postJson("/api/vision-ocr", {
+          images: [originalImage, prepared.vision],
+          scan_type: scanReviewState.scanType,
+        });
         nextFields = result.fields || {};
       } catch (_serverError) {
         if (!(await ensureBrowserOcr())) throw new Error("No se pudo cargar el lector OCR.");
