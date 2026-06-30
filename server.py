@@ -21,7 +21,7 @@ STATIC_DIR = BASE_DIR / "static"
 OCR_MAX_SIDE = 1600
 OCR_MIN_WIDTH = 1000
 OCR_TIMEOUT_SECONDS = 18
-OPENAI_MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1")
 
 
 def clean_text(value):
@@ -61,13 +61,44 @@ def compact_fields(fields):
     }
 
 
+def validate_extracted_fields(fields, scan_type):
+    fields = dict(fields or {})
+    if scan_type in {"driver", "additional", "id"}:
+        bad_name = re.compile(
+            r"LICENCIA|LICENSE|CONDUCIR|REPUBLICA|REPÚBLICA|CIUDAD|SEGURIDAD|MINISTERIO|"
+            r"TRANSPORTE|CLASE|CLASS|VIAL|NACIONAL|DOCUMENTO|PASAPORTE|IDENTITY",
+            re.IGNORECASE,
+        )
+        for key in ("renter", "additional_name"):
+            if key in fields and bad_name.search(fields[key]):
+                fields.pop(key, None)
+        for key in ("license_number", "additional_license_number", "passport_id"):
+            value = re.sub(r"[^A-Z0-9]", "", normalize_key(fields.get(key, "")))
+            if fields.get(key) and (len(value) < 5 or len(value) > 16 or not re.search(r"\d", value)):
+                fields.pop(key, None)
+    if scan_type == "driver":
+        joined = normalize_key(" ".join(str(value) for value in fields.values()))
+        country = normalize_key(fields.get("license_country", ""))
+        if "ARGENTINA" in joined and country == "ITALIA":
+            fields["license_country"] = "ARGENTINA"
+    if scan_type == "car":
+        if fields.get("vehicle_plate") and not re.search(r"\d", fields["vehicle_plate"]):
+            fields.pop("vehicle_plate", None)
+        fuel = normalize_key(fields.get("fuel_type", ""))
+        if fuel and fuel not in {"GASOLINA", "DIESEL"}:
+            fields.pop("fuel_type", None)
+    return fields
+
+
 def vision_prompt(scan_type):
     base = (
         "Eres un extractor de datos para contratos de alquiler de coches de Larios Rental. "
-        "Puedes recibir una foto original y un recorte/enderezado del mismo documento. "
-        "Compara ambas imagenes y usa la que se lea mejor. Ignora mesa, dedos, fondo, pantalla y texto de la app. "
-        "Lee la imagen con cuidado y devuelve SOLO JSON valido, sin markdown. "
+        "Recibiras una o varias fotos originales tomadas con movil. Primero localiza visualmente el documento real "
+        "dentro de la foto y haz zoom mental sobre el documento. Ignora mesa, dedos, fondo, navegador, pantalla, "
+        "teclado, reflejos y cualquier texto que no este impreso en el documento. "
+        "Lee solo datos escritos en el documento y devuelve SOLO JSON valido, sin markdown. "
         "Si un dato no se ve claro, devuelve cadena vacia. No inventes nada. "
+        "Es preferible devolver un campo vacio antes que devolver un valor dudoso. "
         "Fechas siempre en formato dd/mm/aaaa. "
     )
     if scan_type in {"driver", "additional"}:
@@ -82,6 +113,9 @@ def vision_prompt(scan_type):
             "No uses como nombre textos de cabecera como Licencia Nacional de Conducir, Republica, Ciudad, Seguridad Vial, "
             "Ministerio, Clase o pais. En una licencia argentina, Apellido=QUEIROT y Nombre=FERNANDO DANIEL debe devolver "
             "renter='FERNANDO DANIEL QUEIROT'. "
+            "Si aparece Ciudad Autonoma de Buenos Aires, Seguridad Vial, Republica Argentina o bandera argentina, "
+            "el pais del permiso es ARGENTINA. No devuelvas ITALIA salvo que el documento indique Italia claramente. "
+            "El numero de permiso suele estar junto a N Licencia/License N o en el campo europeo 5. "
             "Identifica pais del permiso por cabecera o codigo. Devuelve JSON con keys: "
             "renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
         )
@@ -165,7 +199,7 @@ def run_vision_ocr(images, scan_type=""):
                 if content.get("type") in {"output_text", "text"}:
                     chunks.append(content.get("text", ""))
         text = "\n".join(chunks)
-    return compact_fields(extract_json_object(text))
+    return validate_extracted_fields(compact_fields(extract_json_object(text)), scan_type)
 
 
 def normalize_key(text):

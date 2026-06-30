@@ -57,7 +57,7 @@ python server.py
 
 ```text
 OPENAI_API_KEY=tu_clave_de_openai
-OPENAI_VISION_MODEL=gpt-4.1-mini
+OPENAI_VISION_MODEL=gpt-4.1
 ```
 
 4. Cuando termine el despliegue, abre la URL publica de Render y prueba el escaner desde el movil.
@@ -69,7 +69,7 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 
 ```text
 OPENAI_API_KEY=tu_clave_de_openai
-OPENAI_VISION_MODEL=gpt-4.1-mini
+OPENAI_VISION_MODEL=gpt-4.1
 ```
 
 3. Si Railway pide un comando de inicio, usa:
