@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#12664f" />
+    <title>Larios Rental Contrato</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p>Larios Rental</p>
+          <h1>Contrato móvil</h1>
+        </div>
+        <button id="installBtn" class="ghost" hidden>Instalar</button>
+      </header>
+
+      <section class="scan-row" aria-label="Escaneos">
+        <label class="scan-card">
+          <input type="file" accept="image/*" multiple data-scan="driver" />
+          <span>Carnet principal</span>
+          <small>Permiso conducir</small>
+        </label>
+        <label class="scan-card">
+          <input type="file" accept="image/*" multiple data-scan="id" />
+          <span>DNI/Pasaporte</span>
+          <small>Documento</small>
+        </label>
+        <label class="scan-card">
+          <input type="file" accept="image/*" multiple data-scan="additional" />
+          <span>Carnet adicional</span>
+          <small>Segundo conductor</small>
+        </label>
+        <label class="scan-card">
+          <input type="file" accept="image/*" data-scan="car" />
+          <span>Coche</span>
+          <small>Ficha o llavero</small>
+        </label>
+        <label class="scan-card">
+          <input type="file" accept="image/*" data-scan="card" />
+          <span>Tarjeta</span>
+          <small>Numero y caducidad</small>
+        </label>
+      </section>
+
+      <p id="status" class="status">Lista para escanear. La foto intenta leer datos y los deja en revisión antes de aplicarlos.</p>
+
+      <form id="contractForm" class="form">
+        <section>
+          <h2>Conductor principal</h2>
+          <label>Arrendatario <input name="renter" autocomplete="name" /></label>
+          <label>Nº permiso conducir <input name="license_number" /></label>
+          <label>País permiso conducir <input name="license_country" /></label>
+          <label>Fecha expedición <input name="license_issue" placeholder="dd/mm/aaaa" /></label>
+          <label>Fecha caducidad <input name="license_expiry" placeholder="dd/mm/aaaa o Permanente" /></label>
+          <label>Nacionalidad <input name="nationality" /></label>
+          <label>DNI/Pasaporte <input name="passport_id" /></label>
+          <label>Fecha nacimiento <input name="birth_date" placeholder="dd/mm/aaaa" /></label>
+          <label>Teléfono <input name="phone" inputmode="tel" /></label>
+          <label>Email <input name="email" inputmode="email" /></label>
+          <label class="full">Domicilio <textarea name="address" rows="3"></textarea></label>
+        </section>
+
+        <section>
+          <h2>Conductor adicional</h2>
+          <label>Nombre <input name="additional_name" /></label>
+          <label>Fecha nacimiento <input name="additional_birth_date" placeholder="dd/mm/aaaa" /></label>
+          <label>Nº permiso conducir <input name="additional_license_number" /></label>
+          <label>Fecha expedición <input name="additional_license_issue" placeholder="dd/mm/aaaa" /></label>
+          <label>País permiso conducir <input name="additional_license_country" /></label>
+          <label>Fecha caducidad <input name="additional_license_expiry" placeholder="dd/mm/aaaa o Permanente" /></label>
+        </section>
+
+        <section>
+          <h2>Vehículo</h2>
+          <label>Categoría
+            <select name="vehicle_category">
+              <option value="">Sin seleccionar</option>
+              <option value="Grupo A">Grupo A</option>
+              <option value="Grupo B">Grupo B</option>
+              <option value="Grupo C">Grupo C</option>
+              <option value="Grupo D">Grupo D</option>
+              <option value="Grupo F">Grupo F</option>
+              <option value="Grupo G">Grupo G</option>
+              <option value="Grupo I">Grupo I</option>
+              <option value="Grupo J">Grupo J</option>
+              <option value="Grupo K">Grupo K</option>
+              <option value="Grupo H">Grupo H</option>
+              <option value="Grupo L">Grupo L</option>
+              <option value="Grupo Q">Grupo Q</option>
+              <option value="BICICLETA">BICICLETA</option>
+              <option value="E-BIKE">E-BIKE</option>
+              <option value="50cc">50cc</option>
+              <option value="125cc">125cc</option>
+            </select>
+          </label>
+          <label>Modelo <input name="vehicle_model" placeholder="CITROEN C3" /></label>
+          <label>Matrícula <input name="vehicle_plate" placeholder="8486 MVJ" /></label>
+          <label>Color <input name="vehicle_color" /></label>
+          <label>Combustible
+            <select name="fuel_type">
+              <option value="">Sin seleccionar</option>
+              <option value="gasolina">Gasolina 95</option>
+              <option value="diesel">Diésel</option>
+            </select>
+          </label>
+          <label>Cantidad
+            <select name="vehicle_quantity" disabled>
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
+              <option value="19">19</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </section>
+
+        <section>
+          <h2>Salida y devolución</h2>
+          <label>Fecha entrega <input name="delivery_date" /></label>
+          <label>Hora entrega <input name="delivery_time" /></label>
+          <label>Lugar entrega <input name="delivery_place" /></label>
+          <label>Gas entrega <input name="delivery_gas" /></label>
+          <label>Km entrega <input name="delivery_km" inputmode="numeric" /></label>
+          <label>Colaborador/Agencia <input name="agency" /></label>
+          <label>Fecha devolución <input name="return_date" /></label>
+          <label>Hora devolución <input name="return_time" /></label>
+          <label>Lugar devolución <input name="return_place" /></label>
+          <label>Gas devolución <input name="return_gas" /></label>
+          <label>Km devolución <input name="return_km" inputmode="numeric" /></label>
+          <label class="full">Accesorios / extras <input name="extras" /></label>
+        </section>
+
+        <section>
+          <h2>Liquidación</h2>
+          <label class="check full"><input type="checkbox" name="season_94" /> Temporada 94 (+20%)</label>
+          <label>Días alquiler - Uds. <input name="rent_days_units" inputmode="decimal" /></label>
+          <label>Días alquiler - Total <input class="charge-total" name="rent_days_total" inputmode="decimal" /></label>
+          <label>Seguro completo - Uds.
+            <select name="insurance_units">
+              <option value="NO">NO</option>
+              <option value="SI">SI</option>
+            </select>
+          </label>
+          <label>Seguro completo - Total <input class="charge-total" name="insurance_total" inputmode="decimal" /></label>
+          <label>Conductor joven - Uds.
+            <select name="young_driver_units">
+              <option value="NO">NO</option>
+              <option value="SI">SI</option>
+            </select>
+          </label>
+          <label>Conductor joven - Total <input class="charge-total" name="young_driver_total" inputmode="decimal" /></label>
+          <label>Extra 1 - Concepto <input name="extra_1_concept" /></label>
+          <label>Extra 1 - Total <input class="charge-total" name="extra_1_total" inputmode="decimal" /></label>
+          <label>Extra 2 - Concepto <input name="extra_2_concept" /></label>
+          <label>Extra 2 - Total <input class="charge-total" name="extra_2_total" inputmode="decimal" /></label>
+          <label>Descuento <input class="charge-total" name="discount_total" inputmode="decimal" /></label>
+          <label>% IVA - Uds. <input name="vat_units" inputmode="decimal" value="21" /></label>
+          <label>Sub total <input name="subtotal" inputmode="decimal" readonly /></label>
+          <label>Forma de pago
+            <select name="payment_method">
+              <option value="">Sin seleccionar</option>
+              <option value="Tarjeta">Tarjeta</option>
+              <option value="Efectivo">Efectivo</option>
+              <option value="Web">Web</option>
+            </select>
+          </label>
+          <label>Depósito <input name="deposit" inputmode="decimal" /></label>
+          <label>Franquicia responsabilidad <input name="damage_excess" inputmode="decimal" /></label>
+          <label>Numero tarjeta <input name="credit_card_number" inputmode="numeric" autocomplete="cc-number" /></label>
+          <label>Caducidad tarjeta <input name="credit_card_expiry" inputmode="numeric" autocomplete="cc-exp" placeholder="mm/aa" /></label>
+        </section>
+
+        <section>
+          <h2>Documentación y observaciones</h2>
+          <label class="check"><input type="checkbox" name="doc_documents" checked /> Documentación</label>
+          <label class="check"><input type="checkbox" name="doc_triangle" checked /> Triángulo</label>
+          <label class="check"><input type="checkbox" name="doc_vest" checked /> Chaleco</label>
+          <label class="check"><input type="checkbox" name="doc_child_seat" /> Silla niño</label>
+          <label class="check full"><input type="checkbox" name="no_commercial_info" /> No desea recibir información comercial</label>
+          <label class="full">Datos de facturación / observaciones <textarea name="billing_notes" rows="4"></textarea></label>
+          <label>Entregado por <input name="delivered_by" /></label>
+          <label>Recogido por <input name="received_by" /></label>
+        </section>
+      </form>
+
+      <section class="tool-panel">
+        <h2>Daños del vehículo</h2>
+        <div class="damage-board">
+          <img src="assets/damage-map.png" alt="Esquema del estado del vehículo" />
+          <canvas id="damageCanvas"></canvas>
+        </div>
+        <div class="tool-actions">
+          <button id="clearDamageBtn" class="secondary" type="button">Borrar daños</button>
+          <span>Toca o arrastra sobre el dibujo para marcar daños.</span>
+        </div>
+      </section>
+
+      <section class="tool-panel">
+        <h2>Firma del cliente</h2>
+        <canvas id="signatureCanvas" class="signature-pad"></canvas>
+        <div class="tool-actions">
+          <button id="clearSignatureBtn" class="secondary" type="button">Borrar firma</button>
+          <span>Firma con el dedo o Apple Pencil.</span>
+        </div>
+      </section>
+
+      <section class="photos" id="photos" hidden>
+        <h2>Fotos adjuntas</h2>
+        <div id="photoGrid" class="photo-grid"></div>
+      </section>
+
+      <section class="scan-review" id="scanReview" hidden>
+        <div class="scan-review__bar">
+          <div>
+            <h2 id="scanReviewTitle">Revisar documento</h2>
+            <p id="scanReviewHint">Escribe solo los datos que se vean claros en la foto.</p>
+          </div>
+          <button id="closeScanReviewBtn" class="ghost" type="button">Cerrar</button>
+        </div>
+        <div class="scan-review__body">
+          <div class="scan-preview">
+            <img id="scanReviewImage" alt="Documento escaneado" />
+          </div>
+          <div class="scan-fields" id="scanReviewFields"></div>
+        </div>
+        <div class="scan-review__actions">
+          <button id="autoScanReviewBtn" class="secondary" type="button">Leer automáticamente</button>
+          <button id="applyScanReviewBtn" class="primary" type="button">Aplicar al contrato</button>
+          <button id="clearScanReviewBtn" class="secondary" type="button">Limpiar campos</button>
+        </div>
+      </section>
+
+      <footer class="actions">
+        <button id="sampleBtn" class="secondary" type="button">Cargar ejemplo</button>
+        <button id="generateBtn" class="primary" type="button">Generar contrato PDF</button>
+      </footer>
+    </main>
+
+    <script src="vendor/pdf-lib.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
