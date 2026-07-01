@@ -104,9 +104,9 @@ def vision_prompt(scan_type):
     )
     if scan_type in {"driver", "additional"}:
         return base + (
-            "Tipo: permiso de conducir. En permisos europeos usa los campos: "
+            "Tipo: permiso de conducir. MUY IMPORTANTE: en permisos europeos NO adivines; transcribe y usa los numeros impresos. Usa exactamente: "
             "1 apellidos, 2 nombre, 3 fecha nacimiento, 4a fecha expedicion, "
-            "4b fecha caducidad, 5 numero de carnet. Si 4b no es fecha y parece documento, usalo como numero. "
+            "4b fecha caducidad, 5 numero de carnet. Devuelve tambien raw_text_lines con las lineas visibles incluyendo 1.,2.,3.,4a.,4b.,5. Si 4b no es fecha y parece documento, usalo como numero. "
             "En permisos latinoamericanos o no europeos tambien reconoce etiquetas como Apellido/Last name, "
             "Nombre/First name, Fecha de Nac./Date of birth, Otorgamiento/Date of issue, "
             "Vencimiento/Expires, N Licencia/License N y Domicilio/Address. "
@@ -117,7 +117,7 @@ def vision_prompt(scan_type):
             "Si aparece Ciudad Autonoma de Buenos Aires, Seguridad Vial, Republica Argentina o bandera argentina, "
             "el pais del permiso es ARGENTINA. No devuelvas ITALIA salvo que el documento indique Italia claramente. "
             "El numero de permiso suele estar junto a N Licencia/License N o en el campo europeo 5. "
-            "Identifica pais del permiso por cabecera o codigo. En fields devuelve keys: "
+            "Identifica pais del permiso por cabecera o codigo grande del recuadro azul (A=Austria, I=Italia, E=Espana, H=Hungria), pero no confundas categorias AM/A/B/C con pais. En fields devuelve keys: "
             "renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
         )
     if scan_type == "id":
@@ -139,6 +139,37 @@ def vision_prompt(scan_type):
             "No devuelvas CVV aunque aparezca."
         )
     return base + "Devuelve JSON con los campos que reconozcas."
+
+
+def direct_vision_prompt(scan_type):
+    if scan_type in {"driver", "additional"}:
+        return (
+            "Lee el permiso de conducir de la imagen. Si es un permiso europeo, extrae por etiquetas oficiales: 1 apellidos, 2 nombre, 3 nacimiento, 4a expedicion, 4b caducidad, 5 numero. Devuelve SOLO JSON plano sin markdown con estas keys exactas: "
+            "renter, license_number, license_country, license_issue, license_expiry, birth_date, address. "
+            "No anides dentro de fields. No incluyas raw_text_lines. "
+            "Busca visualmente el carnet dentro de la foto aunque sea pequeno. "
+            "Para carnet argentino: N Licencia/License N es license_number; Apellido + Nombre forman renter; "
+            "Fecha de Nac. es birth_date; Otorgamiento es license_issue; Vencimiento es license_expiry; "
+            "Domicilio es address; pais ARGENTINA. Fechas dd/mm/aaaa. Si un campo no se ve, cadena vacia."
+        )
+    if scan_type == "id":
+        return (
+            "Lee el DNI o pasaporte de la imagen. Devuelve SOLO JSON plano con keys: "
+            "renter, passport_id, nationality, birth_date, address. Fechas dd/mm/aaaa. "
+            "Si un campo no se ve, cadena vacia."
+        )
+    if scan_type == "car":
+        return (
+            "Lee el llavero o ficha de coche. Devuelve SOLO JSON plano con keys: "
+            "vehicle_plate, vehicle_model, vehicle_color, fuel_type. "
+            "fuel_type solo gasolina o diesel si aparece claro."
+        )
+    if scan_type == "card":
+        return (
+            "Lee la tarjeta bancaria. Devuelve SOLO JSON plano con keys: credit_card_number, credit_card_expiry. "
+            "No devuelvas CVV."
+        )
+    return "Lee la imagen y devuelve SOLO JSON plano con los campos visibles."
 
 
 def extract_json_object(text):
@@ -170,19 +201,9 @@ def normalize_vision_payload(payload, scan_type):
     return validate_extracted_fields(compact_fields(merged), scan_type)
 
 
-def run_vision_ocr(images, scan_type=""):
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Falta OPENAI_API_KEY en el servidor.")
-    if isinstance(images, str):
-        image_urls = [images]
-    else:
-        image_urls = [image for image in images if isinstance(image, str) and image.startswith("data:image")]
-    if not image_urls:
-        raise RuntimeError("No se recibio ninguna imagen valida.")
-    image_urls = image_urls[:3]
-    content = [{"type": "input_text", "text": vision_prompt(scan_type)}]
-    content.extend({"type": "input_image", "image_url": image_url} for image_url in image_urls)
+def openai_vision_json(image_urls, prompt):
+    content = [{"type": "input_text", "text": prompt}]
+    content.extend({"type": "input_image", "image_url": image_url, "detail": "high"} for image_url in image_urls)
     request_body = {
         "model": OPENAI_MODEL,
         "input": [
@@ -197,13 +218,13 @@ def run_vision_ocr(images, scan_type=""):
         "https://api.openai.com/v1/responses",
         data=json.dumps(request_body).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
             "Content-Type": "application/json",
         },
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=70) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -217,7 +238,28 @@ def run_vision_ocr(images, scan_type=""):
                 if content.get("type") in {"output_text", "text"}:
                     chunks.append(content.get("text", ""))
         text = "\n".join(chunks)
-    return normalize_vision_payload(extract_json_object(text), scan_type)
+    return extract_json_object(text)
+
+
+def run_vision_ocr(images, scan_type=""):
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Falta OPENAI_API_KEY en el servidor.")
+    if isinstance(images, str):
+        image_urls = [images]
+    else:
+        image_urls = [image for image in images if isinstance(image, str) and image.startswith("data:image")]
+    if not image_urls:
+        raise RuntimeError("No se recibio ninguna imagen valida.")
+    image_urls = image_urls[:3]
+    first_payload = openai_vision_json(image_urls, vision_prompt(scan_type))
+    first_fields = normalize_vision_payload(first_payload, scan_type)
+    minimum = 2 if scan_type in {"driver", "additional", "id", "car"} else 1
+    if len(first_fields) >= minimum:
+        return first_fields
+    second_payload = openai_vision_json(image_urls, direct_vision_prompt(scan_type))
+    second_fields = normalize_vision_payload(second_payload, scan_type)
+    return {**first_fields, **second_fields}
 
 
 def normalize_key(text):
@@ -464,6 +506,157 @@ def parse_mrz(text):
     return result
 
 
+
+def normalize_license_country_from_text(text):
+    n = normalize_key(text)
+    # Prefer explicit country names / headers. Avoid using a loose single letter unless the document header is a driving licence.
+    country_patterns = [
+        ("AUSTRIA", ["OSTERREICH", "AUSTRIA", "FUHRERSCHEIN", "FUEHRERSCHEIN"]),
+        ("ITALIA", ["REPUBBLICA ITALIANA", "PATENTE DI GUIDA", "ITALIA"]),
+        ("ESPANA", ["REINO DE ESPANA", "PERMISO DE CONDUCCION", "ESPANA"]),
+        ("HUNGRIA", ["MAGYARORSZAG", "VEZETOI ENGEDELY", "HUNGARY"]),
+        ("BELGICA", ["BELGIE", "BELGIQUE", "BELGIEN", "BELGIUM"]),
+        ("FRANCIA", ["REPUBLIQUE FRANCAISE", "FRANCE", "PERMIS DE CONDUIRE"]),
+        ("ALEMANIA", ["DEUTSCHLAND", "BUNDESREPUBLIK", "GERMANY"]),
+        ("POLONIA", ["POLSKA", "PRAWO JAZDY"]),
+        ("PORTUGAL", ["PORTUGAL", "CARTA DE CONDUCAO"]),
+        ("ARGENTINA", ["ARGENTINA", "BUENOS AIRES", "LICENCIA NACIONAL DE CONDUCIR"]),
+    ]
+    for country, words in country_patterns:
+        if any(w in n for w in words):
+            if country == "AUSTRIA" and not any(w in n for w in ["OSTERREICH", "AUSTRIA", "FUHRERSCHEIN", "FUEHRERSCHEIN"]):
+                continue
+            return country
+    return ""
+
+
+def clean_eu_field_value(value):
+    value = clean_text(value)
+    value = re.sub(r"^[\s:;.,-]+", "", value)
+    value = re.sub(r"\b(?:1|2|3|4a|4b|4c|5|6|7|8|9)\s*[.)]?\b.*$", "", value, flags=re.IGNORECASE)
+    return clean_text(value)
+
+
+def extract_eu_label_value(text, label):
+    # Read EU driving-licence fields by official labels: 1,2,3,4a,4b,5.
+    raw = clean_text(text.replace("\n", " "))
+    raw = re.sub(r"(?i)4\s*\(\s*a\s*\)", "4a", raw)
+    raw = re.sub(r"(?i)4\s*\(\s*b\s*\)", "4b", raw)
+    raw = re.sub(r"(?i)4\s*\(\s*c\s*\)", "4c", raw)
+    raw = re.sub(r"(?i)\b([1235679])\s*[:;]", r"\1.", raw)
+    raw = re.sub(r"(?i)\b4\s*a\s*[:;.]?", "4a.", raw)
+    raw = re.sub(r"(?i)\b4\s*b\s*[:;.]?", "4b.", raw)
+    raw = re.sub(r"(?i)\b4\s*c\s*[:;.]?", "4c.", raw)
+    label_patterns = {
+        "1": r"\b1\s*[.)]",
+        "2": r"\b2\s*[.)]",
+        "3": r"\b3\s*[.)]",
+        "4a": r"\b4a\s*[.)]?",
+        "4b": r"\b4b\s*[.)]?",
+        "4c": r"\b4c\s*[.)]?",
+        "5": r"\b5\s*[.)]",
+    }
+    next_pat = r"(?=\s*(?:\b1\s*[.)]|\b2\s*[.)]|\b3\s*[.)]|\b4a\s*[.)]?|\b4b\s*[.)]?|\b4c\s*[.)]?|\b5\s*[.)]|\b7\s*[.)]|\b9\s*[.)]|$))"
+    pat = label_patterns[label] + r"\s*(.*?)" + next_pat
+    m = re.search(pat, raw, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    return clean_text(m.group(1))
+
+
+def parse_eu_driving_license(text):
+    """Deterministic parser for most EU driving licences.
+    Official fields: 1=surname, 2=name, 3=birth, 4a=issue, 4b=expiry, 5=licence number.
+    """
+    normalized = normalize_key(text)
+    if not any(w in normalized for w in [
+        "FUHRERSCHEIN", "FUEHRERSCHEIN", "PERMISO DE CONDUCCION", "PATENTE DI GUIDA",
+        "VEZETOI ENGEDELY", "PRAWO JAZDY", "PERMIS DE CONDUIRE", "DRIVING LICENCE",
+        "LICENCIA NACIONAL DE CONDUCIR"
+    ]):
+        return {}
+    result = {}
+    country = normalize_license_country_from_text(text)
+    if country:
+        result["license_country"] = country
+    surname_raw = extract_eu_label_value(text, "1")
+    name_raw = extract_eu_label_value(text, "2")
+    surname = clean_person_name(surname_raw)
+    name = clean_person_name(name_raw)
+    if name and surname:
+        result["renter"] = clean_text(f"{name} {surname}").title()
+    elif surname or name:
+        result["renter"] = clean_text(name or surname).title()
+
+    field3 = extract_eu_label_value(text, "3")
+    date3 = extract_dates(field3)
+    if date3:
+        result["birth_date"] = date3[0]
+
+    field4a = extract_eu_label_value(text, "4a")
+    date4a = extract_dates(field4a)
+    if date4a:
+        result["license_issue"] = date4a[0]
+
+    field4b = extract_eu_label_value(text, "4b")
+    date4b = extract_dates(field4b)
+    if date4b:
+        result["license_expiry"] = date4b[0]
+    elif field4b:
+        maybe_doc = clean_license_number(field4b)
+        if maybe_doc:
+            result["license_number"] = maybe_doc
+
+    field5 = extract_eu_label_value(text, "5")
+    lic = clean_license_number(field5)
+    if lic:
+        result["license_number"] = lic
+    return {k: v for k, v in result.items() if clean_text(v)}
+
+
+def parse_argentina_license(text):
+    lines = [clean_text(line) for line in text.splitlines() if clean_text(line)]
+    normalized = normalize_key(text)
+    if not any(w in normalized for w in ["ARGENTINA", "BUENOS AIRES", "LICENCIA NACIONAL DE CONDUCIR"]):
+        return {}
+    result = {"license_country": "ARGENTINA"}
+    # Direct labelled extraction; labels may appear on same line or previous small text.
+    combined = " ".join(lines)
+    def grab(label_regex, stop_regex):
+        m = re.search(label_regex + r"\s*[:/\-]*\s*(.*?)\s*(?=" + stop_regex + r"|$)", combined, re.IGNORECASE)
+        return clean_text(m.group(1)) if m else ""
+    stop = r"(?:\b(?:1|2|3|4a|4b|5|7|9)\s*[.)]|Apellido|Last name|Nombre|First name|Domicilio|Address|Fecha de Nac|Date of birth|Otorgamiento|Date of issue|Vencimiento|Expires|Firma|Signature|Clases|Class)"
+    license_number = grab(r"(?:5\s*[.)]?\s*)?(?:N[°ºo]?\s*)?Licencia\s*/?\s*License\s*N[°ºo]?", stop) or find_after_labels_clean(lines, ["n licencia", "license n"], ["n", "licencia", "license"])
+    if not license_number:
+        m = re.search(r"\b(?:N[°ºo]?\s*)?Licencia\s*/?\s*License\s*N[°ºo]?\s*(\d{5,12})", combined, re.IGNORECASE)
+        if m:
+            license_number = m.group(1)
+    if license_number:
+        result["license_number"] = clean_license_number(license_number)
+    surname = grab(r"(?:1\s*[.)]?\s*)?Apellido\s*/?\s*Last\s*name", stop)
+    name = grab(r"(?:2\s*[.)]?\s*)?Nombre\s*/?\s*First\s*name", stop)
+    # Fallback and cleanup for Argentine cards where label and value are close together.
+    m_s = re.search(r"Apellido\s*/?\s*Last\s*name\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s'-]{2,}?)(?=\s+(?:2\s*[.)]|Nombre|First|8\s*[.)]|Domicilio|Address|3\s*[.)]|Fecha))", combined, re.IGNORECASE)
+    m_n = re.search(r"Nombre\s*/?\s*First\s*name\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s'-]{2,}?)(?=\s+(?:8\s*[.)]|Domicilio|Address|3\s*[.)]|Fecha|4a|Otorgamiento))", combined, re.IGNORECASE)
+    if m_s:
+        surname = m_s.group(1)
+    if m_n:
+        name = m_n.group(1)
+    surname = re.sub(r"\b(?:8|3|4a|4b|5|7|9)\s*[.)]?.*$", "", surname, flags=re.IGNORECASE).strip()
+    name = re.sub(r"\b(?:8|3|4a|4b|5|7|9)\s*[.)]?.*$", "", name, flags=re.IGNORECASE).strip()
+    if surname or name:
+        result["renter"] = clean_text(f"{name} {surname}").title()
+    address = grab(r"(?:8\s*[.)]?\s*)?Domicilio\s*/?\s*Address", stop)
+    if address:
+        result["address"] = address.title()
+    birth = extract_dates(grab(r"(?:3\s*[.)]?\s*)?Fecha\s+de\s+Nac\.?\s*/?\s*Date\s+of\s+birth", stop))
+    issue = extract_dates(grab(r"(?:4a\s*[.)]?\s*)?Otorgamiento\s*/?\s*Date\s+of\s+issue", stop))
+    expiry = extract_dates(grab(r"(?:4b\s*[.)]?\s*)?Vencimiento\s*/?\s*Expires", stop))
+    if birth: result["birth_date"] = birth[0]
+    if issue: result["license_issue"] = issue[0]
+    if expiry: result["license_expiry"] = expiry[0]
+    return {k: v for k, v in result.items() if clean_text(v)}
+
 def parse_ocr(text, scan_type):
     lines = [clean_text(line) for line in text.splitlines() if clean_text(line)]
     normalized = normalize_key(text)
@@ -472,18 +665,21 @@ def parse_ocr(text, scan_type):
     document_number = find_document_number(text)
 
     if scan_type == "driver":
+        deterministic = {}
+        deterministic.update(parse_eu_driving_license(text))
+        deterministic.update(parse_argentina_license(text))
+        result.update(deterministic)
         license_number = clean_license_number(
-            find_after_labels_clean(lines, ["n licencia", "nº licencia", "no licencia", "num licencia", "numero licencia", "license n", "license no", "license number"], ["license", "licencia", "n", "no", "number"])
+            result.get("license_number")
+            or find_after_labels_clean(lines, ["n licencia", "nº licencia", "no licencia", "num licencia", "numero licencia", "license n", "license no", "license number"], ["license", "licencia", "n", "no", "number"])
             or find_numbered_value(lines, 5)
             or find_after_labels(lines, ["5."])
         )
         if license_number:
-            result["license_number"] = license_number
-        result.setdefault("license_country", find_after_labels(lines, ["expedido por", "issued by", "4c", "espana", "spain", "argentina"]))
-        if "ESPANA" in normalized or "SPAIN" in normalized:
-            result["license_country"] = "ESPANA"
-        if "ARGENTINA" in normalized or "BUENOS AIRES" in normalized or "LICENCIA NACIONAL DE CONDUCIR" in normalized:
-            result["license_country"] = "ARGENTINA"
+            result.setdefault("license_number", license_number)
+        country = normalize_license_country_from_text(text)
+        if country:
+            result.setdefault("license_country", country)
         if len(dates) >= 1:
             result.setdefault("birth_date", dates[0])
         if len(dates) >= 2:
@@ -498,7 +694,7 @@ def parse_ocr(text, scan_type):
         if not renter:
             renter = clean_person_name(find_after_labels(lines, ["apellidos y nombre", "nombre", "name"]))
         if renter and len(re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]", "", renter)) >= 6:
-            result.setdefault("renter", renter)
+            result.setdefault("renter", renter.title())
         address = find_after_labels_clean(lines, ["domicilio", "address"], ["domicilio", "address"])
         if address:
             result.setdefault("address", address.title())
@@ -687,7 +883,7 @@ class Handler(SimpleHTTPRequestHandler):
             if self.path == "/api/vision-ocr":
                 scan_type = payload.get("scan_type", "")
                 fields = run_vision_ocr(payload.get("images") or payload.get("image"), scan_type)
-                self.send_json({"fields": fields})
+                self.send_json({"fields": fields, "field_count": len(fields), "model": OPENAI_MODEL})
                 return
             self.send_error(404)
         except Exception as exc:
