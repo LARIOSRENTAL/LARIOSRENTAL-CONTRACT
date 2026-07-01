@@ -1065,40 +1065,17 @@ async function recognizeScanReview() {
   const previousLabel = autoScanReviewBtn.textContent;
   autoScanReviewBtn.textContent = "Leyendo...";
   try {
-    let fields = {};
-    for (let index = 0; index < scanReviewState.files.length; index += 1) {
-      let nextFields = {};
-      setStatus(`Buscando contorno ${index + 1}/${scanReviewState.files.length}...`);
-      const prepared = await prepareOcrImages(scanReviewState.files[index], scanReviewState.scanType);
-      scanReviewState.processed[index] = prepared;
-      if (index === 0) {
-        scanReviewImage.src = prepared.preview;
-        scanCropStatus.textContent = prepared.cropFound
-          ? "Contorno detectado: se envia al OCR solo el recorte enderezado."
-          : "No se encontro un contorno claro: se envia un recorte automatico de la zona con texto.";
-      }
-      try {
-        setStatus(`Leyendo con vision ${index + 1}/${scanReviewState.files.length}...`);
-        const originalImage = await fileToDataUrl(scanReviewState.files[index]);
-        const result = await postJson("/api/vision-ocr", {
-          images: [originalImage, prepared.vision],
-          scan_type: scanReviewState.scanType,
-        });
-        nextFields = result.fields || {};
-      } catch (_serverError) {
-        if (!(await ensureBrowserOcr())) throw new Error("No se pudo cargar el lector OCR.");
-        setStatus(`Leyendo recorte mejorado ${index + 1}/${scanReviewState.files.length}...`);
-        let text = await readOcrImage(prepared.soft, `${index + 1}/${scanReviewState.files.length}`);
-        nextFields = parseOcrFields(text, scanReviewState.scanType);
-        if (Object.keys(nextFields).length < 2) {
-          const fallbackText = await readOcrImage(prepared.hard, `${index + 1}/${scanReviewState.files.length} extra`);
-          nextFields = { ...parseOcrFields(fallbackText, scanReviewState.scanType), ...nextFields };
-        }
-      }
-      fields = { ...nextFields, ...fields };
-    }
+    setStatus("Leyendo la foto original con vision...");
+    scanReviewImage.src = URL.createObjectURL(scanReviewState.files[0]);
+    scanCropStatus.textContent = "Lectura nueva: se usa la foto original completa, sin recortes automaticos.";
+    const images = await Promise.all(scanReviewState.files.map((file) => fileToDataUrl(file)));
+    const result = await postJson("/api/vision-ocr", {
+      images,
+      scan_type: scanReviewState.scanType,
+    }, 70000);
+    const fields = result.fields || {};
     const count = fillScanReviewFields(fields);
-    setStatus(count ? `Lectura terminada: ${count} campos detectados. Revisa y pulsa Aplicar al contrato.` : "No he encontrado datos claros. La foto queda abierta para copiarlos manualmente.");
+    setStatus(count ? `Lectura terminada: ${count} campos fiables detectados. Revisa y pulsa Aplicar al contrato.` : "No he encontrado datos fiables. La foto queda abierta para copiarlos manualmente.");
   } catch (error) {
     setStatus(`No se pudo leer automaticamente: ${error.message}. Puedes copiar los datos desde la foto.`);
   } finally {
@@ -1525,7 +1502,7 @@ function openScanReview(scanType, imageUrl, files = []) {
   scanReviewTitle.textContent = config.title;
   scanReviewHint.textContent = config.hint;
   scanReviewImage.src = imageUrl;
-  scanCropStatus.textContent = "Imagen original. Buscando contorno...";
+  scanCropStatus.textContent = "Imagen original. El OCR leera la foto completa sin recorte automatico.";
   scanReviewFields.replaceChildren();
 
   config.fields.forEach(([name, labelText, type]) => {

@@ -100,6 +100,7 @@ def vision_prompt(scan_type):
         "Si un dato no se ve claro, devuelve cadena vacia. No inventes nada. "
         "Es preferible devolver un campo vacio antes que devolver un valor dudoso. "
         "Fechas siempre en formato dd/mm/aaaa. "
+        "Devuelve siempre este formato: {\"raw_text_lines\": [lineas visibles del documento], \"fields\": {...}}. "
     )
     if scan_type in {"driver", "additional"}:
         return base + (
@@ -116,12 +117,12 @@ def vision_prompt(scan_type):
             "Si aparece Ciudad Autonoma de Buenos Aires, Seguridad Vial, Republica Argentina o bandera argentina, "
             "el pais del permiso es ARGENTINA. No devuelvas ITALIA salvo que el documento indique Italia claramente. "
             "El numero de permiso suele estar junto a N Licencia/License N o en el campo europeo 5. "
-            "Identifica pais del permiso por cabecera o codigo. Devuelve JSON con keys: "
+            "Identifica pais del permiso por cabecera o codigo. En fields devuelve keys: "
             "renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
         )
     if scan_type == "id":
         return base + (
-            "Tipo: documento de identidad o pasaporte. Devuelve JSON con keys: "
+            "Tipo: documento de identidad o pasaporte. En fields devuelve keys: "
             "renter, passport_id, nationality, birth_date, address. "
             "No confundas cabeceras de pais como nombre."
         )
@@ -134,7 +135,7 @@ def vision_prompt(scan_type):
         )
     if scan_type == "card":
         return base + (
-            "Tipo: tarjeta bancaria. Devuelve JSON con keys: credit_card_number, credit_card_expiry. "
+            "Tipo: tarjeta bancaria. En fields devuelve keys: credit_card_number, credit_card_expiry. "
             "No devuelvas CVV aunque aparezca."
         )
     return base + "Devuelve JSON con los campos que reconozcas."
@@ -150,6 +151,23 @@ def extract_json_object(text):
     if start >= 0 and end > start:
         text = text[start : end + 1]
     return json.loads(text)
+
+
+def normalize_vision_payload(payload, scan_type):
+    if not isinstance(payload, dict):
+        return {}
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else payload
+    compact = compact_fields(fields)
+    raw_lines = payload.get("raw_text_lines") or payload.get("raw_lines") or payload.get("lines") or []
+    if isinstance(raw_lines, str):
+        raw_text = raw_lines
+    elif isinstance(raw_lines, list):
+        raw_text = "\n".join(clean_text(line) for line in raw_lines if clean_text(line))
+    else:
+        raw_text = ""
+    parsed_from_lines = parse_ocr(raw_text, scan_type) if raw_text else {}
+    merged = {**compact, **parsed_from_lines}
+    return validate_extracted_fields(compact_fields(merged), scan_type)
 
 
 def run_vision_ocr(images, scan_type=""):
@@ -199,7 +217,7 @@ def run_vision_ocr(images, scan_type=""):
                 if content.get("type") in {"output_text", "text"}:
                     chunks.append(content.get("text", ""))
         text = "\n".join(chunks)
-    return validate_extracted_fields(compact_fields(extract_json_object(text)), scan_type)
+    return normalize_vision_payload(extract_json_object(text), scan_type)
 
 
 def normalize_key(text):
@@ -232,6 +250,29 @@ def extract_dates(text):
         day_number = int(day)
         month_number = int(month)
         if 1 <= day_number <= 31 and 1 <= month_number <= 12:
+            normalized.append(f"{day_number:02d}/{month_number:02d}/{year}")
+    month_names = {
+        "ENE": 1,
+        "JAN": 1,
+        "FEB": 2,
+        "MAR": 3,
+        "ABR": 4,
+        "APR": 4,
+        "MAY": 5,
+        "JUN": 6,
+        "JUL": 7,
+        "AGO": 8,
+        "AUG": 8,
+        "SEP": 9,
+        "OCT": 10,
+        "NOV": 11,
+        "DIC": 12,
+        "DEC": 12,
+    }
+    for day, month, year in re.findall(r"\b(\d{1,2})\s+([A-ZÁÉÍÓÚ]{3,})\s+(\d{4})\b", normalize_key(text)):
+        month_number = month_names.get(month[:3])
+        day_number = int(day)
+        if month_number and 1 <= day_number <= 31:
             normalized.append(f"{day_number:02d}/{month_number:02d}/{year}")
     return normalized
 
@@ -284,7 +325,13 @@ def find_document_number(text):
 def clean_license_number(value):
     candidate = clean_text(value).upper().replace(" ", "").replace("-", "")
     match = re.search(r"\d{6,8}[A-Z]", candidate)
-    return match.group(0) if match else ""
+    if match:
+        return match.group(0)
+    numeric = re.search(r"\b\d{5,12}\b", candidate)
+    if numeric:
+        return numeric.group(0)
+    alpha_numeric = re.search(r"\b[A-Z0-9]{5,16}\b", candidate)
+    return alpha_numeric.group(0) if alpha_numeric and re.search(r"\d", alpha_numeric.group(0)) else ""
 
 
 def find_numbered_value(lines, number):
@@ -351,6 +398,21 @@ def find_after_labels(lines, labels):
     return ""
 
 
+def find_after_labels_clean(lines, labels, ignored_words):
+    ignored = {normalize_key(word) for word in ignored_words}
+    value = find_after_labels(lines, labels)
+    normalized = normalize_key(value)
+    words = [word for word in re.split(r"[^A-Z0-9]+", normalized) if word]
+    if value and words and not all(word in ignored for word in words):
+        return value
+    normalized_labels = [normalize_key(label) for label in labels]
+    for index, line in enumerate(lines):
+        normalized_line = normalize_key(line)
+        if any(label in normalized_line for label in normalized_labels) and index + 1 < len(lines):
+            return clean_text(lines[index + 1])
+    return ""
+
+
 def find_vehicle_plate(text):
     normalized = normalize_key(text)
     match = re.search(r"MATR[IÍ]CULA\s*[:\-]?\s*([0-9]{4}\s*[A-Z]{3})", normalized)
@@ -410,25 +472,36 @@ def parse_ocr(text, scan_type):
     document_number = find_document_number(text)
 
     if scan_type == "driver":
-        license_number = clean_license_number(find_numbered_value(lines, 5) or find_after_labels(lines, ["5."]))
+        license_number = clean_license_number(
+            find_after_labels_clean(lines, ["n licencia", "nº licencia", "no licencia", "num licencia", "numero licencia", "license n", "license no", "license number"], ["license", "licencia", "n", "no", "number"])
+            or find_numbered_value(lines, 5)
+            or find_after_labels(lines, ["5."])
+        )
         if license_number:
             result["license_number"] = license_number
-        result.setdefault("license_country", find_after_labels(lines, ["expedido por", "issued by", "4c", "espana", "spain"]))
+        result.setdefault("license_country", find_after_labels(lines, ["expedido por", "issued by", "4c", "espana", "spain", "argentina"]))
         if "ESPANA" in normalized or "SPAIN" in normalized:
             result["license_country"] = "ESPANA"
+        if "ARGENTINA" in normalized or "BUENOS AIRES" in normalized or "LICENCIA NACIONAL DE CONDUCIR" in normalized:
+            result["license_country"] = "ARGENTINA"
         if len(dates) >= 1:
-            result.setdefault("license_issue", dates[0])
+            result.setdefault("birth_date", dates[0])
         if len(dates) >= 2:
-            result.setdefault("license_expiry", dates[1])
+            result.setdefault("license_issue", dates[1])
+        if len(dates) >= 3:
+            result.setdefault("license_expiry", dates[2])
         if "PERMANENTE" in normalized:
             result["license_expiry"] = "Permanente"
-        surname = clean_person_name(find_numbered_value(lines, 1))
-        name = clean_person_name(find_numbered_value(lines, 2))
+        surname = clean_person_name(find_after_labels_clean(lines, ["apellido", "last name"], ["apellido", "last", "name"]) or find_numbered_value(lines, 1))
+        name = clean_person_name(find_after_labels_clean(lines, ["nombre", "first name"], ["nombre", "first", "name"]) or find_numbered_value(lines, 2))
         renter = clean_text(f"{name} {surname}" if name and surname else name or surname)
         if not renter:
             renter = clean_person_name(find_after_labels(lines, ["apellidos y nombre", "nombre", "name"]))
         if renter and len(re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]", "", renter)) >= 6:
             result.setdefault("renter", renter)
+        address = find_after_labels_clean(lines, ["domicilio", "address"], ["domicilio", "address"])
+        if address:
+            result.setdefault("address", address.title())
 
     if scan_type == "id":
         if document_number:
