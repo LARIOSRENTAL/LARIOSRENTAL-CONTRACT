@@ -90,35 +90,45 @@ def validate_extracted_fields(fields, scan_type):
     return fields
 
 
-def vision_prompt(scan_type):
+
+def transcription_prompt(scan_type):
     base = (
-        "Eres un extractor de datos para contratos de alquiler de coches de Larios Rental. "
-        "Recibiras una o varias fotos originales tomadas con movil. Primero localiza visualmente el documento real "
-        "dentro de la foto y haz zoom mental sobre el documento. Ignora mesa, dedos, fondo, navegador, pantalla, "
-        "teclado, reflejos y cualquier texto que no este impreso en el documento. "
-        "Lee solo datos escritos en el documento y devuelve SOLO JSON valido, sin markdown. "
-        "Si un dato no se ve claro, devuelve cadena vacia. No inventes nada. "
-        "Es preferible devolver un campo vacio antes que devolver un valor dudoso. "
-        "Fechas siempre en formato dd/mm/aaaa. "
-        "Devuelve siempre este formato: {\"raw_text_lines\": [lineas visibles del documento], \"fields\": {...}}. "
+        "Eres un OCR de documentos para Larios Rental. Tu tarea NO es interpretar todavia, solo TRANSCRIBIR. "
+        "Mira la foto completa, localiza el documento/carnet/llavero/tarjeta dentro de la imagen e ignora fondo, mesa, navegador o teclado. "
+        "Transcribe TODAS las lineas impresas visibles del documento, respetando etiquetas como 1., 2., 3., 4a., 4b., 5., Apellido, Nombre, Matricula, Marca, Modelo y Fuel. "
+        "No inventes letras. Si una parte no se ve, omite esa parte. Devuelve SOLO JSON valido sin markdown con esta forma: "
+        "{\"raw_text_lines\":[\"linea 1\",\"linea 2\"]}. "
     )
     if scan_type in {"driver", "additional"}:
         return base + (
-            "Tipo: permiso de conducir. MUY IMPORTANTE: en permisos europeos NO adivines; transcribe y usa los numeros impresos. Usa exactamente: "
-            "1 apellidos, 2 nombre, 3 fecha nacimiento, 4a fecha expedicion, "
-            "4b fecha caducidad, 5 numero de carnet. Devuelve tambien raw_text_lines con las lineas visibles incluyendo 1.,2.,3.,4a.,4b.,5. Si 4b no es fecha y parece documento, usalo como numero. "
-            "En permisos latinoamericanos o no europeos tambien reconoce etiquetas como Apellido/Last name, "
-            "Nombre/First name, Fecha de Nac./Date of birth, Otorgamiento/Date of issue, "
-            "Vencimiento/Expires, N Licencia/License N y Domicilio/Address. "
-            "El arrendatario debe ser Nombre + Apellidos, por ejemplo Nombre/First name seguido de Apellido/Last name. "
-            "No uses como nombre textos de cabecera como Licencia Nacional de Conducir, Republica, Ciudad, Seguridad Vial, "
-            "Ministerio, Clase o pais. En una licencia argentina, Apellido=QUEIROT y Nombre=FERNANDO DANIEL debe devolver "
-            "renter='FERNANDO DANIEL QUEIROT'. "
-            "Si aparece Ciudad Autonoma de Buenos Aires, Seguridad Vial, Republica Argentina o bandera argentina, "
-            "el pais del permiso es ARGENTINA. No devuelvas ITALIA salvo que el documento indique Italia claramente. "
-            "El numero de permiso suele estar junto a N Licencia/License N o en el campo europeo 5. "
-            "Identifica pais del permiso por cabecera o codigo grande del recuadro azul (A=Austria, I=Italia, E=Espana, H=Hungria), pero no confundas categorias AM/A/B/C con pais. En fields devuelve keys: "
-            "renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
+            "Es especialmente importante copiar literalmente los campos numerados del permiso: 1, 2, 3, 4a, 4b, 4c y 5. "
+            "Ejemplo de salida: [\"FUHRERSCHEIN\",\"1. SALINGER\",\"2. PAUL\",\"3. 13.07.1994 MODLING\",\"4a. 11.03.2021 4b. 10.03.2036\",\"5. 21080013\"]."
+        )
+    if scan_type == "car":
+        return base + "Es un llavero de coche: copia literalmente Matricula, Marca, Modelo y Fuel."
+    return base
+
+def vision_prompt(scan_type):
+    base = (
+        "Eres un lector de documentos para contratos de alquiler de Larios Rental. "
+        "Recibiras fotos tomadas con movil. Localiza visualmente el documento/carnet dentro de la foto y lee SOLO el texto impreso en el documento. "
+        "Ignora mesa, fondo, navegador, teclado, reflejos y textos de la app. "
+        "Devuelve SOLO JSON valido, sin markdown. Si un dato no se ve claro, cadena vacia. No inventes. "
+        "Fechas siempre en formato dd/mm/aaaa. "
+        "Devuelve siempre: {\"raw_text_lines\": [lineas visibles del documento], \"eu_fields\": {\"1\":\"\",\"2\":\"\",\"3\":\"\",\"4a\":\"\",\"4b\":\"\",\"5\":\"\"}, \"fields\": {...}}. "
+    )
+    if scan_type in {"driver", "additional"}:
+        return base + (
+            "TIPO: PERMISO DE CONDUCIR. Para permisos europeos, el objetivo principal es leer las etiquetas numericas impresas. "
+            "No traduzcas ni adivines. Copia exactamente el valor que aparece junto a cada etiqueta: "
+            "1 = apellidos, 2 = nombre, 3 = fecha nacimiento, 4a = fecha expedicion, 4b = fecha caducidad, 5 = numero de permiso. "
+            "Despues construye fields asi: renter = 2 + espacio + 1; birth_date = 3; license_issue = 4a; license_expiry = 4b; license_number = 5. "
+            "Ejemplo: si ves 1. SALINGER, 2. PAUL, 3. 13.07.1994, 4a. 11.03.2021, 4b. 10.03.2036, 5. 21080013, devuelve renter='PAUL SALINGER', birth_date='13/07/1994', license_issue='11/03/2021', license_expiry='10/03/2036', license_number='21080013'. "
+            "Detecta pais por cabecera y codigo de pais del recuadro azul: A=AUSTRIA, I=ITALIA, E=ESPAÑA, H=HUNGRIA, D=ALEMANIA, F=FRANCIA, B=BELGICA, P=PORTUGAL, PL=POLONIA, CZ=REPUBLICA CHECA, SK=ESLOVAQUIA, RO=RUMANIA. "
+            "No confundas categorias AM/A/B/C/C1/F con pais. Si el recuadro azul muestra A y dice Führerschein, pais AUSTRIA. "
+            "Para permisos no europeos/latinoamericanos usa etiquetas: Apellido/Last name, Nombre/First name, Fecha de Nac./Date of birth, Otorgamiento/Date of issue, Vencimiento/Expires, N Licencia/License N, Domicilio/Address. "
+            "Para licencia argentina: Apellido=QUEIROT y Nombre=FERNANDO DANIEL debe devolver renter='FERNANDO DANIEL QUEIROT', pais ARGENTINA. "
+            "fields debe contener solo estas keys: renter, license_number, license_country, license_issue, license_expiry, birth_date, address."
         )
     if scan_type == "id":
         return base + (
@@ -144,13 +154,12 @@ def vision_prompt(scan_type):
 def direct_vision_prompt(scan_type):
     if scan_type in {"driver", "additional"}:
         return (
-            "Lee el permiso de conducir de la imagen. Si es un permiso europeo, extrae por etiquetas oficiales: 1 apellidos, 2 nombre, 3 nacimiento, 4a expedicion, 4b caducidad, 5 numero. Devuelve SOLO JSON plano sin markdown con estas keys exactas: "
-            "renter, license_number, license_country, license_issue, license_expiry, birth_date, address. "
-            "No anides dentro de fields. No incluyas raw_text_lines. "
-            "Busca visualmente el carnet dentro de la foto aunque sea pequeno. "
-            "Para carnet argentino: N Licencia/License N es license_number; Apellido + Nombre forman renter; "
-            "Fecha de Nac. es birth_date; Otorgamiento es license_issue; Vencimiento es license_expiry; "
-            "Domicilio es address; pais ARGENTINA. Fechas dd/mm/aaaa. Si un campo no se ve, cadena vacia."
+            "Lee el permiso de conducir de la imagen. Devuelve SOLO JSON plano sin markdown con keys: renter, license_number, license_country, license_issue, license_expiry, birth_date, address. "
+            "Para permisos europeos usa estrictamente las etiquetas impresas: 1 apellidos, 2 nombre, 3 nacimiento, 4a expedicion, 4b caducidad, 5 numero. "
+            "Ejemplo visual: 1 SALINGER, 2 PAUL, 3 13.07.1994, 4a 11.03.2021, 4b 10.03.2036, 5 21080013 => renter PAUL SALINGER, license_country AUSTRIA, birth_date 13/07/1994, license_issue 11/03/2021, license_expiry 10/03/2036, license_number 21080013. "
+            "Detecta pais por codigo grande del recuadro azul: A Austria, I Italia, E Espana, H Hungria. No confundas AM/A/B/C/C1/F con pais. "
+            "Para carnet argentino: N Licencia es license_number; Apellido + Nombre forman renter; Fecha de Nac. birth_date; Otorgamiento license_issue; Vencimiento license_expiry; Domicilio address; pais ARGENTINA. "
+            "Si un campo no se ve, cadena vacia."
         )
     if scan_type == "id":
         return (
@@ -197,7 +206,32 @@ def normalize_vision_payload(payload, scan_type):
     else:
         raw_text = ""
     parsed_from_lines = parse_ocr(raw_text, scan_type) if raw_text else {}
-    merged = {**compact, **parsed_from_lines}
+    eu_parsed = {}
+    eu_fields = payload.get("eu_fields") or payload.get("eu") or {}
+    if scan_type in {"driver", "additional"} and isinstance(eu_fields, dict):
+        one = clean_person_name(eu_fields.get("1") or eu_fields.get(1) or "")
+        two = clean_person_name(eu_fields.get("2") or eu_fields.get(2) or "")
+        three = normalize_date(eu_fields.get("3") or eu_fields.get(3) or "")
+        four_a = normalize_date(eu_fields.get("4a") or eu_fields.get("4A") or "")
+        four_b_raw = clean_text(eu_fields.get("4b") or eu_fields.get("4B") or "")
+        four_b = normalize_date(four_b_raw)
+        five = clean_license_number(eu_fields.get("5") or eu_fields.get(5) or "")
+        if one or two:
+            eu_parsed["renter"] = clean_text(f"{two} {one}" if two and one else two or one).title()
+        if three:
+            eu_parsed["birth_date"] = three
+        if four_a:
+            eu_parsed["license_issue"] = four_a
+        if four_b:
+            eu_parsed["license_expiry"] = four_b
+        elif four_b_raw and not re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", four_b_raw):
+            alt = clean_license_number(four_b_raw)
+            if alt:
+                eu_parsed["license_number"] = alt
+        if five:
+            eu_parsed["license_number"] = five
+    # Priority: raw line parser, then explicit EU fields, then direct fields from model.
+    merged = {**compact, **parsed_from_lines, **eu_parsed}
     return validate_extracted_fields(compact_fields(merged), scan_type)
 
 
@@ -213,6 +247,7 @@ def openai_vision_json(image_urls, prompt):
             }
         ],
         "temperature": 0,
+        "max_output_tokens": 1800,
     }
     req = urllib.request.Request(
         "https://api.openai.com/v1/responses",
@@ -252,14 +287,45 @@ def run_vision_ocr(images, scan_type=""):
     if not image_urls:
         raise RuntimeError("No se recibio ninguna imagen valida.")
     image_urls = image_urls[:3]
+
+    minimum = 2 if scan_type in {"driver", "additional", "id", "car"} else 1
+    debug = {"mode": "ocr_v2_transcribe_then_parse"}
+
+    # Paso 1: pedir una transcripcion literal del documento. Esto suele ser mas fiable
+    # que pedir al modelo que interprete campos directamente.
+    transcribed_text = ""
+    try:
+        trans_payload = openai_vision_json(image_urls, transcription_prompt(scan_type))
+        raw_lines = trans_payload.get("raw_text_lines") or trans_payload.get("lines") or trans_payload.get("raw_lines") or []
+        if isinstance(raw_lines, list):
+            transcribed_text = "\n".join(clean_text(line) for line in raw_lines if clean_text(line))
+        elif isinstance(raw_lines, str):
+            transcribed_text = raw_lines
+        debug["raw_text"] = transcribed_text[:1200]
+    except Exception as exc:
+        debug["transcription_error"] = str(exc)[:300]
+
+    parsed_fields = parse_ocr(transcribed_text, scan_type) if transcribed_text else {}
+    parsed_fields = validate_extracted_fields(compact_fields(parsed_fields), scan_type)
+    if len(parsed_fields) >= minimum:
+        parsed_fields["_debug_mode"] = "transcription_parser"
+        return parsed_fields
+
+    # Paso 2: pedir extraccion estructurada completa, usando imagen + reglas.
     first_payload = openai_vision_json(image_urls, vision_prompt(scan_type))
     first_fields = normalize_vision_payload(first_payload, scan_type)
-    minimum = 2 if scan_type in {"driver", "additional", "id", "car"} else 1
-    if len(first_fields) >= minimum:
-        return first_fields
+    merged = {**first_fields, **parsed_fields}
+    if len(merged) >= minimum:
+        merged["_debug_mode"] = "vision_fields_plus_parser"
+        return merged
+
+    # Paso 3: ultimo intento, prompt directo y estricto.
     second_payload = openai_vision_json(image_urls, direct_vision_prompt(scan_type))
     second_fields = normalize_vision_payload(second_payload, scan_type)
-    return {**first_fields, **second_fields}
+    final = {**first_fields, **second_fields, **parsed_fields}
+    if final:
+        final["_debug_mode"] = "direct_fallback"
+    return final
 
 
 def normalize_key(text):
@@ -318,6 +384,24 @@ def extract_dates(text):
             normalized.append(f"{day_number:02d}/{month_number:02d}/{year}")
     return normalized
 
+
+
+
+def normalize_date(value):
+    value = clean_text(value)
+    if not value:
+        return ""
+    m = re.search(r"(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})", value)
+    if not m:
+        return ""
+    day, month, year = m.groups()
+    day_number = int(day)
+    month_number = int(month)
+    if not (1 <= day_number <= 31 and 1 <= month_number <= 12):
+        return ""
+    if len(year) == 2:
+        year = ("19" if int(year) > 35 else "20") + year
+    return f"{day_number:02d}/{month_number:02d}/{year}"
 
 def find_document_number(text):
     compact = re.sub(r"[^A-Z0-9]", "", normalize_key(text))
