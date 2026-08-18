@@ -1,0 +1,6 @@
+{
+  "appId": "com.lariosrental.management",
+  "appName": "Larios Rental",
+  "webDir": "www",
+  "server": { "androidScheme": "https" }
+}
