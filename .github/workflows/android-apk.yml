@@ -19,26 +19,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - name: Inspect project
-        run: |
-          pwd
-          find . -maxdepth 2 -type f | sort | head -200
       - name: Install dependencies
         run: npm install
-      - name: Verify Capacitor
+      - name: Verify production web bundle
         run: |
-          npx cap --version
           test -f capacitor.config.json
-      - name: Create temporary web shell if frontend is not uploaded yet
-        run: |
-          if [ ! -f www/index.html ]; then
-            mkdir -p www
-            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Larios Rental</title></head><body><main><h1>Larios Rental</h1><p>Android bootstrap build.</p></main></body></html>' > www/index.html
-          fi
+          test -f www/index.html
+          test -f www/config.js
+          grep -q "Larios Rental Pro" www/index.html
+          npx cap --version
       - name: Create Android project
         run: npx cap add android
       - name: Sync web app
@@ -50,6 +43,7 @@ jobs:
           ./gradlew assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: larios-rental-android-debug
+          name: larios-rental-v84-android
           path: app-v84/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 30
