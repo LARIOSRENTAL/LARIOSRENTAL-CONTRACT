@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Larios Rental Pro</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,sans-serif;color:#111827;background:#f4f6f8}*{box-sizing:border-box}body{margin:0}.app{max-width:760px;margin:auto;min-height:100vh;background:#fff}.top{padding:calc(18px + env(safe-area-inset-top)) 20px 18px;background:#111827;color:white}.top h1{margin:0;font-size:24px}.top p{margin:5px 0 0;color:#cbd5e1}.status{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:13px}.dot{width:9px;height:9px;border-radius:50%;background:#f59e0b}.dot.ok{background:#22c55e}.content{padding:20px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card{border:1px solid #e5e7eb;border-radius:16px;padding:18px;background:#fff;min-height:112px;box-shadow:0 2px 8px #0000000a}.card b{display:block;font-size:17px;margin-bottom:7px}.card span{color:#6b7280;font-size:13px}.wide{grid-column:1/-1}.section{margin:24px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#6b7280}.notice{padding:14px;border-radius:12px;background:#f3f4f6;font-size:14px;line-height:1.45}.foot{padding:20px;color:#9ca3af;text-align:center;font-size:12px}@media(max-width:430px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="top"><h1>Larios Rental Pro</h1><p>Gestión móvil de alquileres</p><div class="status"><i id="dot" class="dot"></i><span id="status">Comprobando configuración…</span></div></header>
+  <main class="content">
+    <div class="section">Operaciones</div>
+    <div class="grid">
+      <div class="card"><b>Clientes</b><span>Consulta y gestión de clientes.</span></div>
+      <div class="card"><b>Vehículos</b><span>Flota, disponibilidad y datos.</span></div>
+      <div class="card"><b>Contratos</b><span>Reservas, contratos y estados.</span></div>
+      <div class="card"><b>Documentos</b><span>Documentación asociada.</span></div>
+      <div class="card"><b>Conductores</b><span>Conductores vinculados a contratos.</span></div>
+      <div class="card"><b>Daños</b><span>Registro y seguimiento.</span></div>
+      <div class="card wide"><b>Sincronización Renthub</b><span>Estado de sincronización con los sistemas de Larios Rental.</span></div>
+    </div>
+    <div class="section">Estado</div><div class="notice" id="notice">Preparando conexión segura con Supabase.</div>
+  </main>
+  <footer class="foot">Larios Rental · V8.4 Android</footer>
+</div>
+<script src="config.js"></script>
+<script>
+(function(){var c=window.LARIOS_CONFIG||{},ok=!!(c.supabaseUrl&&c.supabasePublishableKey);document.getElementById('dot').classList.toggle('ok',ok);document.getElementById('status').textContent=ok?'Configuración Supabase disponible':'Configuración pendiente';document.getElementById('notice').textContent=ok?'La aplicación tiene cargada la configuración pública de Supabase. El siguiente paso es habilitar autenticación y operaciones contra el esquema real.':'Falta configurar la conexión pública de Supabase.';})();
+</script>
+</body>
+</html>
