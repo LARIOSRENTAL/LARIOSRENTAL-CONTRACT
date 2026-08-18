@@ -23,8 +23,22 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Inspect project
+        run: |
+          pwd
+          find . -maxdepth 2 -type f | sort | head -200
       - name: Install dependencies
         run: npm install
+      - name: Verify Capacitor
+        run: |
+          npx cap --version
+          test -f capacitor.config.json
+      - name: Create temporary web shell if frontend is not uploaded yet
+        run: |
+          if [ ! -f www/index.html ]; then
+            mkdir -p www
+            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Larios Rental</title></head><body><main><h1>Larios Rental</h1><p>Android bootstrap build.</p></main></body></html>' > www/index.html
+          fi
       - name: Create Android project
         run: npx cap add android
       - name: Sync web app
@@ -33,7 +47,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: larios-rental-android-debug
