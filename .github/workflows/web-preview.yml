@@ -6,6 +6,8 @@ on:
     branches: [agent/mobile-v84]
     paths:
       - "app-v84/www/**"
+      - "static/assets/**"
+      - "static/vendor/**"
       - ".github/workflows/web-preview.yml"
 
 permissions:
@@ -26,6 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Prepare original contract assets
+        run: |
+          mkdir -p app-v84/www/assets app-v84/www/vendor
+          cp static/assets/contrato-larios-normalizado.pdf app-v84/www/assets/
+          cp static/assets/damage-map.png app-v84/www/assets/
+          cp static/vendor/pdf-lib.min.js app-v84/www/vendor/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app-v84/www
