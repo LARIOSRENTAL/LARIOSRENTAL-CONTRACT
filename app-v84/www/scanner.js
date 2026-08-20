@@ -1,156 +1,66 @@
 window.LariosScanner=(function(){
-  let target='identity';
-  let lastFile=null;
-  let lastPath=null;
-  const $=id=>document.getElementById(id);
-
-  function isNative(){
-    return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
-  }
-  function plugin(name){
-    return window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins[name];
-  }
-  function setState(message){
-    const el=$('scanState');
-    if(el)el.textContent=message||'';
-  }
-
-  function open(kind){
-    target=kind==='keys'?'keys':'identity';
-    const title=$('scanTitle');
-    const help=$('scanHelp');
-    if(title)title.textContent=target==='keys'?'Fotografiar llavero':'Escanear documentación';
-    if(help)help.textContent=target==='keys'
-      ?'Haz una foto nítida de la etiqueta completa de las llaves. La app intentará detectar matrícula, grupo y combustible.'
-      :'Haz una foto nítida del DNI, pasaporte o permiso de conducir.';
-    const scan=$('scan');
-    const reservation=$('reservation');
-    if(scan)scan.classList.remove('hidden');
-    if(reservation)reservation.classList.add('hidden');
-    setState(isNative()?'Cámara y reconocimiento nativo preparados.':'Modo web: usa la cámara o fototeca del iPad.');
-  }
-
-  function close(){
-    const scan=$('scan');
-    const reservation=$('reservation');
-    if(scan)scan.classList.add('hidden');
-    if(reservation)reservation.classList.remove('hidden');
-  }
-
-  async function choose(){
-    if(isNative()&&plugin('Camera')){
-      try{
-        const photo=await plugin('Camera').getPhoto({
-          quality:92,
-          allowEditing:false,
-          resultType:'uri',
-          source:'CAMERA',
-          direction:'REAR',
-          correctOrientation:true
-        });
-        if(!photo||!photo.webPath)throw new Error('La cámara no devolvió una imagen.');
-        const preview=$('scanPreview');
-        if(preview){preview.src=photo.webPath;preview.classList.remove('hidden');}
-        setState('Foto tomada. Reconociendo texto…');
-        const blob=await (await fetch(photo.webPath)).blob();
-        lastFile=new File([blob],'capture.'+(photo.format||'jpeg'),{type:blob.type||'image/jpeg'});
-        await recognize(photo.path||photo.webPath);
-        return;
-      }catch(e){
-        setState('No se pudo usar la cámara nativa: '+e.message+'. Usa el selector de imagen.');
-      }
-    }
-    const input=$('scanFile');
-    if(input){input.value='';input.click();}
-  }
-
-  async function selected(input){
-    const file=input&&input.files&&input.files[0];
-    if(!file)return;
-    lastFile=file;
-    const preview=$('scanPreview');
-    const url=URL.createObjectURL(file);
-    if(preview){preview.src=url;preview.classList.remove('hidden');}
-    setState('Imagen capturada. Puedes guardarla y revisar los datos detectados.');
-    if(isNative())await recognize(url);
-  }
-
-  async function recognize(path){
-    try{
-      const tr=plugin('TextRecognition');
-      if(!tr)throw new Error('ML Kit no está disponible en esta compilación');
-      const result=await tr.processImage({path:path});
-      const text=(result&&result.text)?result.text:'';
-      if(!text)throw new Error('No se detectó texto legible');
-      const area=$('scanText');
-      if(area)area.value=text;
-      setState('Texto reconocido en el dispositivo. Revisa los datos antes de aplicarlos.');
-      apply(false);
-    }catch(e){
-      setState('Reconocimiento automático no disponible: '+e.message+'. Puedes introducir, pegar o dictar el texto manualmente.');
-    }
-  }
-
-  async function upload(){
-    if(!lastFile){alert('Primero haz una foto.');return null;}
-    try{
-      const ext=(lastFile.name&&lastFile.name.split('.').pop()||'jpg').toLowerCase();
-      const uuid=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now());
-      lastPath='mobile/'+new Date().toISOString().slice(0,10)+'/'+uuid+'.'+ext;
-      const response=await fetch(cfg.supabaseUrl+'/storage/v1/object/documents/'+lastPath,{
-        method:'POST',
-        headers:{
-          apikey:cfg.supabasePublishableKey,
-          Authorization:'Bearer '+token,
-          'Content-Type':lastFile.type||'image/jpeg',
-          'x-upsert':'false'
-        },
-        body:lastFile
-      });
-      if(!response.ok)throw new Error(await response.text());
-      setState('Foto guardada de forma privada en Supabase Storage.');
-      return lastPath;
-    }catch(e){
-      alert('No se pudo guardar la imagen: '+e.message);
-      return null;
-    }
-  }
-
-  function cleanUpper(value){return String(value||'').replace(/\s/g,'').toUpperCase();}
-
-  function apply(doClose){
-    if(typeof doClose==='undefined')doClose=true;
-    const area=$('scanText');
-    const text=(area&&area.value||'').trim();
-    if(!text){
-      if(doClose)alert('No hay texto reconocido para aplicar.');
-      return;
-    }
-    const lines=text.split(/\n+/).map(v=>v.trim()).filter(Boolean);
-
-    if(target==='keys'){
-      const plate=text.match(/\b\d{4}\s*[BCDFGHJKLMNPRSTVWXYZ]{3}\b/i);
-      if(plate&&$('vehicle_plate'))$('vehicle_plate').value=cleanUpper(plate[0]);
-      const group=text.match(/(?:GRUPO|GROUP|GRP|G)\s*[:\-]?\s*([A-Z0-9]{1,6})/i);
-      if(group&&$('vehicle_group'))$('vehicle_group').value=group[1].toUpperCase();
-      const fuel=text.match(/\b(DIESEL|GASOLINA|PETROL|HIBRIDO|HÍBRIDO|HYBRID|ELECTRICO|ELÉCTRICO|ELECTRIC)\b/i);
-      if(fuel&&$('fuel_type'))$('fuel_type').value=fuel[1].toUpperCase();
-      if($('vehicle_model')&&!$('vehicle_model').value&&lines.length)$('vehicle_model').value=lines[0];
-    }else{
-      const dni=text.match(/\b\d{8}[A-Z]\b/i);
-      const nie=text.match(/\b[XYZ]\d{7}[A-Z]\b/i);
-      const passport=text.match(/\b[A-Z]{1,3}\d{5,9}\b/i);
-      const documentMatch=dni||nie||passport;
-      if(documentMatch&&$('customer_document'))$('customer_document').value=documentMatch[0].toUpperCase();
-      const emailMatch=text.match(/[\w.+-]+@[\w.-]+\.[A-Z]{2,}/i);
-      if(emailMatch&&$('customer_email'))$('customer_email').value=emailMatch[0];
-      const licence=text.match(/(?:PERMISO|LICEN[CS]E|DRIVING\s+LICEN[CS]E)[^A-Z0-9]*([A-Z0-9-]{5,20})/i);
-      if(licence&&$('driving_license'))$('driving_license').value=licence[1].toUpperCase();
-      if($('customer_name')&&!$('customer_name').value&&lines.length)$('customer_name').value=lines[0];
-    }
-
-    if(doClose)close();
-  }
-
-  return {open:open,close:close,choose:choose,selected:selected,upload:upload,apply:apply,recognize:recognize};
+let target='identity',driverTarget='main',lastFile=null,lastPath=null;
+const $=id=>document.getElementById(id);
+function isNative(){return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())}
+function plugin(name){return window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins[name]}
+function setState(message){if($('scanState'))$('scanState').textContent=message||''}
+function loadScript(src){return new Promise((resolve,reject)=>{if([...document.scripts].some(s=>s.src===src))return resolve();const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}
+function open(kind,who){target=kind==='keys'?'keys':'identity';driverTarget=who==='additional'?'additional':'main';if($('scanTitle'))$('scanTitle').textContent=target==='keys'?'Fotografiar vehículo / llavero':(driverTarget==='additional'?'Escanear conductor adicional':'Escanear documentación');if($('scanHelp'))$('scanHelp').textContent=target==='keys'?'Haz una foto nítida de la etiqueta o documentación del vehículo. La app intentará detectar matrícula, grupo y combustible.':'Haz una foto nítida del DNI, pasaporte o permiso de conducir. En iPad la lectura OCR se realiza en el propio navegador.';if($('scanText'))$('scanText').value='';if($('scanPreview'))$('scanPreview').classList.add('hidden');$('scan')?.classList.remove('hidden');$('reservation')?.classList.add('hidden');setState('Preparado para capturar y reconocer el documento.')}
+function close(){$('scan')?.classList.add('hidden');$('reservation')?.classList.remove('hidden')}
+async function choose(){if(isNative()&&plugin('Camera')){try{const photo=await plugin('Camera').getPhoto({quality:92,allowEditing:false,resultType:'uri',source:'CAMERA',direction:'REAR',correctOrientation:true});if(!photo?.webPath)throw Error('La cámara no devolvió una imagen');const blob=await (await fetch(photo.webPath)).blob();lastFile=new File([blob],'capture.'+(photo.format||'jpeg'),{type:blob.type||'image/jpeg'});preview(photo.webPath);await recognize(photo.path||photo.webPath,lastFile);return}catch(e){setState('Cámara nativa no disponible: '+e.message+'. Abriendo cámara/fototeca web…')}}const input=$('scanFile');if(input){input.value='';input.click()}}
+function preview(url){const p=$('scanPreview');if(p){p.src=url;p.classList.remove('hidden')}}
+async function selected(input){const file=input?.files?.[0];if(!file)return;lastFile=file;const url=URL.createObjectURL(file);preview(url);setState('Imagen capturada. Reconociendo texto…');await recognize(url,file)}
+async function recognize(path,file){try{let resultText='';if(isNative()&&plugin('TextRecognition')){const r=await plugin('TextRecognition').processImage({path});resultText=r?.text||''}else{await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');if(!window.Tesseract)throw Error('No se pudo cargar el motor OCR');setState('Leyendo documento… puede tardar unos segundos.');const source=file||path;const r=await window.Tesseract.recognize(source,'spa+eng',{logger:m=>{if(m.status==='recognizing text')setState('Leyendo documento… '+Math.round((m.progress||0)*100)+'%')}});resultText=r?.data?.text||''}if(!resultText.trim())throw Error('No se detectó texto legible');if($('scanText'))$('scanText').value=resultText;setState('Texto reconocido. Aplicando datos al contrato…');apply(false);setState('Datos detectados y aplicados. Revísalos antes de guardar.')}catch(e){setState('No se pudo reconocer automáticamente: '+e.message+'. Puedes repetir la foto o introducir el texto manualmente.')}}
+async function upload(){if(!lastFile){alert('Primero haz una foto.');return null}try{const ext=(lastFile.name?.split('.').pop()||'jpg').toLowerCase();const uuid=crypto.randomUUID?crypto.randomUUID():String(Date.now());lastPath='mobile/'+new Date().toISOString().slice(0,10)+'/'+uuid+'.'+ext;const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/documents/'+lastPath,{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':lastFile.type||'image/jpeg','x-upsert':'false'},body:lastFile});if(!r.ok)throw Error(await r.text());setState('Foto guardada de forma privada.');return lastPath}catch(e){alert('No se pudo guardar la imagen: '+e.message);return null}}
+function isoDate(s){const m=String(s||'').match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);if(!m)return'';let y=m[3];if(y.length===2)y='20'+y;return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')}
+function set(id,v){if(v&&$(id))$(id).value=String(v).trim()}
+function cleanUpper(v){return String(v||'').replace(/\s/g,'').toUpperCase()}
+function parseSpanishLicence(text,prefix){const normalized=String(text||'').replace(/\r/g,'');const doc=(normalized.match(/\b\d{8}\s*[- ]?\s*[A-Z]\b/i)||normalized.match(/\b[XYZ]\d{7}[A-Z]\b/i)||[])[0];if(doc){set(prefix==='additional'?'additional_driving_license':'customer_document',cleanUpper(doc));set(prefix==='additional'?'additional_driving_license':'driving_license',cleanUpper(doc))}const birth=(normalized.match(/(?:^|\s)3\.?\s*[:\-]?\s*(\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4})/m)||[])[1];const issue=(normalized.match(/4a\.?\s*[:\-]?\s*(\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4})/i)||[])[1];const expiry=(normalized.match(/4b\.?\s*[:\-]?\s*(\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4})/i)||[])[1];if(prefix==='additional'){set('additional_birth_date',isoDate(birth));set('additional_license_issue',isoDate(issue));set('additional_license_expiry',isoDate(expiry));set('additional_license_issued_by',/ESPAÑA|SPAIN/i.test(normalized)?'España':'')}else{set('customer_birth_date',isoDate(birth));set('license_issue',isoDate(issue));set('license_expiry',isoDate(expiry));set('license_issued_by',/ESPAÑA|SPAIN/i.test(normalized)?'España':'España');set('customer_nationality',/ESPAÑA|SPAIN/i.test(normalized)?'Española':'')}
+const surname=(normalized.match(/(?:^|\n)\s*1\.?\s*[:\-]?\s*([^\n]+)/m)||[])[1];const given=(normalized.match(/(?:^|\n)\s*2\.?\s*[:\-]?\s*([^\n]+)/m)||[])[1];let name=[given,surname].filter(Boolean).join(' ').replace(/\s{2,}/g,' ').trim();name=name.replace(/\b(3\.?|4a\.?|4b\.?).*$/,'').trim();if(name.length>3){set(prefix==='additional'?'additional_name':'customer_name',name)}}
+function apply(doClose=true){const text=($('scanText')?.value||'').trim();if(!text){if(doClose)alert('No hay texto reconocido para aplicar.');return}const lines=text.split(/\n+/).map(v=>v.trim()).filter(Boolean);if(target==='keys'){const plate=(text.match(/\b\d{4}\s*[BCDFGHJKLMNPRSTVWXYZ]{3}\b/i)||[])[0];if(plate)set('vehicle_plate',cleanUpper(plate));const group=(text.match(/(?:GRUPO|GROUP|GRP|G)\s*[:\-]?\s*([A-Z0-9]{1,6})/i)||[])[1];if(group)set('vehicle_group',group.toUpperCase());const fuel=(text.match(/\b(DIESEL|GASOLINA|PETROL|HIBRIDO|HÍBRIDO|HYBRID|ELECTRICO|ELÉCTRICO|ELECTRIC)\b/i)||[])[1];if(fuel)set('fuel_type',fuel.toUpperCase());if(!$('vehicle_model')?.value&&lines[0])set('vehicle_model',lines[0])}else{parseSpanishLicence(text,driverTarget);const email=(text.match(/[\w.+-]+@[\w.-]+\.[A-Z]{2,}/i)||[])[0];if(email&&driverTarget==='main')set('customer_email',email);const phone=(text.match(/(?:\+34\s*)?[6789]\d{8}\b/)||[])[0];if(phone&&driverTarget==='main')set('customer_phone',phone)}if(window.LariosContractUX?.recalculate)LariosContractUX.recalculate();if(doClose)close()}
+return {open,close,choose,selected,upload,apply,recognize};
 })();
+
+window.LariosContractUX=(function(){
+const $=id=>document.getElementById(id);let pricing=[],currentId=null,wrapped=false,damageCanvas=null,signCanvas=null;
+function val(id){return ($(''+id)?.value||'').trim()}function num(id){return Number($(''+id)?.value||0)||0}function chk(id){return !!$(''+id)?.checked}function set(id,v){if($(id))$(id).value=v??''}function money(v){return Number(v||0).toFixed(2)}
+function fuelButtons(id,selected){return `<select id="${id}">${Array.from({length:9},(_,i)=>`<option value="${i}/8" ${i===selected?'selected':''}>${i}/8</option>`).join('')}</select>`}
+function categories(){return ['','A','B','C','D','F','G','H','I','J','K','L','Q','50cc','125cc','BICICLETA','E-BIKE'].map(v=>`<option value="${v}">${v?(['50cc','125cc','BICICLETA','E-BIKE'].includes(v)?v:'Grupo '+v):'Seleccionar grupo'}</option>`).join('')}
+function formHtml(){return `<div class="contractStep"><h3><span>01</span> Reserva</h3><div class="formGrid"><label>Grupo<select id="vehicle_group">${categories()}</select></label><label>Cantidad<input id="vehicle_quantity" type="number" min="1" value="1"></label><label>Recogida<input id="pickup_date" type="date"></label><label>Hora<input id="pickup_time" type="time"></label><label>Días<input id="rental_days" type="number" min="1" value="1"></label><label>Lugar de entrega<input id="pickup_location" placeholder="Hotel, oficina, aeropuerto…"></label><label>Habitación / referencia<input id="reservation_detail" placeholder="Hab. 308 / teléfono / referencia"></label><label>Colaborador / agencia<input id="agency" placeholder="Agencia o colaborador"></label><label>Devolución<input id="return_date" type="date"></label><label>Hora devolución<input id="return_time" type="time"></label><label>Lugar devolución<input id="return_location"></label></div></div>
+<div class="contractStep"><h3><span>02</span> Arrendatario</h3><div class="scanBar"><b>Rellenar desde foto</b><button type="button" onclick="LariosScanner.open('identity','main')">📷 Permiso / DNI / Pasaporte</button></div><div class="formGrid"><input id="customer_name" placeholder="Nombre y apellidos *"><input id="customer_document" placeholder="DNI / Pasaporte"><input id="customer_phone" placeholder="Teléfono"><input id="customer_email" type="email" placeholder="Email"><input id="customer_address" placeholder="Domicilio"><input id="driving_license" placeholder="Permiso conducir"><label>Fecha nacimiento<input id="customer_birth_date" type="date"></label><input id="customer_nationality" placeholder="Nacionalidad"><label>Expedición permiso<input id="license_issue" type="date"></label><label>Caducidad permiso<input id="license_expiry" type="date"></label><input id="license_issued_by" placeholder="Permiso obtenido en / país"></div></div>
+<div class="contractStep"><h3><span>03</span> Conductor adicional</h3><div class="scanBar"><b>Opcional</b><button type="button" onclick="LariosScanner.open('identity','additional')">📷 Escanear conductor adicional</button></div><div class="formGrid"><input id="additional_name" placeholder="Nombre y apellidos"><input id="additional_driving_license" placeholder="DNI / permiso"><label>Fecha nacimiento<input id="additional_birth_date" type="date"></label><label>Expedición<input id="additional_license_issue" type="date"></label><input id="additional_license_issued_by" placeholder="Obtenido en / país"><label>Caducidad<input id="additional_license_expiry" type="date"></label></div></div>
+<div class="contractStep"><h3><span>04</span> Vehículo, salida y devolución</h3><div class="scanBar"><b>Rellenar desde foto</b><button type="button" onclick="LariosScanner.open('keys')">📷 Vehículo</button></div><div class="formGrid"><input id="vehicle_model" placeholder="Vehículo / modelo"><input id="vehicle_plate" placeholder="Matrícula"><input id="vehicle_color" placeholder="Color"><select id="fuel_type"><option value="">Combustible</option><option>GASOLINA</option><option>DIESEL</option><option>HIBRIDO</option><option>ELECTRICO</option><option>NINGUNO</option></select><input id="km_out" type="number" min="0" placeholder="KM salida"><input id="km_in" type="number" min="0" placeholder="KM devolución"><label>Combustible salida${fuelButtons('fuel_out',8)}</label><label>Combustible devolución${fuelButtons('fuel_in',8)}</label><input class="wide" id="accessories_notes" placeholder="Accesorios / equipamiento entregado"></div></div>
+<div class="contractStep"><h3><span>05</span> Liquidación</h3><div class="toggleLine"><label><input id="tariff94" type="checkbox"> Tarifa 94</label><small>Aplica suplemento configurado</small></div><div class="toggleLine"><label><input id="full_insurance" type="checkbox"> Seguro completo</label><small>Concepto separado</small></div><div class="toggleLine"><label><input id="young_driver" type="checkbox"> Conductor joven &lt;25 años</label><input id="young_driver_amount" type="number" step="0.01" value="0" placeholder="Importe €"></div><div class="extrasTable"><b>Extra</b><b>Unidades</b><b>Precio unidad</b><b>Total</b>${extraRow('child_seat','Sillita')}${extraRow('gps','GPS')}${extraRow('phone_holder','Soporte móvil')}${extraRow('helmet','Casco / otro')}</div><div class="formGrid"><label>Alquiler<input id="rental_price" type="number" step="0.01" readonly></label><label>Seguro completo<input id="insurance_total" type="number" step="0.01" readonly></label><label>Franquicia<input id="franchise" type="number" step="0.01" readonly></label><label>Descuento %<input id="discount_percent" type="number" step="0.01" value="0"></label><label>IVA % informativo<input id="vat_percent" type="number" value="21"></label><label>Forma de pago<select id="payment_method"><option value="">Seleccionar</option><option>Tarjeta</option><option>Efectivo</option><option>Transferencia</option><option>Online</option></select></label><label>Total<input id="contract_total" type="number" step="0.01" readonly></label><label>Depósito<input id="deposit" type="number" step="0.01" value="0"></label></div><div id="priceBreakdown" class="priceBox"></div></div>
+<div class="contractStep"><h3><span>06</span> Estado del vehículo</h3><p class="muted">Dibuja sobre el esquema las zonas dañadas.</p><canvas id="damageCanvas" width="800" height="320"></canvas><button class="secondary" type="button" onclick="LariosContractUX.clearDamage()">Borrar marcas</button><textarea id="billing_notes" placeholder="Datos de facturación / observaciones"></textarea></div>
+<div class="contractStep"><h3><span>07</span> Firma del arrendatario</h3><canvas id="signatureCanvas" width="800" height="220"></canvas><button class="secondary" type="button" onclick="LariosContractUX.clearSignature()">Borrar firma</button></div>
+<div class="actions finalActions"><button class="secondary" type="button" onclick="LariosReservations.save('draft')">Guardar reserva</button><button class="primary" type="button" onclick="LariosReservations.save('confirmed')">Generar contrato y enviar</button></div>`}
+function extraRow(k,label){return `<label><input id="extra_${k}" type="checkbox"> ${label}</label><input id="extra_${k}_qty" type="number" min="1" value="1"><input id="extra_${k}_price" type="number" min="0" step="0.01" value="0"><b id="extra_${k}_total">0,00 €</b>`}
+function style(){const s=document.createElement('style');s.textContent='.contractStep{padding:18px 0;border-bottom:1px solid #e5e7eb}.contractStep h3{font-size:17px;margin:0 0 14px}.contractStep h3 span{color:#15803d;font-size:12px;margin-right:8px}.scanBar{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px dashed #86b99b;background:#f3faf5;border-radius:10px;padding:10px;margin-bottom:12px}.scanBar button{border:1px solid #86b99b;background:#fff;color:#166534;border-radius:8px;padding:9px 12px;font-weight:700}.toggleLine{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid #e5e7eb}.toggleLine input[type=checkbox]{width:auto}.extrasTable{display:grid;grid-template-columns:2fr .7fr .9fr .8fr;gap:8px;align-items:center;margin:14px 0}.extrasTable input[type=checkbox]{width:auto}.priceBox{background:#f3faf5;border:1px solid #bbdcc8;border-radius:10px;padding:12px;margin-top:12px}.priceLine{display:flex;justify-content:space-between;padding:5px 0}.priceTotal{font-size:20px;font-weight:800;border-top:1px solid #bdd2c5;margin-top:7px;padding-top:9px}#damageCanvas,#signatureCanvas{width:100%;height:auto;border:1px solid #d1d5db;border-radius:10px;background:#fff;touch-action:none}.finalActions{position:sticky;bottom:0;background:#fff;padding:12px 0;border-top:1px solid #e5e7eb;z-index:3}.agendaItem.locked:before{background:#dc2626!important;box-shadow:0 0 0 4px #fee2e2!important}.agendaItem.locked .agendaNumber{color:#dc2626!important}.agendaItem.locked button{background:#dc2626!important;color:#fff!important;border-color:#dc2626!important}@media(max-width:600px){.extrasTable{grid-template-columns:1.5fr .7fr .9fr .8fr;font-size:12px}.scanBar{align-items:stretch;flex-direction:column}}';document.head.appendChild(s)}
+function setupForm(){const f=$('reservationForm');if(!f||f.dataset.full==='1')return;f.dataset.full='1';f.innerHTML=formHtml();style();setupCanvas('damageCanvas',true);setupCanvas('signatureCanvas',false);wireCalc()}
+function setupCanvas(id,car){const c=$(id);if(!c)return;const ctx=c.getContext('2d');if(car){ctx.strokeStyle='#9ca3af';ctx.lineWidth=3;ctx.strokeRect(190,65,420,190);ctx.beginPath();ctx.ellipse(400,160,145,72,0,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(255,95);ctx.lineTo(545,95);ctx.moveTo(255,225);ctx.lineTo(545,225);ctx.stroke()}ctx.strokeStyle='#dc2626';ctx.lineWidth=4;ctx.lineCap='round';let drawing=false;function pos(e){const r=c.getBoundingClientRect(),p=e.touches?.[0]||e;return[(p.clientX-r.left)*c.width/r.width,(p.clientY-r.top)*c.height/r.height]}c.addEventListener('pointerdown',e=>{drawing=true;const [x,y]=pos(e);ctx.beginPath();ctx.moveTo(x,y)});c.addEventListener('pointermove',e=>{if(!drawing)return;const[x,y]=pos(e);ctx.lineTo(x,y);ctx.stroke()});['pointerup','pointerleave'].forEach(ev=>c.addEventListener(ev,()=>drawing=false));if(id==='damageCanvas')damageCanvas=c;else signCanvas=c}
+function clearCanvas(c,car){if(!c)return;const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);if(car)setupCanvas('damageCanvas',true)}
+function clearDamage(){const c=$('damageCanvas');c?.getContext('2d').clearRect(0,0,c.width,c.height);if(c){const ctx=c.getContext('2d');ctx.strokeStyle='#9ca3af';ctx.lineWidth=3;ctx.strokeRect(190,65,420,190);ctx.beginPath();ctx.ellipse(400,160,145,72,0,0,Math.PI*2);ctx.stroke();ctx.strokeStyle='#dc2626';ctx.lineWidth=4}}
+function clearSignature(){const c=$('signatureCanvas');c?.getContext('2d').clearRect(0,0,c.width,c.height)}
+async function loadPricing(){try{pricing=await api('pricing?select=*&active=eq.true&order=category');recalculate()}catch(e){console.warn('pricing',e)}}
+function key(){const v=val('vehicle_group');return ['50cc','125cc','BICICLETA','E-BIKE'].includes(v)?v:(v?'Grupo '+v:'')}
+function base(row,days){if(!row)return 0;if(row.pricing_type==='daily_tiers'){const d=days<=3?row.tier_1_3_daily:days<=7?row.tier_4_7_daily:row.tier_8_plus_daily;return Number(d||0)*days}if(days<=7)return Number(row['day_'+days]||0);return Number(row.day_7||0)+Number(row.extra_day||0)*(days-7)}
+function extrasTotal(){let t=0;['child_seat','gps','phone_holder','helmet'].forEach(k=>{const z=chk('extra_'+k)?Math.max(1,num('extra_'+k+'_qty'))*num('extra_'+k+'_price'):0;t+=z;if($('extra_'+k+'_total'))$('extra_'+k+'_total').textContent=money(z).replace('.',',')+' €'});return t}
+function recalculate(){const row=pricing.find(r=>r.category===key());const days=Math.max(1,num('rental_days')||1),qty=Math.max(1,num('vehicle_quantity')||1);let rental=base(row,days)*qty;if(chk('tariff94'))rental*=1+Number(row?.season_94_markup||20)/100;let insurance=0;if(chk('full_insurance')&&row)insurance=(Number(row.insurance_first_day||0)+Math.max(0,days-1)*Number(row.insurance_extra_day||0))*qty;const young=chk('young_driver')?num('young_driver_amount'):0,extras=extrasTotal(),subtotal=rental+insurance+young+extras,discount=subtotal*Math.max(0,num('discount_percent'))/100,total=Math.max(0,subtotal-discount);set('rental_price',money(rental));set('insurance_total',money(insurance));set('franchise',money(Number(row?.franchise||0)));set('contract_total',money(total));if($('priceBreakdown'))$('priceBreakdown').innerHTML=`<div class="priceLine"><span>Alquiler</span><b>${money(rental)} €</b></div><div class="priceLine"><span>Seguro completo</span><b>${money(insurance)} €</b></div><div class="priceLine"><span>Conductor joven</span><b>${money(young)} €</b></div><div class="priceLine"><span>Extras</span><b>${money(extras)} €</b></div><div class="priceLine"><span>Descuento</span><b>-${money(discount)} €</b></div><div class="priceLine priceTotal"><span>Total</span><b>${money(total)} €</b></div>${row?`<small>Tarifa oficial ${row.category}${chk('tariff94')?' · Tarifa 94':''} · ${days} día(s) · cantidad ${qty}</small>`:'<small>Selecciona el grupo para calcular la tarifa automáticamente.</small>'}`}
+function wireCalc(){['vehicle_group','vehicle_quantity','rental_days','tariff94','full_insurance','young_driver','young_driver_amount','discount_percent','extra_child_seat','extra_child_seat_qty','extra_child_seat_price','extra_gps','extra_gps_qty','extra_gps_price','extra_phone_holder','extra_phone_holder_qty','extra_phone_holder_price','extra_helmet','extra_helmet_qty','extra_helmet_price'].forEach(id=>{['change','input'].forEach(ev=>$(id)?.addEventListener(ev,recalculate))})}
+function payload(status){return {id:currentId||'',status,customer_name:val('customer_name'),customer_document:val('customer_document'),customer_email:val('customer_email'),customer_phone:val('customer_phone'),customer_nationality:val('customer_nationality'),customer_address:val('customer_address'),customer_birth_date:val('customer_birth_date'),driving_license:val('driving_license'),license_issued_by:val('license_issued_by'),license_issue:val('license_issue'),license_expiry:val('license_expiry'),additional_name:val('additional_name'),additional_driving_license:val('additional_driving_license'),additional_license_issued_by:val('additional_license_issued_by'),additional_birth_date:val('additional_birth_date'),additional_license_issue:val('additional_license_issue'),additional_license_expiry:val('additional_license_expiry'),vehicle_group:val('vehicle_group'),vehicle_quantity:String(Math.max(1,num('vehicle_quantity')||1)),vehicle_plate:val('vehicle_plate'),vehicle_model:val('vehicle_model'),vehicle_color:val('vehicle_color'),fuel_type:val('fuel_type'),km_out:String(num('km_out')||''),km_in:String(num('km_in')||''),fuel_out:val('fuel_out'),fuel_in:val('fuel_in'),accessories_notes:val('accessories_notes'),pickup_date:val('pickup_date'),pickup_time:val('pickup_time'),pickup_location:val('pickup_location'),return_date:val('return_date'),return_time:val('return_time'),return_location:val('return_location'),rental_days:String(Math.max(1,num('rental_days')||1)),reservation_detail:val('reservation_detail'),agency:val('agency'),tariff94:chk('tariff94'),rental_price:money(num('rental_price')),full_insurance:chk('full_insurance'),insurance_total:money(num('insurance_total')),young_driver:chk('young_driver'),young_driver_amount:money(num('young_driver_amount')),discount_percent:money(num('discount_percent')),vat_percent:val('vat_percent')||'21',total:money(num('contract_total')),deposit:money(num('deposit')),payment_method:val('payment_method'),franchise:money(num('franchise')),billing_notes:val('billing_notes'),extra_child_seat:chk('extra_child_seat'),extra_child_seat_qty:num('extra_child_seat_qty'),extra_child_seat_price:num('extra_child_seat_price'),extra_gps:chk('extra_gps'),extra_gps_qty:num('extra_gps_qty'),extra_gps_price:num('extra_gps_price'),extra_phone_holder:chk('extra_phone_holder'),extra_phone_holder_qty:num('extra_phone_holder_qty'),extra_phone_holder_price:num('extra_phone_holder_price'),extra_helmet:chk('extra_helmet'),extra_helmet_qty:num('extra_helmet_qty'),extra_helmet_price:num('extra_helmet_price')}}
+async function rpcSave(p){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_save_contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_payload:p})});if(!r.ok)throw Error(await r.text());return r.json()}
+async function getRows(){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_list_contracts',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error(await r.text());return r.json()}
+function hydrate(x){if(!x)return;const fields=['customer_name','customer_document','customer_email','customer_phone','customer_nationality','customer_address','customer_birth_date','driving_license','license_issued_by','license_issue','license_expiry','additional_name','additional_driving_license','additional_license_issued_by','additional_birth_date','additional_license_issue','additional_license_expiry','vehicle_group','vehicle_quantity','vehicle_plate','vehicle_model','vehicle_color','fuel_type','km_out','km_in','fuel_out','fuel_in','accessories_notes','pickup_location','return_location','rental_days','reservation_detail','agency','young_driver_amount','discount_percent','vat_percent','deposit','payment_method','billing_notes'];fields.forEach(k=>set(k,x[k]??''));if(x.pickup_at){const d=new Date(x.pickup_at);set('pickup_date',dateMadrid(d));set('pickup_time',timeMadrid(d))}if(x.return_at){const d=new Date(x.return_at);set('return_date',dateMadrid(d));set('return_time',timeMadrid(d))}['tariff94','full_insurance','young_driver','extra_child_seat','extra_gps','extra_phone_holder','extra_helmet'].forEach(k=>{if($(k))$(k).checked=!!x[k]});['child_seat','gps','phone_holder','helmet'].forEach(k=>{set('extra_'+k+'_qty',x['extra_'+k+'_qty']||1);set('extra_'+k+'_price',x['extra_'+k+'_price']||0)});recalculate()}
+function dateMadrid(d){const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value}function timeMadrid(d){return new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).format(d)}
+async function saveDraft(){if(!currentId)return alert('Abre una reserva desde la agenda para editarla.');try{recalculate();await rpcSave(payload('draft'));alert('Reserva guardada.');LariosReservations.close()}catch(e){alert('No se pudo guardar: '+e.message)}}
+function loadScript(src){return new Promise((res,rej)=>{if([...document.scripts].some(s=>s.src===src))return res();const q=document.createElement('script');q.src=src;q.onload=res;q.onerror=rej;document.head.appendChild(q)})}
+async function pdf(record){await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js');const jsPDF=window.jspdf?.jsPDF;if(!jsPDF)throw Error('No se pudo cargar el generador PDF');const doc=new jsPDF('p','mm','a4');let y=16;doc.setFontSize(17);doc.text('LARIOS RENTAL',15,y);y+=8;doc.setFontSize(12);doc.text('Contrato '+String(record.contract_number||''),15,y);y+=9;doc.setFontSize(9);const rows=[['Cliente',val('customer_name')],['DNI/Pasaporte',val('customer_document')],['Teléfono',val('customer_phone')],['Email',val('customer_email')],['Permiso',val('driving_license')],['Conductor adicional',val('additional_name')],['Vehículo',[val('vehicle_group'),val('vehicle_model'),val('vehicle_plate')].filter(Boolean).join(' · ')],['Cantidad',val('vehicle_quantity')||'1'],['Entrega',`${val('pickup_date')} ${val('pickup_time')} · ${val('pickup_location')}`],['Devolución',`${val('return_date')} ${val('return_time')} · ${val('return_location')}`],['Combustible',`${val('fuel_out')} → ${val('fuel_in')}`],['Días',val('rental_days')],['Tarifa 94',chk('tariff94')?'Sí':'No'],['Seguro completo',chk('full_insurance')?'Sí':'No'],['Conductor <25',chk('young_driver')?'Sí':'No'],['Extras',extrasDescription()],['Total',money(num('contract_total'))+' EUR'],['Observaciones',val('billing_notes')]];for(const [a,b] of rows){const lines=doc.splitTextToSize(`${a}: ${b||'-'}`,180);doc.text(lines,15,y);y+=5*lines.length+1;if(y>245){doc.addPage();y=16}}if(damageCanvas){doc.addPage();doc.setFontSize(12);doc.text('Estado del vehículo',15,16);doc.addImage(damageCanvas.toDataURL('image/png'),'PNG',15,25,180,72)}if(signCanvas){doc.addPage();doc.setFontSize(12);doc.text('Firma del arrendatario',15,16);doc.addImage(signCanvas.toDataURL('image/png'),'PNG',15,25,180,50)}const blob=doc.output('blob');doc.save(String(record.contract_number||'contrato')+'.pdf');return blob}
+function extrasDescription(){const out=[];[['child_seat','Sillita'],['gps','GPS'],['phone_holder','Soporte móvil'],['helmet','Casco/otro']].forEach(([k,l])=>{if(chk('extra_'+k))out.push(l+' x'+Math.max(1,num('extra_'+k+'_qty')))});return out.join(', ')||'Ninguno'}
+async function uploadPdf(record,blob){const name=record.id+'/'+String(record.contract_number||'contrato').replace(/[^A-Za-z0-9_-]/g,'')+'.pdf';const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/contracts/'+name,{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/pdf','x-upsert':'true'},body:blob});if(!r.ok)throw Error('No se pudo guardar el PDF: '+await r.text());const p=await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(record.id),{method:'PATCH',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({pdf_path:name})});if(!p.ok)throw Error('PDF guardado pero no enlazado al contrato');return name}
+async function sendEmail(record){if(!val('customer_email'))return 'El cliente no tiene email; no se envió correo.';const r=await fetch(cfg.supabaseUrl+'/functions/v1/send-contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({contract_id:record.id})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Error al enviar correo');return 'Correo enviado al cliente.'}
+async function generate(){if(!currentId)return alert('Abre una reserva desde la agenda para generar el contrato.');if(!val('customer_name'))return alert('Falta el nombre del cliente.');try{recalculate();let record=await rpcSave(payload('confirmed'));currentId=record.id;const blob=await pdf(record);await uploadPdf(record,blob);let msg='PDF descargado y almacenado.';try{msg+=' '+await sendEmail(record)}catch(e){msg+=' No se pudo enviar el correo: '+e.message}alert('Contrato generado. '+msg);LariosReservations.close();setTimeout(()=>{if(typeof changeAgendaDate==='function')changeAgendaDate()},100)}catch(e){alert('No se pudo generar el contrato: '+e.message)}}
+function wrap(){if(wrapped||!window.LariosReservations)return;wrapped=true;const oldEdit=LariosReservations.edit.bind(LariosReservations);const oldSave=LariosReservations.save.bind(LariosReservations);LariosReservations.edit=function(id){currentId=id;oldEdit(id);setTimeout(async()=>{setupForm();try{const rows=await getRows();hydrate(rows.find(x=>x.id===id))}catch(e){console.warn(e)}},0)};LariosReservations.save=function(status){return status==='confirmed'?generate():saveDraft()}}
+function init(){setupForm();loadPricing();wrap()}
+return {init,recalculate,clearDamage,clearSignature};
+})();
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(LariosContractUX.init,0));else setTimeout(LariosContractUX.init,0);
