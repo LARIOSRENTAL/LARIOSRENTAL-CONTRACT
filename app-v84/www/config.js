@@ -6,12 +6,14 @@ window.LARIOS_CONFIG = window.LARIOS_CONFIG || {
   contractEmailEndpoint: 'https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/send-contract'
 };
 
-// El scanner-v5 crea la carcasa visual y cambia el pie al cargarse. Scanner V6 se
-// carga después y es el motor final. Marcamos la versión una vez terminada toda la
-// carga para que el pie no vuelva a mostrar V5 por el orden de los scripts.
+// Cargar el guard del scanner al final, despues de scanner.js, V5 y V6.
+// Evita que codigo antiguo intente escribir en #scanTitle antes de crear la vista.
 window.addEventListener('load', function () {
-  setTimeout(function () {
+  var s = document.createElement('script');
+  s.src = 'scanner-open-guard-v6.js?v=2';
+  s.onload = function () {
     var f = document.querySelector('.foot');
-    if (f) f.textContent = 'Larios Rental · V8.4 · Scanner V6 WEB · FINAL';
-  }, 800);
+    if (f) f.textContent = 'Larios Rental · V8.4 · Scanner V6 WEB · OPEN FIX';
+  };
+  document.body.appendChild(s);
 });
