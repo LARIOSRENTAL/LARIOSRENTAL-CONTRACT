@@ -5,3 +5,13 @@ window.LARIOS_CONFIG = window.LARIOS_CONFIG || {
   requireEmployeeLogin: true,
   contractEmailEndpoint: 'https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/send-contract'
 };
+
+// El scanner-v5 crea la carcasa visual y cambia el pie al cargarse. Scanner V6 se
+// carga después y es el motor final. Marcamos la versión una vez terminada toda la
+// carga para que el pie no vuelva a mostrar V5 por el orden de los scripts.
+window.addEventListener('load', function () {
+  setTimeout(function () {
+    var f = document.querySelector('.foot');
+    if (f) f.textContent = 'Larios Rental · V8.4 · Scanner V6 WEB · FINAL';
+  }, 800);
+});
