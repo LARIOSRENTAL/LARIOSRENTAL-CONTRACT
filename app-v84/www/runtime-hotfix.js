@@ -4,7 +4,30 @@ const nativeFetch=window.fetch.bind(window);
 function cloneOptions(opt,body){const o={...(opt||{})};o.body=body;return o}
 window.fetch=async function(input,opt){
   const url=typeof input==='string'?input:(input&&input.url)||'';
-  const isSave=/\/rest\/v1\/rpc\/app_save_contract(?:\?|$)/.test(url) && String(opt?.method||'GET').toUpperCase()==='POST';
+  const method=String(opt?.method||'GET').toUpperCase();
+
+  // The email Edge Function intentionally returns HTTP 200 for Gmail/OAuth
+  // diagnostics so Safari cannot hide the response behind a generic
+  // "Load failed". Convert {ok:false,...} back into an application error
+  // that the existing contract flow can display to the user.
+  const isSend=/\/functions\/v1\/send-contract(?:\?|$)/.test(url) && method==='POST';
+  if(isSend){
+    const response=await nativeFetch(input,opt);
+    let data=null;
+    try{data=await response.clone().json()}catch(_){return response}
+    if(data && data.ok===false){
+      const stage=String(data.stage||'email');
+      const detail=String(data.error||'Error desconocido');
+      return new Response(JSON.stringify({error:'['+stage+'] '+detail,stage,detail}),{
+        status:502,
+        statusText:'Email delivery failed',
+        headers:{'Content-Type':'application/json; charset=utf-8'}
+      });
+    }
+    return response;
+  }
+
+  const isSave=/\/rest\/v1\/rpc\/app_save_contract(?:\?|$)/.test(url) && method==='POST';
   if(!isSave)return nativeFetch(input,opt);
   const response=await nativeFetch(input,opt);
   if(response.ok)return response;
