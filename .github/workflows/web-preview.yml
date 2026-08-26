@@ -1,9 +1,10 @@
 name: Publish V8.4 Web Preview
 
+# Production source of truth: agent/mobile-v84
 on:
   workflow_dispatch:
   push:
-    branches: [main, agent/mobile-v84]
+    branches: [agent/mobile-v84]
     paths:
       - "app-v84/www/**"
       - "static/assets/**"
