@@ -1,5 +1,6 @@
 name: Publish V8.4 Web Preview
 
+# Production source of truth: agent/mobile-v84
 on:
   workflow_dispatch:
   push:
