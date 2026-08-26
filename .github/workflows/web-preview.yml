@@ -3,7 +3,7 @@ name: Publish V8.4 Web Preview
 on:
   workflow_dispatch:
   push:
-    branches: [agent/mobile-v84]
+    branches: [main, agent/mobile-v84]
     paths:
       - "app-v84/www/**"
       - "static/assets/**"
