@@ -13,7 +13,7 @@ window.addEventListener('load', function () {
   s.src = 'scanner-open-guard-v6.js?v=2';
   s.onload = function () {
     var f = document.querySelector('.foot');
-    if (f) f.textContent = 'Larios Rental · V8.4 · Scanner V6 WEB · OPEN FIX';
+    if (f) f.textContent = 'Larios Rental · V8.4 · PRECIOS V7 · AMPLIACIONES V2';
   };
   document.body.appendChild(s);
 });
