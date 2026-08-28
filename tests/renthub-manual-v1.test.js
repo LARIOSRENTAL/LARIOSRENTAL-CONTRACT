@@ -13,6 +13,7 @@ assert.match(source,/Eliminar copia local/);
 assert.match(source,/pendiente de verificar PDF/);
 assert.match(source,/se volverá a comprobar/);
 assert.match(source,/Esta acción no se puede deshacer/);
+assert.match(source,/LariosReservations\.loadAgenda=async function/);
 const edge=fs.readFileSync(require.resolve('../supabase/functions/renthub-transfer/index.ts'),'utf8');
 assert.match(edge,/send_confirmation_email", "0"/);
 assert.match(edge,/booking\/details/);
