@@ -47,6 +47,32 @@ async function renthubFetch(path: string, init: RequestInit = {}, retry = true):
   return data;
 }
 
+async function cacheStatus(service: any) {
+  const { data, error } = await service.from("renthub_cache").select("resource_type,cached_at,expires_at").order("resource_type");
+  if (error) throw new Error(`Renthub cache status failed: ${error.message}`);
+  return { resources: data || [], contains_personal_data: false };
+}
+
+async function refreshCatalogueCache(service: any, userId: string) {
+  const catalogues = [
+    ["parameters", "/module/rental/api/partner/config/parameters"],
+    ["locations", "/module/rental/api/partner/config/locations"],
+    ["categories", "/module/rental/api/partner/config/categories"],
+  ] as const;
+  const refreshed = [];
+  for (const [resourceType, path] of catalogues) {
+    const response = await renthubFetch(path);
+    const payload = response?.result ?? response;
+    const { error } = await service.from("renthub_cache").upsert({
+      resource_type: resourceType, payload, source_hash: await digest(payload),
+      cached_at: new Date().toISOString(), expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), updated_by: userId,
+    }, { onConflict: "resource_type" });
+    if (error) throw new Error(`Renthub ${resourceType} cache failed: ${error.message}`);
+    refreshed.push(resourceType);
+  }
+  return refreshed;
+}
+
 let userTokenCache = "";
 async function userToken(force = false) {
   if (!force && userTokenCache) return userTokenCache;
@@ -105,8 +131,10 @@ async function handler(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const action = String(body.action || "status"), config = configuration();
-  if (action === "status") return json({ configured: config.enabled && config.ready, purge_configured: config.purgeReady, activation_pending: !config.enabled, missing: config.missing });
+  if (action === "status") return json({ configured: config.enabled && config.ready, purge_configured: config.purgeReady, activation_pending: !config.enabled, missing: config.missing, cache: await cacheStatus(service) });
   if (!config.enabled || !config.ready) return json({ error: "RENTHUB_NOT_CONFIGURED", activation_pending: true, missing: config.missing }, 503);
+
+  if (action === "refresh_cache") return json({ refreshed: await refreshCatalogueCache(service, userData.user.id), cache: await cacheStatus(service) });
 
   const contractId = String(body.contract_id || "");
   if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
