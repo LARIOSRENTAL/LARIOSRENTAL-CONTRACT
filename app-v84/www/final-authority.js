@@ -1,5 +1,12 @@
 (function(){
 'use strict';
+function installRoleAccess(){
+  if(document.querySelector('script[data-role-access],script[src*="role-access-v1.js"]'))return;
+  const access=document.createElement('script');
+  access.src='role-access-v1.js?v=2';
+  access.dataset.roleAccess='1';
+  document.body.appendChild(access);
+}
 function installAuthoritativeFlow(){
   if(!window.LariosReservations)return;
   const old=document.getElementById('lr-authority-reload');
@@ -11,5 +18,6 @@ function installAuthoritativeFlow(){
   s.onerror=function(){console.error('Could not reload PDF authority v3');};
   document.body.appendChild(s);
 }
+installRoleAccess();
 setTimeout(installAuthoritativeFlow,3000);
 })();
