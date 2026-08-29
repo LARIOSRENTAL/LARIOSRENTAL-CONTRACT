@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+global.window=global;global.document={readyState:'loading',addEventListener(){},createElement(){return{}},head:{appendChild(){}}};
+require('../app-v84/www/stripe-checkout-v1.js');
+assert.equal(global.LariosStripe.__test.isCard('Tarjeta'),true);
+assert.equal(global.LariosStripe.__test.isCard('Efectivo'),false);
+const ui=fs.readFileSync(require.resolve('../app-v84/www/stripe-checkout-v1.js'),'utf8');
+assert.match(ui,/saveDraft/);assert.match(ui,/location\.assign\(checkout\.checkout_url\)/);assert.match(ui,/stripe\('verify'/);assert.match(ui,/no se ha realizado ningún cargo/);
+const checkout=fs.readFileSync(require.resolve('../supabase/functions/stripe-checkout/index.ts'),'utf8');
+assert.match(checkout,/2026-08-26\.dahlia/);assert.match(checkout,/Idempotency-Key/);assert.match(checkout,/amount_total/);assert.match(checkout,/payment_status === "paid"/);assert.match(checkout,/STRIPE_NOT_CONFIGURED/);
+const webhook=fs.readFileSync(require.resolve('../supabase/functions/stripe-webhook/index.ts'),'utf8');
+assert.match(webhook,/Stripe-Signature/);assert.match(webhook,/HMAC/);assert.match(webhook,/amountMatches/);assert.match(webhook,/referenceMatches/);assert.match(webhook,/checkout\.session\.completed/);
+console.log('Stripe Checkout flow: ok');
