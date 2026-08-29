@@ -131,6 +131,6 @@ function css(){const s=document.createElement('style');s.textContent='.agendaLif
 function statusCss(){const s=document.createElement('style');s.textContent='.lrLifecycleStatus{margin-top:14px;padding:12px;border:1px solid #86b99b;background:#f0fdf4;color:#166534;border-radius:10px;font-weight:700}.lrLifecycleStatus.error{border-color:#fca5a5;background:#fef2f2;color:#b91c1c}';document.head.appendChild(s)}
 window.LariosLifecycle={extend:openExtension,generateExtension:generateExtensionById,changeVehicle:openVehicleChange,close:closePage,confirmDeposit:id=>markReturned(id,true),__test:{baseRental,extensionCalculation,calculateTotal,setPricing:rows=>{pricing=rows}}};
 if(!document.querySelector?.('script[data-renthub-manual]')){const renthubScript=document.createElement('script');renthubScript.src='renthub-manual-v1.js?v=3';renthubScript.dataset.renthubManual='1';document.head.appendChild(renthubScript)}
-if(!document.querySelector?.('script[data-contract-panel]')){const panelScript=document.createElement('script');panelScript.src='contract-panel-v1.js?v=1';panelScript.dataset.contractPanel='1';document.head.appendChild(panelScript)}
+if(!document.querySelector?.('script[data-contract-panel]')){const panelScript=document.createElement('script');panelScript.src='contract-panel-v1.js?v=2';panelScript.dataset.contractPanel='1';document.head.appendChild(panelScript)}
 css();statusCss();if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,3800));else setTimeout(install,3800);
 })();
