@@ -19,6 +19,7 @@ assert.match(ui,/app_metadata/);
 assert.match(ui,/if\(!isAdmin\(\)\)button\.disabled=true/);
 assert.doesNotMatch(ui,/button\.disabled=!isAdmin/);
 assert.match(ui,/__lariosRoleSessionHook/);
+assert.match(ui,/markVersion/);
 const panel=fs.readFileSync(require.resolve('../app-v84/www/contract-panel-v1.js'),'utf8');
 assert.match(panel,/data-admin-only="true"/);
 assert.match(panel,/requireAdmin\('enviar los contratos pendientes a Renthub'\)/);

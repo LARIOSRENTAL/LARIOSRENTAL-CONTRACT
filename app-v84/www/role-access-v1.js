@@ -52,13 +52,14 @@ function pricingGuide(){
   const pricing=$('pricing');if(!pricing||$('lrPricingAccessNote'))return;
   const note=document.createElement('div');note.id='lrPricingAccessNote';note.className='lrPricingAccessNote';note.textContent=isAdmin()?'Consulta de tarifas · su modificación es administrativa.':'Consulta de tarifas · 🔒 modificar la tabla oficial requiere un administrador.';pricing.insertAdjacentElement('afterend',note);
 }
+function markVersion(){const footer=document.querySelector('.foot');if(footer&&!footer.textContent.includes('PERMISOS V1'))footer.textContent=footer.textContent.trim()+' · PERMISOS V1'}
 function decorate(){
   if(decorating)return;decorating=true;
   requestAnimationFrame(()=>{
     document.body.classList.toggle('lrRoleAdmin',isAdmin());
     document.body.classList.toggle('lrRoleEmployee',isEmployee());
     document.body.classList.toggle('lrRoleMissing',state.ready&&!isStaff());
-    identityBar();reservationGuide();lifecycleGuide();pricingGuide();
+    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();
     document.querySelectorAll('[data-admin-only="true"]').forEach(button=>{
       if(!isAdmin())button.disabled=true;
       button.setAttribute('aria-disabled',String(button.disabled));
