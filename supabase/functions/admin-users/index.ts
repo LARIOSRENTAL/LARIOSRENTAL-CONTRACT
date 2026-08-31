@@ -10,7 +10,6 @@ const cors = {
 const env = (name: string) => (Deno.env.get(name) || "").trim();
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: cors });
 const allowedRoles = new Set(["admin", "employee", "none"]);
-const appUrl = "https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/";
 const safeUser = (user: any) => ({
   id: user.id,
   email: user.email || "",
@@ -49,34 +48,28 @@ async function handler(req: Request) {
     return json({ users: users.map(safeUser).sort((a, b) => a.email.localeCompare(b.email, "es")), current_user_id: caller.id });
   }
 
-  if (action === "invite_user") {
+  if (action === "create_user") {
     const email = String(body.email || "").trim().toLowerCase();
+    const password = String(body.password || "");
     const role = String(body.role || "employee");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !allowedRoles.has(role) || role === "none") {
-      return json({ error: "INVALID_INVITATION", message: "Indica un email válido y el permiso Empleado o Administrador." }, 400);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 10 || !allowedRoles.has(role) || role === "none") {
+      return json({ error: "INVALID_USER", message: "Indica un email válido, una contraseña de al menos 10 caracteres y el permiso Empleado o Administrador." }, 400);
     }
-    const { data: invitedData, error: inviteError } = await service.auth.admin.inviteUserByEmail(email, { redirectTo: `${appUrl}?auth_action=invite` });
-    const invited = invitedData?.user;
-    if (inviteError || !invited) return json({ error: "INVITATION_FAILED", message: inviteError?.message || "No se pudo enviar la invitación." }, 409);
-    const appMetadata = { ...(invited.app_metadata || {}), role };
-    const { data: updatedData, error: updateError } = await service.auth.admin.updateUserById(invited.id, { app_metadata: appMetadata });
-    if (updateError || !updatedData?.user) {
-      await service.auth.admin.deleteUser(invited.id).catch(() => undefined);
-      return json({ error: "INVITATION_ROLE_FAILED", message: updateError?.message || "No se pudo asignar el permiso a la invitación." }, 500);
-    }
-    return json({ user: safeUser(updatedData.user), message: `Invitación enviada a ${email}. La persona creará su propia contraseña.` });
+    const { data: createdData, error: createError } = await service.auth.admin.createUser({ email, password, email_confirm: true, app_metadata: { role } });
+    if (createError || !createdData?.user) return json({ error: "USER_CREATE_FAILED", message: createError?.message || "No se pudo crear el usuario." }, 409);
+    return json({ user: safeUser(createdData.user), message: `Cuenta ${email} creada con permiso de ${role === "admin" ? "Administrador" : "Empleado"}.` });
   }
 
-  if (action === "reset_password") {
+  if (action === "set_password") {
     const userId = String(body.user_id || "");
-    if (!/^[0-9a-f-]{36}$/i.test(userId)) return json({ error: "INVALID_USER" }, 400);
+    const password = String(body.password || "");
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || password.length < 10) return json({ error: "INVALID_PASSWORD", message: "La contraseña debe tener al menos 10 caracteres." }, 400);
     const { data: targetData, error: targetError } = await service.auth.admin.getUserById(userId);
     const target = targetData?.user;
     if (targetError || !target?.email) return json({ error: "USER_NOT_FOUND" }, 404);
-    const publicClient = createClient(env("SUPABASE_URL"), env("SUPABASE_ANON_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
-    const { error: resetError } = await publicClient.auth.resetPasswordForEmail(target.email, { redirectTo: `${appUrl}?auth_action=recovery` });
-    if (resetError) return json({ error: "RESET_FAILED", message: resetError.message }, 500);
-    return json({ message: `Enlace de recuperación enviado a ${target.email}.` });
+    const { error: passwordError } = await service.auth.admin.updateUserById(userId, { password });
+    if (passwordError) return json({ error: "PASSWORD_UPDATE_FAILED", message: passwordError.message }, 500);
+    return json({ message: `Contraseña de ${target.email} actualizada.` });
   }
 
   if (action === "delete_user") {
