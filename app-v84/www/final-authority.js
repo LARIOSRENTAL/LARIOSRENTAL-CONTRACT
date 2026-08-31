@@ -7,6 +7,13 @@ function installRoleAccess(){
   access.dataset.roleAccess='1';
   document.body.appendChild(access);
 }
+function installAdminUsers(){
+  if(document.querySelector('script[data-admin-users],script[src*="admin-users-v1.js"]'))return;
+  const users=document.createElement('script');
+  users.src='admin-users-v1.js?v=1';
+  users.dataset.adminUsers='1';
+  document.body.appendChild(users);
+}
 function installAuthoritativeFlow(){
   if(!window.LariosReservations)return;
   const old=document.getElementById('lr-authority-reload');
@@ -19,5 +26,6 @@ function installAuthoritativeFlow(){
   document.body.appendChild(s);
 }
 installRoleAccess();
+installAdminUsers();
 setTimeout(installAuthoritativeFlow,3000);
 })();
