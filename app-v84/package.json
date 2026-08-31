@@ -4,7 +4,7 @@
   "private": true,
   "description": "Aplicacion web y nativa de gestion de Larios Rental",
   "scripts": {
-    "test": "node tests/smoke.mjs",
+    "test": "node ../tests/run-all.js",
     "serve": "python3 -m http.server 4173 --directory www",
     "sync": "npx cap sync",
     "android:add": "npx cap add android",
