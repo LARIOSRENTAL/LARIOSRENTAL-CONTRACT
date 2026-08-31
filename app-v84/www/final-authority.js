@@ -36,7 +36,7 @@ function installReservationAdmin(){
   document.body.appendChild(reservations);
 }
 function installOperationsPanels(){
-  const modules=[['vehicle-manager-v1.js?v=2','vehicle-manager'],['pricing-manager-v1.js?v=2','pricing-manager'],['contract-download-v1.js?v=2','contract-download']];
+  const modules=[['vehicle-manager-v1.js?v=3','vehicle-manager'],['pricing-manager-v1.js?v=3','pricing-manager'],['contract-download-v1.js?v=3','contract-download']];
   modules.forEach(([src,key])=>{if(document.querySelector(`script[data-${key}]`))return;const s=document.createElement('script');s.src=src;s.setAttribute('data-'+key,'1');document.body.appendChild(s)});
 }
 function installAuthoritativeFlow(){
