@@ -10,9 +10,23 @@ function installRoleAccess(){
 function installAdminUsers(){
   if(document.querySelector('script[data-admin-users],script[src*="admin-users-v1.js"]'))return;
   const users=document.createElement('script');
-  users.src='admin-users-v1.js?v=1';
+  users.src='admin-users-v1.js?v=2';
   users.dataset.adminUsers='1';
   document.body.appendChild(users);
+}
+function installPasswordAccess(){
+  if(document.querySelector('script[data-password-access],script[src*="auth-access-v1.js"]'))return;
+  const auth=document.createElement('script');
+  auth.src='auth-access-v1.js?v=1';
+  auth.dataset.passwordAccess='1';
+  document.body.appendChild(auth);
+}
+function installReservationAdmin(){
+  if(document.querySelector('script[data-reservation-admin],script[src*="reservation-admin-v1.js"]'))return;
+  const reservations=document.createElement('script');
+  reservations.src='reservation-admin-v1.js?v=1';
+  reservations.dataset.reservationAdmin='1';
+  document.body.appendChild(reservations);
 }
 function installAuthoritativeFlow(){
   if(!window.LariosReservations)return;
@@ -27,5 +41,7 @@ function installAuthoritativeFlow(){
 }
 installRoleAccess();
 installAdminUsers();
+installPasswordAccess();
+installReservationAdmin();
 setTimeout(installAuthoritativeFlow,3000);
 })();
