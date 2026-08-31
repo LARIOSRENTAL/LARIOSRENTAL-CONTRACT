@@ -3,7 +3,7 @@
 function installRoleAccess(){
   if(document.querySelector('script[data-role-access],script[src*="role-access-v1.js"]'))return;
   const access=document.createElement('script');
-  access.src='role-access-v1.js?v=3';
+  access.src='role-access-v1.js?v=4';
   access.dataset.roleAccess='1';
   document.body.appendChild(access);
 }
