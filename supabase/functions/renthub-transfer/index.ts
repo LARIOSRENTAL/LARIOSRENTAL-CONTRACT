@@ -131,7 +131,15 @@ async function handler(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const action = String(body.action || "status"), config = configuration();
-  if (action === "status") return json({ configured: config.enabled && config.ready, purge_configured: config.purgeReady, activation_pending: !config.enabled, missing: config.missing, cache: await cacheStatus(service), role, can_manage: role === "admin" });
+  if (action === "status") return json({
+    configured: config.enabled && config.ready,
+    purge_configured: config.purgeReady,
+    activation_pending: !config.enabled,
+    document_upload_configured: config.documentReady,
+    safe_delete_enabled: env("RENTHUB_PURGE_ENABLED").toLowerCase() === "true",
+    missing: config.missing,
+    cache: await cacheStatus(service), role, can_manage: role === "admin",
+  });
   if (role !== "admin") return json({ error: "ADMIN_REQUIRED", message: "Solo una cuenta administradora puede realizar acciones de Renthub." }, 403);
   if (!config.enabled || !config.ready) return json({ error: "RENTHUB_NOT_CONFIGURED", activation_pending: true, missing: config.missing }, 503);
 
