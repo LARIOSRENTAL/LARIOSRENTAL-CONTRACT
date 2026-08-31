@@ -52,7 +52,7 @@ function pricingGuide(){
   const pricing=$('pricing');if(!pricing||$('lrPricingAccessNote'))return;
   const note=document.createElement('div');note.id='lrPricingAccessNote';note.className='lrPricingAccessNote';note.textContent=isAdmin()?'Consulta de tarifas · su modificación es administrativa.':'Consulta de tarifas · 🔒 modificar la tabla oficial requiere un administrador.';pricing.insertAdjacentElement('afterend',note);
 }
-function markVersion(){const footer=document.querySelector('.foot');if(footer&&!footer.textContent.includes('PERMISOS V1'))footer.textContent=footer.textContent.trim()+' · PERMISOS V1'}
+function markVersion(){const footer=document.querySelector('.foot');if(footer){footer.textContent=footer.textContent.replace(/ · PERMISOS V\d+/g,'').trim()+' · PERMISOS V2'}}
 function decorate(){
   if(decorating)return;decorating=true;
   requestAnimationFrame(()=>{
