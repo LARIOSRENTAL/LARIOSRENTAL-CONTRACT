@@ -10,6 +10,7 @@ const cors = {
 const env = (name: string) => (Deno.env.get(name) || "").trim();
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: cors });
 const allowedRoles = new Set(["admin", "employee", "none"]);
+const appUrl = "https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/";
 const safeUser = (user: any) => ({
   id: user.id,
   email: user.email || "",
@@ -47,6 +48,56 @@ async function handler(req: Request) {
     const users = await allUsers(service);
     return json({ users: users.map(safeUser).sort((a, b) => a.email.localeCompare(b.email, "es")), current_user_id: caller.id });
   }
+
+  if (action === "invite_user") {
+    const email = String(body.email || "").trim().toLowerCase();
+    const role = String(body.role || "employee");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !allowedRoles.has(role) || role === "none") {
+      return json({ error: "INVALID_INVITATION", message: "Indica un email válido y el permiso Empleado o Administrador." }, 400);
+    }
+    const { data: invitedData, error: inviteError } = await service.auth.admin.inviteUserByEmail(email, { redirectTo: `${appUrl}?auth_action=invite` });
+    const invited = invitedData?.user;
+    if (inviteError || !invited) return json({ error: "INVITATION_FAILED", message: inviteError?.message || "No se pudo enviar la invitación." }, 409);
+    const appMetadata = { ...(invited.app_metadata || {}), role };
+    const { data: updatedData, error: updateError } = await service.auth.admin.updateUserById(invited.id, { app_metadata: appMetadata });
+    if (updateError || !updatedData?.user) {
+      await service.auth.admin.deleteUser(invited.id).catch(() => undefined);
+      return json({ error: "INVITATION_ROLE_FAILED", message: updateError?.message || "No se pudo asignar el permiso a la invitación." }, 500);
+    }
+    return json({ user: safeUser(updatedData.user), message: `Invitación enviada a ${email}. La persona creará su propia contraseña.` });
+  }
+
+  if (action === "reset_password") {
+    const userId = String(body.user_id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) return json({ error: "INVALID_USER" }, 400);
+    const { data: targetData, error: targetError } = await service.auth.admin.getUserById(userId);
+    const target = targetData?.user;
+    if (targetError || !target?.email) return json({ error: "USER_NOT_FOUND" }, 404);
+    const publicClient = createClient(env("SUPABASE_URL"), env("SUPABASE_ANON_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
+    const { error: resetError } = await publicClient.auth.resetPasswordForEmail(target.email, { redirectTo: `${appUrl}?auth_action=recovery` });
+    if (resetError) return json({ error: "RESET_FAILED", message: resetError.message }, 500);
+    return json({ message: `Enlace de recuperación enviado a ${target.email}.` });
+  }
+
+  if (action === "delete_user") {
+    const userId = String(body.user_id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) return json({ error: "INVALID_USER" }, 400);
+    if (userId === caller.id) return json({ error: "CANNOT_DELETE_SELF", message: "No puedes eliminar tu propia cuenta mientras la estás utilizando." }, 409);
+    const { data: targetData, error: targetError } = await service.auth.admin.getUserById(userId);
+    const target = targetData?.user;
+    if (targetError || !target) return json({ error: "USER_NOT_FOUND" }, 404);
+    if (target.app_metadata?.role === "admin") {
+      const users = await allUsers(service);
+      if (users.filter((user) => user.app_metadata?.role === "admin").length <= 1) {
+        return json({ error: "LAST_ADMIN", message: "No se puede eliminar la última cuenta administradora." }, 409);
+      }
+    }
+    const email = target.email || "el usuario";
+    const { error: deleteError } = await service.auth.admin.deleteUser(userId);
+    if (deleteError) return json({ error: "USER_DELETE_FAILED", message: deleteError.message }, 500);
+    return json({ deleted: true, message: `Cuenta ${email} eliminada.` });
+  }
+
   if (action !== "set_role") return json({ error: "UNKNOWN_ACTION" }, 400);
 
   const userId = String(body.user_id || "");
