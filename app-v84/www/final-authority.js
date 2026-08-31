@@ -35,6 +35,10 @@ function installReservationAdmin(){
   reservations.dataset.reservationAdmin='1';
   document.body.appendChild(reservations);
 }
+function installOperationsPanels(){
+  const modules=[['vehicle-manager-v1.js?v=1','vehicle-manager'],['pricing-manager-v1.js?v=1','pricing-manager'],['contract-download-v1.js?v=1','contract-download']];
+  modules.forEach(([src,key])=>{if(document.querySelector(`script[data-${key}]`))return;const s=document.createElement('script');s.src=src;s.setAttribute('data-'+key,'1');document.body.appendChild(s)});
+}
 function installAuthoritativeFlow(){
   if(!window.LariosReservations)return;
   const old=document.getElementById('lr-authority-reload');
@@ -51,5 +55,6 @@ installAdminUsers();
 installUserProfile();
 installPasswordAccess();
 installReservationAdmin();
+installOperationsPanels();
 setTimeout(installAuthoritativeFlow,3000);
 })();
