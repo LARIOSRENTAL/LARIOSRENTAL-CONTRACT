@@ -39,5 +39,7 @@ assert.match(lifecycleSource,/generateBtn\.addEventListener\('touchend',activate
 assert.match(lifecycleSource,/generateBtn\.addEventListener\('click',activate/);
 assert.match(lifecycleSource,/Listo para generar · AMPLIACIONES V6/);
 assert.match(lifecycleSource,/try\{await refreshAgenda\(\)\}catch\(e\)\{console\.warn\('La ampliación terminó/);
+assert.match(lifecycleSource,/try\{await refreshAgenda\(\)\}catch\(e\)\{console\.warn\('El cambio terminó/);
+assert.match(lifecycleSource,/Cambio de vehículo guardado correctamente/);
 assert.equal(typeof global.LariosLifecycle.generateExtension,'function');
 console.log('contract lifecycle calculations: ok');
