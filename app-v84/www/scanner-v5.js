@@ -46,7 +46,7 @@ function choose(){const i=$('scanFile');if(i){i.value='';i.click();}}
 function validDate(d,m,y){const x=new Date(Date.UTC(y,m-1,d));if(y<1900||y>2100||x.getUTCFullYear()!==y||x.getUTCMonth()!==m-1||x.getUTCDate()!==d)return'';return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;}
 function dateFrom(v){const s=upper(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'');let m=s.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);if(m){let y=Number(m[3]);if(y<100)y+=(y>35?1900:2000);return validDate(Number(m[1]),Number(m[2]),y);}const mm={ENE:1,JAN:1,FEB:2,MAR:3,ABR:4,APR:4,MAY:5,JUN:6,JUL:7,AGO:8,AUG:8,SEP:9,SEPT:9,OCT:10,NOV:11,DIC:12,DEC:12};m=s.match(/(\d{1,2})\s+([A-Z]{3,5})\s+(\d{2,4})/);if(m&&mm[m[2]]){let y=Number(m[3]);if(y<100)y+=(y>35?1900:2000);return validDate(Number(m[1]),mm[m[2]],y);}return'';}
 function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').replace(/\s+/g,' ').trim();if(s.length<2||s.length>60)return'';if(/PERMISO|CONDUC|LICEN|FUHRER|FÜHRER|REINO|ESPANA|ESPAÑA|ARGENTINA|EUROP|FECHA|DATE|BIRTH|DOMICILIO|ADDRESS|SEGURIDAD|TRANSPORTE/i.test(s))return'';return s;}
-function goodLicence(v){const s=upper(v).replace(/[^A-Z0-9-]/g,'');return s.length>=5&&s.length<=18&&/\d{4,}/.test(s)?s:'';}
+function goodLicence(v){const raw=upper(v).replace(/[^A-Z0-9.\/-]/g,'');const compact=raw.replace(/[^A-Z0-9]/g,'');return compact.length>=5&&compact.length<=20&&/\d{4,}/.test(compact)?raw:'';}
 function rawLines(items){return (items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text);}
 function trustedLines(items){return rawLines(items).filter(x=>x.score>=0);}
 function joined(lines){return lines.map(x=>x.text).join('\n');}
@@ -63,8 +63,20 @@ function findNumbered(lines,label){
 }
 function findInlineNumbered(lines,label){const marker=numberMarker(label,false);for(const line of lines){const hit=marker.exec(line.text);if(hit)return clean(line.text.slice(hit.index+hit[0].length));}return'';}
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab);const p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text;}}}return'';}
-function countryFrom(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/UK DRIVING LICEN[CS]E|UNITED KINGDOM|ENGLAND|DVLA/.test(t))return'REINO UNIDO';if(/OSTERREICH|AUSTRIA|MODELL DER EUROPAISCHEN UNION/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
-function spanishLicence(v){const s=upper(v).replace(/[^A-Z0-9]/g,'');if(!/^\d{8}[A-Z0-9]$/.test(s))return goodLicence(v);const letters='TRWAGMYFPDXBNJZSQVHLCKE';return s.slice(0,8)+'-'+letters[Number(s.slice(0,8))%23];}
+function countryFrom(text){
+  const normalize=v=>String(v||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  const all=normalize(text),rawLines=String(text||'').replace(/\r/g,'').split('\n').map(normalize).filter(Boolean);const firstField=rawLines.findIndex(line=>/^1\s*[.)]/.test(line));const header=(firstField>=0?rawLines.slice(0,firstField):rawLines.slice(0,20));
+  const codes={A:'AUSTRIA',B:'BÉLGICA',BG:'BULGARIA',CH:'SUIZA',CY:'CHIPRE',CZ:'REPÚBLICA CHECA',D:'ALEMANIA',DK:'DINAMARCA',E:'ESPAÑA',EST:'ESTONIA',F:'FRANCIA',FIN:'FINLANDIA',GR:'GRECIA',H:'HUNGRÍA',HR:'CROACIA',I:'ITALIA',IRL:'IRLANDA',L:'LUXEMBURGO',LT:'LITUANIA',LV:'LETONIA',M:'MALTA',N:'NORUEGA',NL:'PAÍSES BAJOS',P:'PORTUGAL',PL:'POLONIA',RO:'RUMANÍA',S:'SUECIA',SK:'ESLOVAQUIA',SLO:'ESLOVENIA',UK:'REINO UNIDO'};
+  for(const line of header){const code=line.replace(/[^A-Z]/g,'');if(codes[code]&&line.length<=5)return codes[code];}
+  if(/UK DRIVING LICEN[CS]E|UNITED KINGDOM|\bDVLA\b/.test(all))return'REINO UNIDO';
+  if(/REINO DE ESPANA/.test(all))return'ESPAÑA';
+  if(/OSTERREICH|\bAUSTRIA\b|\bM[OÖ]DLING\b|\bBH MODLING\b/.test(all))return'AUSTRIA';
+  if(/BUNDESREPUBLIK DEUTSCHLAND/.test(all))return'ALEMANIA';
+  if(/REPUBLIQUE FRANCAISE/.test(all))return'FRANCIA';
+  if(/REPUBBLICA ITALIANA/.test(all))return'ITALIA';
+  if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(all))return'ARGENTINA';
+  return'';
+}
 function parseIdentity(items){
   const lines=trustedLines(items),text=joined(lines),result={};const c=countryFrom(text);if(c)result.country=c;
   if(c==='ARGENTINA'){
@@ -73,10 +85,9 @@ function parseIdentity(items){
     result.birth=dateFrom(findLabel(lines,['FECHA DE NAC. / DATE OF BIRTH','FECHA DE NAC','DATE OF BIRTH']));result.issue=dateFrom(findLabel(lines,['OTORGAMIENTO / DATE OF ISSUE','OTORGAMIENTO','DATE OF ISSUE']));result.expiry=dateFrom(findLabel(lines,['VENCIMIENTO / EXPIRES','VENCIMIENTO','EXPIRES']));const ad=clean(findLabel(lines,['DOMICILIO / ADDRESS','DOMICILIO','ADDRESS']));if(ad.length>=5&&ad.length<=80)result.address=ad;
   }else{
     const sur=goodName(findNumbered(lines,'1'));const given=goodName(findNumbered(lines,'2')).replace(/^(?:MR|MRS|MS|MISS|DR)\s+/i,'');if(sur&&given)result.name=`${given} ${sur}`;
-    result.birth=dateFrom(findNumbered(lines,'3'));result.issue=dateFrom(findNumbered(lines,'4a'));result.expiry=dateFrom(findNumbered(lines,'4b')||findInlineNumbered(lines,'4b'));const lic=c==='ESPAÑA'?spanishLicence(findNumbered(lines,'5')):goodLicence(findNumbered(lines,'5'));if(lic)result.license=lic;
+    result.birth=dateFrom(findNumbered(lines,'3'));result.issue=dateFrom(findNumbered(lines,'4a'));result.expiry=dateFrom(findNumbered(lines,'4b')||findInlineNumbered(lines,'4b'));const lic=goodLicence(findNumbered(lines,'5'));if(lic)result.license=lic;
     const ad=clean(findNumbered(lines,'8'));if(ad.length>=5&&ad.length<=120)result.address=ad;
   }
-  const compact=upper(text).replace(/\s+/g,'');const dni=(compact.match(/(?:[XYZ]\d{7}[A-Z]|\d{8}[A-Z])/i)||[])[0];if(dni)result.document=dni;
   for(const k of Object.keys(result))if(!result[k])delete result[k];return result;
 }
 function coreCount(r){return ['name','license','birth','issue','expiry','country'].filter(k=>r&&r[k]).length;}

@@ -58,8 +58,12 @@ assert.equal(eu.issue, '2021-03-11');
 assert.equal(eu.expiry, '2036-03-10');
 assert.equal(eu.license, '21080013');
 assert.equal(eu.country, 'AUSTRIA');
+assert.equal(eu.document, undefined);
 
 const fullScreen = parse(`El scanner web leerá los campos 1, 2, 3, 4a, 4b, 5 y 8.
+Permiso de Conducción
+FÜHRERSCHEIN
+MODELL DER EUROPÄISCHEN UNION
 1. SALINGER
 2. PAUL
 3. 13.07.1994 MÖDLING
@@ -69,5 +73,18 @@ const fullScreen = parse(`El scanner web leerá los campos 1, 2, 3, 4a, 4b, 5 y 
 4b. 10.03.2036`);
 assert.equal(fullScreen.name, 'PAUL SALINGER');
 assert.equal(fullScreen.license, '21080013');
+assert.equal(fullScreen.country, 'AUSTRIA');
+assert.equal(fullScreen.document, undefined);
+
+const badgeCountry = parse(`A
+FÜHRERSCHEIN
+1. MUSTER
+2. ANNA
+3. 01.02.1990
+4a. 02.03.2020
+4b. 02.03.2035
+5. 998877663`);
+assert.equal(badgeCountry.country, 'AUSTRIA');
+assert.equal(badgeCountry.license, '998877663');
 
 console.log('OK parser V6: permisos español, británico y europeo.');
