@@ -59,4 +59,15 @@ assert.equal(eu.expiry, '2036-03-10');
 assert.equal(eu.license, '21080013');
 assert.equal(eu.country, 'AUSTRIA');
 
+const fullScreen = parse(`El scanner web leerá los campos 1, 2, 3, 4a, 4b, 5 y 8.
+1. SALINGER
+2. PAUL
+3. 13.07.1994 MÖDLING
+4a. 11.03.2021
+4c. BH Mödling
+5. 21080013
+4b. 10.03.2036`);
+assert.equal(fullScreen.name, 'PAUL SALINGER');
+assert.equal(fullScreen.license, '21080013');
+
 console.log('OK parser V6: permisos español, británico y europeo.');
