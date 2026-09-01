@@ -89,6 +89,31 @@ FÜHRERSCHEIN
 assert.equal(badgeCountry.country, 'AUSTRIA');
 assert.equal(badgeCountry.license, '998877663');
 
+const argentina = parse(`Licencia Nacional de Conducir
+Ciudad Autónoma de Buenos Aires
+5. N° Licencia/License N°
+31912176
+1. Apellido / Last name
+QUEIROT
+2. Nombre / First name
+FERNANDO DANIEL
+8. Domicilio / Address
+NICARAGUA 5855
+3. Fecha de Nac. / Date of birth
+22 NOV 1985
+4a. Otorgamiento / Date of issue
+21 SEP 2023
+46. Vencimiento / Expires
+28 AGO 2025
+República Argentina`);
+assert.equal(argentina.name, 'FERNANDO DANIEL QUEIROT');
+assert.equal(argentina.license, '31912176');
+assert.equal(argentina.birth, '1985-11-22');
+assert.equal(argentina.issue, '2023-09-21');
+assert.equal(argentina.expiry, '2025-08-28');
+assert.equal(argentina.address, 'NICARAGUA 5855');
+assert.equal(argentina.country, 'ARGENTINA');
+
 const keyLabel = parseVehicle(`MATRICULA: 8046 MPM.
 P MARCA: SKODA : NI
 |MODELO: SCALA ) \\
