@@ -13,6 +13,7 @@ const context = {
 vm.runInNewContext(source, context);
 const parse = context.window.LariosScanner.__testParseIdentityText;
 const parseVehicle = context.window.LariosScanner.__testParseVehicleText;
+const bestFleetVehicle = context.window.LariosScanner.__testBestFleetVehicle;
 
 const spanish = parse(`PERMISO DE CONDUCCIÓN REINO DE ESPAÑA
 1. GARCIA
@@ -93,5 +94,26 @@ P MARCA: SKODA : NI
 |MODELO: SCALA ) \\
 FUEL: GASOLINA-UNLEADED 95 RS`);
 assert.deepEqual(JSON.parse(JSON.stringify(keyLabel)), {plate:'8046MPM',make:'SKODA',model:'SCALA',fuel:'GASOLINA'});
+
+const keyTwoPasses = `MATRICULA: 4028« MRC. I
+MARCA: FIAT |®.
+/ MODELO: 500 71 \\
+FUEL: GASOLINA-UNLEADED5 4
+--- SEGUNDA LECTURA ---
+MATRICULA: 4028 MIRC
+MARCA: FIAT
+MODELO: 500
+FUEL: GASOLINA-UNLEADEDES`;
+const keyFiat = parseVehicle(keyTwoPasses);
+assert.equal(keyFiat.plate, '4028MRC');
+assert.equal(keyFiat.make, 'FIAT');
+assert.equal(keyFiat.model, '500');
+assert.equal(keyFiat.fuel, 'GASOLINA');
+
+const fleetMatch = bestFleetVehicle([
+  {registration:'4028 MRC',make:'FIAT',model:'500',fuel_type:'GASOLINA'},
+  {registration:'8046 MPM',make:'SKODA',model:'SCALA',fuel_type:'GASOLINA'},
+], 'MATRICULA: 4028 MIRC', {});
+assert.equal(fleetMatch.registration, '4028 MRC');
 
 console.log('OK parser V6: permisos español, británico y europeo.');
