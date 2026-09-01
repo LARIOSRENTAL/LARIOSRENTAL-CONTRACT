@@ -13,8 +13,8 @@ function emit(id,v){if(!v)return false;const e=$(id);if(!e)return false;e.value=
 function scanShell(){
   const s=$('scan');
   if(!s)return null;
-  s.innerHTML=`<div class="toolbar"><button class="back" type="button" id="scanBack">←</button><b id="scanTitle">Scanner V5</b></div>
-  <div class="notice" style="border:2px solid #16a34a"><b>SCANNER V5 ACTIVO</b><div id="scanHelp" class="muted" style="margin-top:6px"></div></div>
+  s.innerHTML=`<div class="toolbar"><button class="back" type="button" id="scanBack">←</button><b id="scanTitle">Scanner Safari 2</b></div>
+  <div class="notice" style="border:2px solid #16a34a"><b>SCANNER SAFARI 2 ACTIVO</b><div id="scanHelp" class="muted" style="margin-top:6px"></div></div>
   <input id="scanFile" class="hidden" type="file" accept="image/*" capture="environment">
   <button id="scanChoose" type="button" class="primary" style="width:100%;margin-top:12px">Abrir cámara</button>
   <img id="scanPreview" class="scanPreview hidden" alt="Vista previa">
