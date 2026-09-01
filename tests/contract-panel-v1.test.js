@@ -10,6 +10,8 @@ assert.equal(t.eligible({status:'confirmed',pdf_path:'contracts/test.pdf',renthu
 assert.equal(t.eligible({status:'draft',pdf_path:'contracts/test.pdf',renthub_sync_status:'pending'}),false);
 assert.equal(t.eligible({status:'confirmed',pdf_path:null,renthub_sync_status:'pending'}),false);
 assert.equal(t.eligible({status:'confirmed',pdf_path:'contracts/test.pdf',renthub_sync_status:'verified'}),false);
+const sorted=t.newestFirst([{contract_number:'LR-1',created_at:'2026-08-01T10:00:00Z'},{contract_number:'LR-3',created_at:'2026-09-01T10:00:00Z'},{contract_number:'LR-2',created_at:'2026-08-15T10:00:00Z'}]);
+assert.deepEqual(sorted.map(x=>x.contract_number),['LR-3','LR-2','LR-1']);
 const source=fs.readFileSync(require.resolve('../app-v84/www/contract-panel-v1.js'),'utf8');
 assert.match(source,/Panel contractual/);
 assert.match(source,/Caché Renthub/);
