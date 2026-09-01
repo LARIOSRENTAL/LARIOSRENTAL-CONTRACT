@@ -12,6 +12,7 @@ const context = {
 };
 vm.runInNewContext(source, context);
 const parse = context.window.LariosScanner.__testParseIdentityText;
+const parseVehicle = context.window.LariosScanner.__testParseVehicleText;
 
 const spanish = parse(`PERMISO DE CONDUCCIÓN REINO DE ESPAÑA
 1. GARCIA
@@ -86,5 +87,11 @@ FÜHRERSCHEIN
 5. 998877663`);
 assert.equal(badgeCountry.country, 'AUSTRIA');
 assert.equal(badgeCountry.license, '998877663');
+
+const keyLabel = parseVehicle(`MATRICULA: 8046 MPM.
+P MARCA: SKODA : NI
+|MODELO: SCALA ) \\
+FUEL: GASOLINA-UNLEADED 95 RS`);
+assert.deepEqual(JSON.parse(JSON.stringify(keyLabel)), {plate:'8046MPM',make:'SKODA',model:'SCALA',fuel:'GASOLINA'});
 
 console.log('OK parser V6: permisos español, británico y europeo.');

@@ -19,12 +19,14 @@ assert.doesNotMatch(identity, /scan-driving-licence|OPENAI_API_KEY/);
 assert.doesNotMatch(identity, /getEngine|Tesseract|recognizePass/);
 assert.match(vehicle, /getEngine/);
 assert.match(vehicle, /OCR/);
+assert.match(vehicle, /vehicleCanvas/);
+assert.match(vehicle, /parseVehicleText/);
 assert.match(vehicle, /vehicles\?select=/);
 
 for (const field of ["'1'", "'2'", "'3'", "'4a'", "'4b'", "'5'", "'8'"]) assert.ok(scanner.includes(field), `Falta el campo europeo ${field}`);
 assert.match(scanner, /result\.name=`\$\{given\} \$\{sur\}`/);
 assert.match(scanner, /findNumbered\(lines,'8'\)/);
-assert.match(html, /scanner-v5\.js\?v=v6web-free3-20260901/);
+assert.match(html, /scanner-v5\.js\?v=v6web-free4-20260901/);
 assert.match(html, /scanner-lock-v6\.js\?v=4/);
 
 console.log('OK scanner: permisos mediante Scanner V6 WEB gratuito, llaveros por OCR y grupos separados.');
