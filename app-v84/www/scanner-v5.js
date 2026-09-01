@@ -47,11 +47,11 @@ function dateFrom(v){const s=upper(v).normalize('NFD').replace(/[\u0300-\u036f]/
 function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').replace(/\s+/g,' ').trim();if(s.length<2||s.length>60)return'';if(/PERMISO|CONDUC|LICEN|FUHRER|FÜHRER|REINO|ESPANA|ESPAÑA|ARGENTINA|EUROP|FECHA|DATE|BIRTH|DOMICILIO|ADDRESS|SEGURIDAD|TRANSPORTE/i.test(s))return'';return s;}
 function goodLicence(v){const s=upper(v).replace(/[^A-Z0-9-]/g,'');return s.length>=5&&s.length<=18&&/\d{4,}/.test(s)?s:'';}
 function rawLines(items){return (items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text);}
-function trustedLines(items){return rawLines(items).filter(x=>x.score>=0.55);}
+function trustedLines(items){return rawLines(items).filter(x=>x.score>=0);}
 function joined(lines){return lines.map(x=>x.text).join('\n');}
-function numberMarker(label){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp('(?:^|\\s)'+escaped+'\\s*[.)]?\\s*[:;-]?\\s*','i');}
+function numberMarker(label){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp('(?:^|\\s)'+escaped+'(?=\\s|[.):;-]|$)\\s*[.)]?\\s*[:;-]?\\s*','i');}
 function findNumbered(lines,label){
-  const marker=numberMarker(label),stops=['1','2','3','4a','4b','4c','5','7','9'].filter(x=>x!==label).map(numberMarker);
+  const marker=numberMarker(label),stops=['1','2','3','4a','4b','4c','5','7','8','9'].filter(x=>x!==label).map(numberMarker);
   for(let i=0;i<lines.length;i++){
     const hit=marker.exec(lines[i].text);if(!hit)continue;
     const parts=[clean(lines[i].text.slice(hit.index+hit[0].length))];
@@ -61,7 +61,8 @@ function findNumbered(lines,label){
   return'';
 }
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab);const p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text;}}}return'';}
-function countryFrom(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/OSTERREICH|AUSTRIA/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
+function countryFrom(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/UK DRIVING LICEN[CS]E|UNITED KINGDOM|ENGLAND|DVLA/.test(t))return'REINO UNIDO';if(/OSTERREICH|AUSTRIA/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
+function spanishLicence(v){const s=upper(v).replace(/[^A-Z0-9]/g,'');if(!/^\d{8}[A-Z0-9]$/.test(s))return goodLicence(v);const letters='TRWAGMYFPDXBNJZSQVHLCKE';return s.slice(0,8)+'-'+letters[Number(s.slice(0,8))%23];}
 function parseIdentity(items){
   const lines=trustedLines(items),text=joined(lines),result={};const c=countryFrom(text);if(c)result.country=c;
   if(c==='ARGENTINA'){
@@ -69,8 +70,9 @@ function parseIdentity(items){
     const lic=goodLicence(findLabel(lines,['N° LICENCIA / LICENSE N°','Nº LICENCIA','LICENSE N','LICENCIA']));if(lic)result.license=lic;
     result.birth=dateFrom(findLabel(lines,['FECHA DE NAC. / DATE OF BIRTH','FECHA DE NAC','DATE OF BIRTH']));result.issue=dateFrom(findLabel(lines,['OTORGAMIENTO / DATE OF ISSUE','OTORGAMIENTO','DATE OF ISSUE']));result.expiry=dateFrom(findLabel(lines,['VENCIMIENTO / EXPIRES','VENCIMIENTO','EXPIRES']));const ad=clean(findLabel(lines,['DOMICILIO / ADDRESS','DOMICILIO','ADDRESS']));if(ad.length>=5&&ad.length<=80)result.address=ad;
   }else{
-    const sur=goodName(findNumbered(lines,'1'));const given=goodName(findNumbered(lines,'2'));if(sur&&given)result.name=`${given} ${sur}`;
-    result.birth=dateFrom(findNumbered(lines,'3'));result.issue=dateFrom(findNumbered(lines,'4a'));result.expiry=dateFrom(findNumbered(lines,'4b'));const lic=goodLicence(findNumbered(lines,'5'));if(lic)result.license=lic;
+    const sur=goodName(findNumbered(lines,'1'));const given=goodName(findNumbered(lines,'2')).replace(/^(?:MR|MRS|MS|MISS|DR)\s+/i,'');if(sur&&given)result.name=`${given} ${sur}`;
+    result.birth=dateFrom(findNumbered(lines,'3'));result.issue=dateFrom(findNumbered(lines,'4a'));result.expiry=dateFrom(findNumbered(lines,'4b'));const lic=c==='ESPAÑA'?spanishLicence(findNumbered(lines,'5')):goodLicence(findNumbered(lines,'5'));if(lic)result.license=lic;
+    if(c==='REINO UNIDO'){const ad=clean(findNumbered(lines,'8'));if(ad.length>=5&&ad.length<=120)result.address=ad;}
   }
   const compact=upper(text).replace(/\s+/g,'');const dni=(compact.match(/(?:[XYZ]\d{7}[A-Z]|\d{8}[A-Z])/i)||[])[0];if(dni)result.document=dni;
   for(const k of Object.keys(result))if(!result[k])delete result[k];return result;
@@ -87,10 +89,13 @@ async function getEngine(){
   engine=await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{if(m&&m.status==='recognizing text')state('Leyendo carnet… '+Math.round((m.progress||0)*100)+'%');}});
   return engine;
 }
-async function prepareIdentityImage(file){
-  const bmp=await createImageBitmap(file),maxSide=2800,scale=Math.min(3,maxSide/Math.max(bmp.width,bmp.height));
-  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
-  const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,c.width,c.height);return c;
+function identityCanvas(bmp,crop){
+  const sx=crop?Math.round(bmp.width*.08):0,sy=crop?Math.round(bmp.height*.10):0,sw=crop?Math.round(bmp.width*.84):bmp.width,sh=crop?Math.round(bmp.height*.80):bmp.height;
+  const maxSide=3000,scale=Math.min(4,maxSide/Math.max(sw,sh)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
+  const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);return c;
+}
+async function prepareIdentityImages(file){
+  const bmp=await createImageBitmap(file);return[identityCanvas(bmp,true),identityCanvas(bmp,false)];
 }
 function tesseractLines(data){
   const lines=Array.isArray(data&&data.lines)?data.lines:[];
@@ -99,9 +104,10 @@ function tesseractLines(data){
 }
 async function recognizePass(ocr,image,psm){await ocr.setParameters({tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await ocr.recognize(image);return tesseractLines(r&&r.data);}
 async function readIdentity(file){
-  const ocr=await getEngine(),image=await prepareIdentityImage(file);state('Analizando carnet en el iPad…');
-  let items=await recognizePass(ocr,image,11),parsed=parseIdentity(items);
-  if(coreCount(parsed)<4){state('Completando la lectura del carnet…');const second=await recognizePass(ocr,image,6);items=items.concat(second);parsed=parseIdentity(items);}
+  const ocr=await getEngine(),images=await prepareIdentityImages(file);state('Analizando la zona central del carnet…');
+  let items=await recognizePass(ocr,images[0],11),parsed=parseIdentity(items);
+  if(coreCount(parsed)<4){state('Completando la lectura estructurada…');const second=await recognizePass(ocr,images[0],6);items=items.concat(second);parsed=parseIdentity(items);}
+  if(coreCount(parsed)<4){state('Comprobando la imagen completa…');const third=await recognizePass(ocr,images[1],11);items=items.concat(third);parsed=parseIdentity(items);}
   $('scanRaw').textContent=items.map(x=>`${Math.round(x.score*100)}%  ${x.text}`).join('\n');
   if(coreCount(parsed)<4)throw new Error('Lectura insuficiente: acerca el carnet hasta que ocupe casi toda la foto y evita reflejos');
   return parsed;
