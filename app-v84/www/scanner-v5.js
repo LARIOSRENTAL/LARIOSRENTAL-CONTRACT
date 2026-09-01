@@ -3,7 +3,7 @@
 const $=id=>document.getElementById(id);
 let mode='identity',who='main',lastFile=null,lastResult=null,engine=null;
 
-function setFooter(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · PERMISOS VISIÓN WEB · LLAVEROS OCR';}
+function setFooter(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · Scanner V6 WEB · LLAVERO OCR';}
 function state(msg){const e=$('scanState');if(e)e.textContent=msg||'';}
 function clean(v){return String(v||'').replace(/\s+/g,' ').trim();}
 function upper(v){return clean(v).toUpperCase();}
@@ -62,7 +62,7 @@ function findNumbered(lines,label){
   return'';
 }
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab);const p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text;}}}return'';}
-function countryFrom(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/UK DRIVING LICEN[CS]E|UNITED KINGDOM|ENGLAND|DVLA/.test(t))return'REINO UNIDO';if(/OSTERREICH|AUSTRIA/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
+function countryFrom(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/UK DRIVING LICEN[CS]E|UNITED KINGDOM|ENGLAND|DVLA/.test(t))return'REINO UNIDO';if(/OSTERREICH|AUSTRIA|MODELL DER EUROPAISCHEN UNION/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
 function spanishLicence(v){const s=upper(v).replace(/[^A-Z0-9]/g,'');if(!/^\d{8}[A-Z0-9]$/.test(s))return goodLicence(v);const letters='TRWAGMYFPDXBNJZSQVHLCKE';return s.slice(0,8)+'-'+letters[Number(s.slice(0,8))%23];}
 function parseIdentity(items){
   const lines=trustedLines(items),text=joined(lines),result={};const c=countryFrom(text);if(c)result.country=c;
@@ -73,7 +73,7 @@ function parseIdentity(items){
   }else{
     const sur=goodName(findNumbered(lines,'1'));const given=goodName(findNumbered(lines,'2')).replace(/^(?:MR|MRS|MS|MISS|DR)\s+/i,'');if(sur&&given)result.name=`${given} ${sur}`;
     result.birth=dateFrom(findNumbered(lines,'3'));result.issue=dateFrom(findNumbered(lines,'4a'));result.expiry=dateFrom(findNumbered(lines,'4b'));const lic=c==='ESPAÑA'?spanishLicence(findNumbered(lines,'5')):goodLicence(findNumbered(lines,'5'));if(lic)result.license=lic;
-    if(c==='REINO UNIDO'){const ad=clean(findNumbered(lines,'8'));if(ad.length>=5&&ad.length<=120)result.address=ad;}
+    const ad=clean(findNumbered(lines,'8'));if(ad.length>=5&&ad.length<=120)result.address=ad;
   }
   const compact=upper(text).replace(/\s+/g,'');const dni=(compact.match(/(?:[XYZ]\d{7}[A-Z]|\d{8}[A-Z])/i)||[])[0];if(dni)result.document=dni;
   for(const k of Object.keys(result))if(!result[k])delete result[k];return result;
@@ -90,33 +90,27 @@ async function getEngine(){
   engine=await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{if(m&&m.status==='recognizing text')state('Leyendo llavero… '+Math.round((m.progress||0)*100)+'%');}});
   return engine;
 }
-function identityCanvas(bmp,crop){
-  const sx=crop?Math.round(bmp.width*.08):0,sy=crop?Math.round(bmp.height*.10):0,sw=crop?Math.round(bmp.width*.84):bmp.width,sh=crop?Math.round(bmp.height*.80):bmp.height;
-  const maxSide=3000,scale=Math.min(4,maxSide/Math.max(sw,sh)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
-  const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);return c;
+async function compressForWeb(file){
+  const bmp=await createImageBitmap(file);let w=bmp.width,h=bmp.height;const maxSide=1800;
+  if(Math.max(w,h)>maxSide){const scale=maxSide/Math.max(w,h);w=Math.round(w*scale);h=Math.round(h*scale);}
+  const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,w,h);
+  let quality=.84,blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));
+  while(blob&&blob.size>950000&&quality>.44){quality-=.1;blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));}
+  if(!blob)throw new Error('No se pudo preparar la fotografía');
+  return new File([blob],'permiso.jpg',{type:'image/jpeg'});
 }
-async function imageData(file){
-  const bmp=await createImageBitmap(file),maxSide=1800,scale=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
-  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
-  const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,c.width,c.height);
-  return c.toDataURL('image/jpeg',.9);
+async function webOCR(file){
+  state('Comprimiendo la fotografía para el Scanner V6 WEB…');
+  const small=await compressForWeb(file),form=new FormData();form.append('file',small);form.append('apikey','helloworld');form.append('OCREngine','3');form.append('scale','true');form.append('detectOrientation','true');form.append('isOverlayRequired','false');
+  state('Leyendo el permiso con Scanner V6 WEB…');
+  const response=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:form});const payload=await response.json().catch(()=>null);
+  if(!response.ok||!payload)throw new Error('El servicio gratuito de lectura no respondió correctamente');
+  if(payload.IsErroredOnProcessing){const detail=payload.ErrorMessage||payload.ErrorDetails||'Error de lectura';throw new Error(Array.isArray(detail)?detail.join(' '):String(detail));}
+  const text=(payload.ParsedResults||[]).map(item=>item.ParsedText||'').join('\n').trim();if(!text)throw new Error('El Scanner V6 WEB no detectó texto');return text;
 }
-function tesseractLines(data){
-  const lines=Array.isArray(data&&data.lines)?data.lines:[];
-  if(lines.length)return lines.map(x=>({text:clean(x.text),score:Math.max(0,Math.min(1,Number(x.confidence||0)/100))})).filter(x=>x.text);
-  return clean(data&&data.text).split(/\r?\n/).map(text=>({text:clean(text),score:.7})).filter(x=>x.text);
-}
-async function recognizePass(ocr,image,psm){await ocr.setParameters({tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await ocr.recognize(image);return tesseractLines(r&&r.data);}
 async function readIdentity(file){
-  state('Preparando el permiso para el scanner web…');
-  const image=await imageData(file);
-  state('Leyendo campos europeos 1, 2, 3, 4a, 4b, 5 y 8…');
-  let response=await fetch(cfg.supabaseUrl+'/functions/v1/scan-driving-licence',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({image})});
-  if((response.status===401||response.status===403)&&typeof refreshSession==='function'&&await refreshSession())response=await fetch(cfg.supabaseUrl+'/functions/v1/scan-driving-licence',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({image})});
-  const payload=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(payload.message||'El scanner web no respondió correctamente');
-  const parsed=payload.fields||{};
-  $('scanRaw').textContent='Scanner visual estructurado\nCampos recibidos: '+Object.keys(parsed).join(', ');
+  const text=await webOCR(file);$('scanRaw').textContent=text;
+  const parsed=parseIdentity(text.split(/\r?\n/).map(line=>({text:line,score:1})));
   if(coreCount(parsed)<4)throw new Error('Lectura insuficiente: no se han reconocido al menos cuatro campos principales');
   return parsed;
 }
@@ -136,7 +130,7 @@ async function selected(input){const file=input&&input.files&&input.files[0];if(
 function apply(){if(!lastResult){alert('No hay una lectura fiable para aplicar.');return;}let n=0;if(mode==='keys'){n+=emit('vehicle_plate',lastResult.plate)?1:0;n+=emit('vehicle_model',lastResult.model)?1:0;n+=emit('fuel_type',lastResult.fuel)?1:0;n+=emit('assigned_vehicle_group',lastResult.group)?1:0;n+=emit('vehicle_color',lastResult.color)?1:0;}else if(who==='additional'){n+=emit('additional_name',lastResult.name)?1:0;n+=emit('additional_driving_license',lastResult.license||lastResult.document)?1:0;n+=emit('additional_birth_date',lastResult.birth)?1:0;n+=emit('additional_license_issue',lastResult.issue)?1:0;n+=emit('additional_license_expiry',lastResult.expiry)?1:0;n+=emit('additional_license_issued_by',lastResult.country)?1:0;}else{n+=emit('customer_name',lastResult.name)?1:0;n+=emit('customer_document',lastResult.document)?1:0;n+=emit('driving_license',lastResult.license)?1:0;n+=emit('customer_birth_date',lastResult.birth)?1:0;n+=emit('license_issue',lastResult.issue)?1:0;n+=emit('license_expiry',lastResult.expiry)?1:0;n+=emit('license_issued_by',lastResult.country)?1:0;n+=emit('customer_address',lastResult.address)?1:0;}if(window.LariosContractUX&&LariosContractUX.recalculate)LariosContractUX.recalculate();state(n+' campos aplicados al contrato.');close();}
 async function upload(){if(!lastFile){alert('Primero haz una foto.');return null;}try{const ext=(lastFile.name&&lastFile.name.split('.').pop()||'jpg').toLowerCase();const uid=crypto.randomUUID?crypto.randomUUID():String(Date.now());const path='mobile/'+new Date().toISOString().slice(0,10)+'/'+uid+'.'+ext;const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/documents/'+path,{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':lastFile.type||'image/jpeg','x-upsert':'false'},body:lastFile});if(!r.ok)throw new Error(await r.text());state('Foto guardada de forma privada.');return path;}catch(e){alert('No se pudo guardar la imagen: '+e.message);return null;}}
 
-window.LariosScanner={open,close,choose,selected,apply,upload};
+window.LariosScanner={open,close,choose,selected,apply,upload,__testParseIdentityText:text=>parseIdentity(String(text||'').split(/\r?\n/).map(line=>({text:line,score:1})))};
 setFooter();
-console.log('Scanner de permisos por visión y llaveros por OCR loaded');
+console.log('Scanner V6 WEB gratuito para permisos y OCR local para llaveros loaded');
 })();
