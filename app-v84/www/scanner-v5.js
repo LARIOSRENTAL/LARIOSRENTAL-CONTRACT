@@ -3,7 +3,7 @@
 const $=id=>document.getElementById(id);
 let mode='identity',who='main',lastFile=null,lastResult=null,engine=null;
 
-function setFooter(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · SCANNER WEB SAFARI · TESSERACT LOCAL';}
+function setFooter(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · PERMISOS VISIÓN WEB · LLAVEROS OCR';}
 function state(msg){const e=$('scanState');if(e)e.textContent=msg||'';}
 function clean(v){return String(v||'').replace(/\s+/g,' ').trim();}
 function upper(v){return clean(v).toUpperCase();}
@@ -13,8 +13,8 @@ function emit(id,v){if(!v)return false;const e=$(id);if(!e)return false;e.value=
 function scanShell(){
   const s=$('scan');
   if(!s)return null;
-  s.innerHTML=`<div class="toolbar"><button class="back" type="button" id="scanBack">←</button><b id="scanTitle">Scanner Safari 2</b></div>
-  <div class="notice" style="border:2px solid #16a34a"><b>SCANNER SAFARI 2 ACTIVO</b><div id="scanHelp" class="muted" style="margin-top:6px"></div></div>
+  s.innerHTML=`<div class="toolbar"><button class="back" type="button" id="scanBack">←</button><b id="scanTitle">Scanner web</b></div>
+  <div class="notice" style="border:2px solid #16a34a"><b id="scanEngine">SCANNER DE PERMISOS ACTIVO</b><div id="scanHelp" class="muted" style="margin-top:6px"></div></div>
   <input id="scanFile" class="hidden" type="file" accept="image/*" capture="environment">
   <button id="scanChoose" type="button" class="primary" style="width:100%;margin-top:12px">Abrir cámara</button>
   <img id="scanPreview" class="scanPreview hidden" alt="Vista previa">
@@ -35,9 +35,10 @@ function open(kind,target){
   mode=kind==='keys'?'keys':'identity';who=target==='additional'?'additional':'main';lastFile=null;lastResult=null;
   scanShell();
   const s=$('scan'),r=$('reservation');if(s)s.classList.remove('hidden');if(r)r.classList.add('hidden');
-  $('scanTitle').textContent=mode==='keys'?'Escanear vehículo':'Escanear documentación';
-  $('scanHelp').textContent=mode==='keys'?'Escanea el QR del llavero. Los datos se obtienen de la flota y no se intenta adivinar el texto del llavero.':'Haz una foto frontal, cercana, recta y sin reflejos. El reconocimiento compatible con Safari se ejecuta en este dispositivo y ningún dato pasará al contrato hasta que revises la lectura y pulses Aplicar.';
-  state('Scanner compatible con Safari preparado.');
+  $('scanTitle').textContent=mode==='keys'?'Escanear llavero del vehículo':'Escanear permiso de conducir';
+  $('scanEngine').textContent=mode==='keys'?'OCR DE LLAVEROS ACTIVO':'SCANNER WEB DE PERMISOS ACTIVO';
+  $('scanHelp').textContent=mode==='keys'?'Haz una foto nítida del llavero. El OCR leerá la matrícula y la contrastará con la flota.':'Haz una foto frontal, cercana, recta y sin reflejos. El scanner web leerá los campos 1, 2, 3, 4a, 4b, 5 y, cuando exista, el 8. Ningún dato pasará al contrato hasta que lo revises y pulses Aplicar.';
+  state(mode==='keys'?'OCR de llaveros preparado.':'Scanner web de permisos preparado.');
 }
 function close(){const s=$('scan'),r=$('reservation');if(s)s.classList.add('hidden');if(r)r.classList.remove('hidden');}
 function choose(){const i=$('scanFile');if(i){i.value='';i.click();}}
@@ -83,10 +84,10 @@ function showResult(r){const b=$('scanResult');if(!b)return;if(!r||!Object.keys(
 function loadScript(src){return new Promise((ok,no)=>{const found=[...document.scripts].find(s=>s.src===src);if(found&&window.Tesseract)return ok();const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar el motor OCR'));document.head.appendChild(s);});}
 async function getEngine(){
   if(engine)return engine;
-  state('Cargando reconocimiento compatible con Safari…');
+  state('Cargando OCR de llaveros…');
   await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
   if(!window.Tesseract)throw new Error('El motor OCR no se cargó');
-  engine=await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{if(m&&m.status==='recognizing text')state('Leyendo carnet… '+Math.round((m.progress||0)*100)+'%');}});
+  engine=await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{if(m&&m.status==='recognizing text')state('Leyendo llavero… '+Math.round((m.progress||0)*100)+'%');}});
   return engine;
 }
 function identityCanvas(bmp,crop){
@@ -94,8 +95,11 @@ function identityCanvas(bmp,crop){
   const maxSide=3000,scale=Math.min(4,maxSide/Math.max(sw,sh)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
   const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);return c;
 }
-async function prepareIdentityImages(file){
-  const bmp=await createImageBitmap(file);return[identityCanvas(bmp,true),identityCanvas(bmp,false)];
+async function imageData(file){
+  const bmp=await createImageBitmap(file),maxSide=1800,scale=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
+  const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',.9);
 }
 function tesseractLines(data){
   const lines=Array.isArray(data&&data.lines)?data.lines:[];
@@ -104,18 +108,29 @@ function tesseractLines(data){
 }
 async function recognizePass(ocr,image,psm){await ocr.setParameters({tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await ocr.recognize(image);return tesseractLines(r&&r.data);}
 async function readIdentity(file){
-  const ocr=await getEngine(),images=await prepareIdentityImages(file);state('Analizando la zona central del carnet…');
-  let items=await recognizePass(ocr,images[0],11),parsed=parseIdentity(items);
-  if(coreCount(parsed)<4){state('Completando la lectura estructurada…');const second=await recognizePass(ocr,images[0],6);items=items.concat(second);parsed=parseIdentity(items);}
-  if(coreCount(parsed)<4){state('Comprobando la imagen completa…');const third=await recognizePass(ocr,images[1],11);items=items.concat(third);parsed=parseIdentity(items);}
-  $('scanRaw').textContent=items.map(x=>`${Math.round(x.score*100)}%  ${x.text}`).join('\n');
-  if(coreCount(parsed)<4)throw new Error('Lectura insuficiente: acerca el carnet hasta que ocupe casi toda la foto y evita reflejos');
+  state('Preparando el permiso para el scanner web…');
+  const image=await imageData(file);
+  state('Leyendo campos europeos 1, 2, 3, 4a, 4b, 5 y 8…');
+  let response=await fetch(cfg.supabaseUrl+'/functions/v1/scan-driving-licence',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({image})});
+  if((response.status===401||response.status===403)&&typeof refreshSession==='function'&&await refreshSession())response=await fetch(cfg.supabaseUrl+'/functions/v1/scan-driving-licence',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({image})});
+  const payload=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(payload.message||'El scanner web no respondió correctamente');
+  const parsed=payload.fields||{};
+  $('scanRaw').textContent='Scanner visual estructurado\nCampos recibidos: '+Object.keys(parsed).join(', ');
+  if(coreCount(parsed)<4)throw new Error('Lectura insuficiente: no se han reconocido al menos cuatro campos principales');
   return parsed;
 }
 
-async function decodeQR(file){const bmp=await createImageBitmap(file);if('BarcodeDetector' in window){try{const d=new BarcodeDetector({formats:['qr_code']});const a=await d.detect(bmp);if(a&&a[0]&&a[0].rawValue)return a[0].rawValue;}catch(e){}}if(!window.jsQR)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=ok;s.onerror=no;document.head.appendChild(s);});const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;const x=c.getContext('2d');x.drawImage(bmp,0,0);const im=x.getImageData(0,0,c.width,c.height);const q=window.jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});return q&&q.data||'';}
-function qrRegistration(raw){const s=clean(raw);let m=s.match(/^LRV:([A-Z0-9-]{4,12})$/i);if(m)return upper(m[1]);try{const j=JSON.parse(s);if(j&&j.registration)return upper(j.registration);}catch(e){}m=s.match(/(?:registration|matricula|plate)=([A-Z0-9-]{4,12})/i);return m?upper(m[1]):'';}
-async function readVehicle(file){state('Leyendo QR del llavero…');const raw=await decodeQR(file);$('scanRaw').textContent=raw||'(sin QR)';if(!raw)throw new Error('No se detectó ningún QR');const reg=qrRegistration(raw);if(!reg)throw new Error('El QR no contiene una matrícula válida');const rows=await api('vehicles?select=registration,make,model,fuel_type,category,color&registration=eq.'+encodeURIComponent(reg)+'&limit=1');const v=rows&&rows[0];if(!v)throw new Error('El vehículo '+reg+' no existe en la flota');return{plate:v.registration,model:clean([v.make,v.model].filter(Boolean).join(' ')),fuel:v.fuel_type||'',group:v.category||'',color:v.color||''};}
+function vehiclePlate(text){const normalized=upper(text).replace(/[·_]/g,' ');const labelled=normalized.match(/(?:MATR[IÍ]CULA|MATRICULA|PLATE|REGISTRATION)\s*[:#.-]*\s*([A-Z0-9 -]{5,12})/i);const candidate=(labelled&&labelled[1]||normalized).match(/\b(?:\d{4}\s*[BCDFGHJKLMNPRSTVWXYZ]{3}|[A-Z]{1,3}\s*[- ]?\s*\d{3,5}\s*[- ]?\s*[A-Z]{0,3})\b/i);return candidate?upper(candidate[0]).replace(/[^A-Z0-9]/g,''):'';}
+async function readVehicle(file){
+  const ocr=await getEngine();state('Leyendo texto del llavero con OCR…');
+  const r=await ocr.recognize(file),text=clean(r&&r.data&&r.data.text);$('scanRaw').textContent=text||'(sin texto)';
+  if(!text)throw new Error('El OCR no detectó texto en el llavero');
+  const reg=vehiclePlate(text);if(!reg)throw new Error('No se reconoció una matrícula válida en el llavero');
+  const rows=await api('vehicles?select=registration,make,model,fuel_type,category,color&registration=ilike.'+encodeURIComponent(reg)+'&limit=1');const v=rows&&rows[0];
+  if(!v)throw new Error('La matrícula '+reg+' no existe en la flota');
+  return{plate:v.registration,model:clean([v.make,v.model].filter(Boolean).join(' ')),fuel:v.fuel_type||'',group:v.category||'',color:v.color||''};
+}
 
 async function selected(input){const file=input&&input.files&&input.files[0];if(!file)return;lastFile=file;lastResult=null;const p=$('scanPreview');if(p){p.src=URL.createObjectURL(file);p.classList.remove('hidden');}showResult(null);$('scanRaw').textContent='';try{lastResult=mode==='keys'?await readVehicle(file):await readIdentity(file);showResult(lastResult);state('Lectura válida. Revisa los datos antes de pulsar Aplicar.');}catch(e){console.error('Scanner V5',e);lastResult=null;showResult(null);state((e&&e.message?e.message:'No se pudo leer')+'. El contrato no se ha modificado.');}}
 function apply(){if(!lastResult){alert('No hay una lectura fiable para aplicar.');return;}let n=0;if(mode==='keys'){n+=emit('vehicle_plate',lastResult.plate)?1:0;n+=emit('vehicle_model',lastResult.model)?1:0;n+=emit('fuel_type',lastResult.fuel)?1:0;n+=emit('assigned_vehicle_group',lastResult.group)?1:0;n+=emit('vehicle_color',lastResult.color)?1:0;}else if(who==='additional'){n+=emit('additional_name',lastResult.name)?1:0;n+=emit('additional_driving_license',lastResult.license||lastResult.document)?1:0;n+=emit('additional_birth_date',lastResult.birth)?1:0;n+=emit('additional_license_issue',lastResult.issue)?1:0;n+=emit('additional_license_expiry',lastResult.expiry)?1:0;n+=emit('additional_license_issued_by',lastResult.country)?1:0;}else{n+=emit('customer_name',lastResult.name)?1:0;n+=emit('customer_document',lastResult.document)?1:0;n+=emit('driving_license',lastResult.license)?1:0;n+=emit('customer_birth_date',lastResult.birth)?1:0;n+=emit('license_issue',lastResult.issue)?1:0;n+=emit('license_expiry',lastResult.expiry)?1:0;n+=emit('license_issued_by',lastResult.country)?1:0;n+=emit('customer_address',lastResult.address)?1:0;}if(window.LariosContractUX&&LariosContractUX.recalculate)LariosContractUX.recalculate();state(n+' campos aplicados al contrato.');close();}
@@ -123,5 +138,5 @@ async function upload(){if(!lastFile){alert('Primero haz una foto.');return null
 
 window.LariosScanner={open,close,choose,selected,apply,upload};
 setFooter();
-console.log('Scanner Safari Tesseract loaded');
+console.log('Scanner de permisos por visión y llaveros por OCR loaded');
 })();
