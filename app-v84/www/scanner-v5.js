@@ -3,7 +3,7 @@
 const $=id=>document.getElementById(id);
 let mode='identity',who='main',lastFile=null,lastResult=null,engine=null;
 
-function setFooter(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · SCANNER WEB LOCAL · SIN OCR EXTERNO';}
+function setFooter(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · SCANNER WEB SAFARI · TESSERACT LOCAL';}
 function state(msg){const e=$('scanState');if(e)e.textContent=msg||'';}
 function clean(v){return String(v||'').replace(/\s+/g,' ').trim();}
 function upper(v){return clean(v).toUpperCase();}
@@ -36,8 +36,8 @@ function open(kind,target){
   scanShell();
   const s=$('scan'),r=$('reservation');if(s)s.classList.remove('hidden');if(r)r.classList.add('hidden');
   $('scanTitle').textContent=mode==='keys'?'Escanear vehículo':'Escanear documentación';
-  $('scanHelp').textContent=mode==='keys'?'Escanea el QR del llavero. Los datos se obtienen de la flota y no se intenta adivinar el texto del llavero.':'Haz una foto frontal, cercana, recta y sin reflejos. PaddleOCR leerá el documento, pero ningún dato pasará al contrato hasta que la lectura supere las validaciones y tú pulses Aplicar.';
-  state('Scanner V5 preparado.');
+  $('scanHelp').textContent=mode==='keys'?'Escanea el QR del llavero. Los datos se obtienen de la flota y no se intenta adivinar el texto del llavero.':'Haz una foto frontal, cercana, recta y sin reflejos. El reconocimiento compatible con Safari se ejecuta en este dispositivo y ningún dato pasará al contrato hasta que revises la lectura y pulses Aplicar.';
+  state('Scanner compatible con Safari preparado.');
 }
 function close(){const s=$('scan'),r=$('reservation');if(s)s.classList.add('hidden');if(r)r.classList.remove('hidden');}
 function choose(){const i=$('scanFile');if(i){i.value='';i.click();}}
@@ -47,9 +47,19 @@ function dateFrom(v){const s=upper(v).normalize('NFD').replace(/[\u0300-\u036f]/
 function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').replace(/\s+/g,' ').trim();if(s.length<2||s.length>60)return'';if(/PERMISO|CONDUC|LICEN|FUHRER|FÜHRER|REINO|ESPANA|ESPAÑA|ARGENTINA|EUROP|FECHA|DATE|BIRTH|DOMICILIO|ADDRESS|SEGURIDAD|TRANSPORTE/i.test(s))return'';return s;}
 function goodLicence(v){const s=upper(v).replace(/[^A-Z0-9-]/g,'');return s.length>=5&&s.length<=18&&/\d{4,}/.test(s)?s:'';}
 function rawLines(items){return (items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text);}
-function trustedLines(items){return rawLines(items).filter(x=>x.score>=0.82);}
+function trustedLines(items){return rawLines(items).filter(x=>x.score>=0.55);}
 function joined(lines){return lines.map(x=>x.text).join('\n');}
-function findNumbered(lines,label){const re=new RegExp('^\\s*'+label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*[.)]?\\s*[:;-]?\\s*(.*)$','i');for(let i=0;i<lines.length;i++){const m=lines[i].text.match(re);if(m){const tail=clean(m[1]);if(tail)return tail;if(lines[i+1])return lines[i+1].text;}}return'';}
+function numberMarker(label){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp('(?:^|\\s)'+escaped+'\\s*[.)]?\\s*[:;-]?\\s*','i');}
+function findNumbered(lines,label){
+  const marker=numberMarker(label),stops=['1','2','3','4a','4b','4c','5','7','9'].filter(x=>x!==label).map(numberMarker);
+  for(let i=0;i<lines.length;i++){
+    const hit=marker.exec(lines[i].text);if(!hit)continue;
+    const parts=[clean(lines[i].text.slice(hit.index+hit[0].length))];
+    for(let j=i+1;j<lines.length&&j<=i+2;j++){if(stops.some(re=>re.test(lines[j].text)))break;parts.push(clean(lines[j].text));}
+    return clean(parts.filter(Boolean).join(' '));
+  }
+  return'';
+}
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab);const p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text;}}}return'';}
 function countryFrom(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/OSTERREICH|AUSTRIA/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
 function parseIdentity(items){
@@ -68,8 +78,34 @@ function parseIdentity(items){
 function coreCount(r){return ['name','license','birth','issue','expiry','country'].filter(k=>r&&r[k]).length;}
 function showResult(r){const b=$('scanResult');if(!b)return;if(!r||!Object.keys(r).length){b.innerHTML='<b>Sin datos fiables</b><div class="muted" style="margin-top:5px">No se copiará nada al contrato.</div>';return;}const map=[['Nombre','name'],['Documento','document'],['Permiso','license'],['Nacimiento','birth'],['Expedición','issue'],['Caducidad','expiry'],['País','country'],['Domicilio','address'],['Matrícula','plate'],['Modelo','model'],['Grupo','group'],['Combustible','fuel']];b.innerHTML='<b>Datos detectados para revisar</b>'+map.filter(([l,k])=>r[k]).map(([l,k])=>`<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;padding:5px 0"><strong>${l}</strong><span>${esc(r[k])}</span></div>`).join('');}
 
-async function getEngine(){if(engine)return engine;state('Cargando PaddleOCR oficial…');const mod=await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');if(!mod||!mod.PaddleOCR)throw new Error('PaddleOCR no se cargó');engine=await mod.PaddleOCR.create({lang:'en',ocrVersion:'PP-OCRv5',worker:false,ortOptions:{backend:'wasm',numThreads:1,simd:true}});return engine;}
-async function readIdentity(file){const ocr=await getEngine();state('Analizando documento con PaddleOCR…');const results=await ocr.predict(file,{textRecScoreThresh:0.65,textDetBoxThresh:0.5,textDetThresh:0.25,textDetMaxSideLimit:3000});const res=Array.isArray(results)?results[0]:null;const items=rawLines(res&&res.items);$('scanRaw').textContent=items.map(x=>`${Math.round(x.score*100)}%  ${x.text}`).join('\n');const parsed=parseIdentity(items);if(coreCount(parsed)<4)throw new Error('Lectura insuficiente: no hay al menos 4 campos principales fiables');return parsed;}
+function loadScript(src){return new Promise((ok,no)=>{const found=[...document.scripts].find(s=>s.src===src);if(found&&window.Tesseract)return ok();const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar el motor OCR'));document.head.appendChild(s);});}
+async function getEngine(){
+  if(engine)return engine;
+  state('Cargando reconocimiento compatible con Safari…');
+  await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+  if(!window.Tesseract)throw new Error('El motor OCR no se cargó');
+  engine=await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{if(m&&m.status==='recognizing text')state('Leyendo carnet… '+Math.round((m.progress||0)*100)+'%');}});
+  return engine;
+}
+async function prepareIdentityImage(file){
+  const bmp=await createImageBitmap(file),maxSide=2800,scale=Math.min(3,maxSide/Math.max(bmp.width,bmp.height));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
+  const x=c.getContext('2d',{alpha:false});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,c.width,c.height);return c;
+}
+function tesseractLines(data){
+  const lines=Array.isArray(data&&data.lines)?data.lines:[];
+  if(lines.length)return lines.map(x=>({text:clean(x.text),score:Math.max(0,Math.min(1,Number(x.confidence||0)/100))})).filter(x=>x.text);
+  return clean(data&&data.text).split(/\r?\n/).map(text=>({text:clean(text),score:.7})).filter(x=>x.text);
+}
+async function recognizePass(ocr,image,psm){await ocr.setParameters({tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1',user_defined_dpi:'300'});const r=await ocr.recognize(image);return tesseractLines(r&&r.data);}
+async function readIdentity(file){
+  const ocr=await getEngine(),image=await prepareIdentityImage(file);state('Analizando carnet en el iPad…');
+  let items=await recognizePass(ocr,image,11),parsed=parseIdentity(items);
+  if(coreCount(parsed)<4){state('Completando la lectura del carnet…');const second=await recognizePass(ocr,image,6);items=items.concat(second);parsed=parseIdentity(items);}
+  $('scanRaw').textContent=items.map(x=>`${Math.round(x.score*100)}%  ${x.text}`).join('\n');
+  if(coreCount(parsed)<4)throw new Error('Lectura insuficiente: acerca el carnet hasta que ocupe casi toda la foto y evita reflejos');
+  return parsed;
+}
 
 async function decodeQR(file){const bmp=await createImageBitmap(file);if('BarcodeDetector' in window){try{const d=new BarcodeDetector({formats:['qr_code']});const a=await d.detect(bmp);if(a&&a[0]&&a[0].rawValue)return a[0].rawValue;}catch(e){}}if(!window.jsQR)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=ok;s.onerror=no;document.head.appendChild(s);});const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;const x=c.getContext('2d');x.drawImage(bmp,0,0);const im=x.getImageData(0,0,c.width,c.height);const q=window.jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});return q&&q.data||'';}
 function qrRegistration(raw){const s=clean(raw);let m=s.match(/^LRV:([A-Z0-9-]{4,12})$/i);if(m)return upper(m[1]);try{const j=JSON.parse(s);if(j&&j.registration)return upper(j.registration);}catch(e){}m=s.match(/(?:registration|matricula|plate)=([A-Z0-9-]{4,12})/i);return m?upper(m[1]):'';}
@@ -81,5 +117,5 @@ async function upload(){if(!lastFile){alert('Primero haz una foto.');return null
 
 window.LariosScanner={open,close,choose,selected,apply,upload};
 setFooter();
-console.log('Scanner web local loaded');
+console.log('Scanner Safari Tesseract loaded');
 })();
