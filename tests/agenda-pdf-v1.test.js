@@ -26,5 +26,7 @@ require('../app-v84/www/agenda-pdf-v1.js');
   const busyDoc=await lib.PDFDocument.load(busyResult.bytes);
   assert.equal(busyResult.pages,1);
   assert.equal(busyDoc.getPageCount(),1);
+  const size=busyDoc.getPage(0).getSize();
+  assert.ok(size.height>size.width,'the daily agenda must use portrait orientation');
   console.log('daily agenda PDF states and layout: ok');
 })().catch(error=>{console.error(error);process.exitCode=1});
