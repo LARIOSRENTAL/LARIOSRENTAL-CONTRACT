@@ -8,6 +8,12 @@ const ui=fs.readFileSync(require.resolve('../app-v84/www/stripe-checkout-v1.js')
 assert.match(ui,/saveDraft/);assert.match(ui,/location\.assign\(checkout\.checkout_url\)/);assert.match(ui,/stripe\('verify'/);assert.match(ui,/no se ha realizado ningún cargo/);
 const checkout=fs.readFileSync(require.resolve('../supabase/functions/stripe-checkout/index.ts'),'utf8');
 assert.match(checkout,/2026-08-26\.dahlia/);assert.match(checkout,/Idempotency-Key/);assert.match(checkout,/amount_total/);assert.match(checkout,/payment_status === "paid"/);assert.match(checkout,/STRIPE_NOT_CONFIGURED/);
+assert.match(checkout,/payment_intent_data\[setup_future_usage\]/);assert.match(checkout,/off_session/);assert.match(checkout,/card_summary/);assert.match(checkout,/role !== "admin"/);assert.match(checkout,/card_access_audit/);assert.doesNotMatch(checkout,/card_number\s*[:=]|security_code\s*[:=]|cvc\s*[:=]/i);
 const webhook=fs.readFileSync(require.resolve('../supabase/functions/stripe-webhook/index.ts'),'utf8');
 assert.match(webhook,/Stripe-Signature/);assert.match(webhook,/HMAC/);assert.match(webhook,/amountMatches/);assert.match(webhook,/referenceMatches/);assert.match(webhook,/checkout\.session\.completed/);
+assert.match(webhook,/stripe_payment_methods/);assert.match(webhook,/expand\[\]=payment_method/);assert.doesNotMatch(webhook,/card_number\s*[:=]|security_code\s*[:=]|cvc\s*[:=]/i);
+const panel=fs.readFileSync(require.resolve('../app-v84/www/contract-panel-v1.js'),'utf8');
+assert.match(panel,/Consultar tarjeta/);assert.match(panel,/card_summary/);assert.match(panel,/requireAdmin\('consultar los datos enmascarados/);assert.doesNotMatch(panel,/stripe_payment_method_id|stripe_customer_id/);
+const migration=fs.readFileSync(require.resolve('../supabase/migrations/20260902063545_stripe_tokenized_payment_methods.sql'),'utf8');
+assert.match(migration,/enable row level security/);assert.match(migration,/revoke all.*authenticated/);assert.match(migration,/card_access_audit/);assert.doesNotMatch(migration,/^\s*(card_number|security_code|cvc)\s+/im);
 console.log('Stripe Checkout flow: ok');

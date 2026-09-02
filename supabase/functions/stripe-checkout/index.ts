@@ -27,7 +27,41 @@ async function stripe(path: string, init: RequestInit = {}) {
   return data;
 }
 
-async function markFromSession(service: any, payment: any, session: any, eventId = "") {
+async function saveReusablePaymentMethod(service: any, payment: any, session: any, actorId: string | null) {
+  if (session.payment_status !== "paid" || !session.payment_intent) return null;
+  const intent = await stripe(`/v1/payment_intents/${encodeURIComponent(String(session.payment_intent))}?expand[]=payment_method`);
+  const method = intent.payment_method;
+  const methodId = typeof method === "string" ? method : String(method?.id || "");
+  const customerId = typeof intent.customer === "string" ? intent.customer : String(intent.customer?.id || session.customer || "");
+  const card = typeof method === "object" ? method?.card : null;
+  if (!/^pm_[A-Za-z0-9_]+$/.test(methodId) || !/^cus_[A-Za-z0-9_]+$/.test(customerId) || method?.type !== "card" || !/^\d{4}$/.test(String(card?.last4 || ""))) {
+    throw new Error("Stripe did not return a reusable card token");
+  }
+  const expMonth = Number(card.exp_month), expYear = Number(card.exp_year);
+  if (!Number.isInteger(expMonth) || expMonth < 1 || expMonth > 12 || !Number.isInteger(expYear)) throw new Error("Stripe returned invalid card metadata");
+  const { data: contract, error: contractError } = await service.from("contracts").select("customer_id").eq("id", payment.contract_id).single();
+  if (contractError) throw new Error(contractError.message);
+  const now = new Date().toISOString();
+  const { error } = await service.from("stripe_payment_methods").upsert({
+    contract_id: payment.contract_id,
+    customer_id: contract.customer_id || null,
+    stripe_customer_id: customerId,
+    stripe_payment_method_id: methodId,
+    card_brand: String(card.brand || "card").slice(0, 40),
+    card_last4: String(card.last4),
+    exp_month: expMonth,
+    exp_year: expYear,
+    reusable: true,
+    consented_at: now,
+    created_by: actorId,
+    updated_at: now,
+  }, { onConflict: "contract_id" });
+  if (error) throw new Error(error.message);
+  await service.from("contracts").update({ card_last4: String(card.last4), updated_at: now }).eq("id", payment.contract_id);
+  return { brand: String(card.brand || "card"), last4: String(card.last4), exp_month: expMonth, exp_year: expYear, reusable: true };
+}
+
+async function markFromSession(service: any, payment: any, session: any, eventId = "", actorId: string | null = null) {
   if (String(session.client_reference_id || "") !== String(payment.contract_id) || String(session.metadata?.contract_id || "") !== String(payment.contract_id)) throw new Error("Stripe contract reference mismatch");
   if (Number(session.amount_total || 0) !== Number(payment.amount_cents)) throw new Error("Stripe amount mismatch");
   const paid = session.payment_status === "paid";
@@ -49,7 +83,8 @@ async function markFromSession(service: any, payment: any, session: any, eventId
     }).eq("id", payment.contract_id);
     if (contractError) throw new Error(contractError.message);
   }
-  return { paid, status, amount_cents: payment.amount_cents, contract_id: payment.contract_id };
+  const card = paid ? await saveReusablePaymentMethod(service, payment, session, actorId || payment.created_by || null) : null;
+  return { paid, status, amount_cents: payment.amount_cents, contract_id: payment.contract_id, card };
 }
 
 Deno.serve(async (req: Request) => {
@@ -64,6 +99,19 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({}));
   const action = String(body.action || "status");
   if (action === "status") return json({ configured: stripeEnabled(), activation_pending: !stripeEnabled(), mode: env("STRIPE_SECRET_KEY").startsWith("sk_live_") ? "live" : "test" });
+  if (action === "card_summary") {
+    if (role !== "admin") return json({ error: "Administrator access required" }, 403);
+    const contractId = String(body.contract_id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
+    const { data: method, error } = await service.from("stripe_payment_methods").select("card_brand,card_last4,exp_month,exp_year,reusable").eq("contract_id", contractId).maybeSingle();
+    if (error) return json({ error: error.message }, 500);
+    const { data: contract } = method ? { data: null } : await service.from("contracts").select("card_last4,payment_method").eq("id", contractId).maybeSingle();
+    const { error: auditError } = await service.from("card_access_audit").insert({ contract_id: contractId, accessed_by: authData.user.id, action: "view_masked" });
+    if (auditError) return json({ error: auditError.message }, 500);
+    if (method) return json({ available: true, source: "stripe", brand: method.card_brand, last4: method.card_last4, exp_month: method.exp_month, exp_year: method.exp_year, reusable: !!method.reusable });
+    if (/^\d{4}$/.test(String(contract?.card_last4 || ""))) return json({ available: true, source: "legacy", brand: null, last4: contract.card_last4, exp_month: null, exp_year: null, reusable: false });
+    return json({ available: false, source: "none", reusable: false });
+  }
   if (!stripeEnabled()) return json({ error: "STRIPE_NOT_CONFIGURED", activation_pending: true }, 503);
 
   try {
@@ -78,13 +126,20 @@ Deno.serve(async (req: Request) => {
       const { data: existing } = await service.from("stripe_payments").select("*").eq("contract_id", contractId).eq("amount_cents", amountCents).eq("status", "open").gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (existing?.checkout_url) return json({ checkout_url: existing.checkout_url, session_id: existing.checkout_session_id, reused: true, mode: existing.livemode ? "live" : "test" });
       const { data: customer } = contract.customer_id ? await service.from("customers").select("email,full_name").eq("id", contract.customer_id).maybeSingle() : { data: null };
+      const { data: savedMethod } = contract.customer_id ? await service.from("stripe_payment_methods").select("stripe_customer_id").eq("customer_id", contract.customer_id).eq("reusable", true).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
       const params = new URLSearchParams();
       params.set("mode", "payment"); params.set("ui_mode", "hosted_page"); params.set("locale", "es"); params.set("payment_method_types[0]", "card");
       params.set("client_reference_id", contract.id); params.set("metadata[contract_id]", contract.id); params.set("metadata[contract_number]", `LR-${String(contract.contract_number).padStart(6, "0")}`);
       params.set("line_items[0][quantity]", "1"); params.set("line_items[0][price_data][currency]", "eur"); params.set("line_items[0][price_data][unit_amount]", String(amountCents));
       params.set("line_items[0][price_data][product_data][name]", `Alquiler Larios Rental · LR-${String(contract.contract_number).padStart(6, "0")}`);
       params.set("line_items[0][price_data][product_data][description]", "Importe total del contrato de alquiler");
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer?.email || "")) params.set("customer_email", customer.email);
+      params.set("payment_intent_data[setup_future_usage]", "off_session");
+      params.set("custom_text[submit][message]", "Al pagar, autorizas a Larios Rental a guardar de forma segura este método en Stripe para cargos posteriores justificados relacionados con el contrato.");
+      if (/^cus_[A-Za-z0-9_]+$/.test(String(savedMethod?.stripe_customer_id || ""))) params.set("customer", savedMethod.stripe_customer_id);
+      else {
+        params.set("customer_creation", "always");
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer?.email || "")) params.set("customer_email", customer.email);
+      }
       params.set("success_url", `${appUrl()}?stripe=success&session_id={CHECKOUT_SESSION_ID}&contract_id=${encodeURIComponent(contract.id)}`);
       params.set("cancel_url", `${appUrl()}?stripe=cancel&contract_id=${encodeURIComponent(contract.id)}`);
       const session = await stripe("/v1/checkout/sessions", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Idempotency-Key": `lr-${contract.id}-${amountCents}` }, body: params });
@@ -99,11 +154,10 @@ Deno.serve(async (req: Request) => {
       const { data: payment, error } = await service.from("stripe_payments").select("*").eq("checkout_session_id", sessionId).eq("contract_id", contractId).single();
       if (error || !payment) return json({ error: "Payment not found" }, 404);
       const session = await stripe(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`);
-      return json(await markFromSession(service, payment, session));
+      return json(await markFromSession(service, payment, session, "", authData.user.id));
     }
     return json({ error: "Unknown action" }, 400);
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : String(error) }, 502);
   }
 });
-
