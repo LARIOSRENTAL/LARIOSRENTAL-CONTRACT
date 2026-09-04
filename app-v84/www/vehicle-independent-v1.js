@@ -1,62 +1,76 @@
 (function(){
 'use strict';
-let fleetPromise=null;
+let fleetPromise=null,fleetCache=[];
 const $=id=>document.getElementById(id);
+const norm=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 function set(id,value){const el=$(id);if(el)el.value=value??''}
-async function loadFleet(){
+function removeSelectors(){
+  ['vehicle_select','vehicle_select_independent'].forEach(id=>{const el=$(id);if(el)el.remove()});
+}
+function loadFleet(){
   if(!fleetPromise){
     fleetPromise=(async()=>{
       try{
         const rows=await api('vehicles?select=id,registration,make,model,status,category,fuel_type&order=registration');
-        return Array.isArray(rows)?rows:[];
-      }catch(e){console.warn('No se pudo cargar la flota independiente',e);return[]}
+        fleetCache=Array.isArray(rows)?rows:[];
+      }catch(e){console.warn('No se pudo precargar la flota',e);fleetCache=[]}
+      return fleetCache;
     })();
   }
   return fleetPromise;
 }
-function label(v){
-  const main=[v.registration,v.make,v.model].filter(Boolean).join(' · ')||'Vehículo';
-  return v.status&&v.status!=='available'?main+' · '+v.status:main;
+function exactVehicle(value){
+  const key=norm(value);if(key.length<4)return null;
+  return fleetCache.find(v=>norm(v.registration)===key)||null;
 }
-async function install(){
-  const model=$('vehicle_model');
-  if(!model)return;
-  const legacy=$('vehicle_select');
-  if(legacy){legacy.style.display='none';legacy.setAttribute('aria-hidden','true')}
-  let sel=$('vehicle_select_independent');
-  if(!sel){
-    sel=document.createElement('select');
-    sel.id='vehicle_select_independent';
-    sel.innerHTML='<option value="">Asignar vehículo de flota · todos los grupos</option>';
-    sel.dataset.independent='1';
-    model.parentNode.insertBefore(sel,legacy||model);
-    sel.addEventListener('change',async()=>{
-      const rows=await loadFleet(),v=rows.find(x=>x.id===sel.value);
-      if(!v)return;
-      set('vehicle_model',[v.make,v.model].filter(Boolean).join(' ')||v.model||'');
-      set('vehicle_plate',v.registration||'');
-      if(v.fuel_type)set('fuel_type',String(v.fuel_type).toUpperCase().includes('DIESEL')?'DIESEL':'GASOLINA');
-      // Deliberadamente NO se modifica vehicle_group, assigned_vehicle_group ni ninguna tarifa.
-    });
-  }
-  const rows=await loadFleet();
-  const currentPlate=String($('vehicle_plate')?.value||'').trim().toUpperCase();
-  const currentId=sel.value;
-  sel.innerHTML='<option value="">Asignar vehículo de flota · todos los grupos</option>'+rows.map(v=>'<option value="'+String(v.id)+'">'+label(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</option>').join('');
-  const byPlate=rows.find(v=>String(v.registration||'').trim().toUpperCase()===currentPlate);
-  if(byPlate)sel.value=byPlate.id;else if(rows.some(v=>v.id===currentId))sel.value=currentId;
+function applyVehicle(v){
+  if(!v)return false;
+  set('vehicle_plate',v.registration||'');
+  set('vehicle_model',[v.make,v.model].filter(Boolean).join(' ')||v.model||'');
+  if(v.fuel_type)set('fuel_type',String(v.fuel_type).toUpperCase().includes('DIESEL')?'DIESEL':'GASOLINA');
+  // La matrícula identifica el vehículo físico. Nunca modifica grupo reservado,
+  // grupo asignado, tarifa, franquicia ni ningún cálculo económico.
+  return true;
 }
+function matchNow(){
+  const plate=$('vehicle_plate');if(!plate)return false;
+  return applyVehicle(exactVehicle(plate.value));
+}
+async function matchAfterLoad(){await loadFleet();return matchNow()}
+function bindPlate(){
+  removeSelectors();
+  const plate=$('vehicle_plate');if(!plate)return false;
+  plate.removeAttribute('list');
+  plate.setAttribute('autocomplete','off');
+  plate.setAttribute('autocapitalize','characters');
+  plate.setAttribute('spellcheck','false');
+  if(plate.dataset.lrFastPlate==='1')return true;
+  plate.dataset.lrFastPlate='1';
+  // Escritura 100% local: no hace ninguna petición de red por pulsación.
+  plate.addEventListener('input',()=>{matchNow()},{passive:true});
+  plate.addEventListener('change',()=>{if(!matchNow())void matchAfterLoad()});
+  plate.addEventListener('blur',()=>{if(!matchNow())void matchAfterLoad()});
+  plate.addEventListener('focus',removeSelectors,{passive:true});
+  matchNow();
+  return true;
+}
+function install(){removeSelectors();bindPlate()}
 function wrapReservations(){
   const R=window.LariosReservations;
-  if(!R||R.__vehicleIndependentV1)return;
-  R.__vehicleIndependentV1=true;
+  if(!R||R.__vehicleIndependentV2)return;
+  R.__vehicleIndependentV2=true;
   if(typeof R.edit==='function'){
     const old=R.edit.bind(R);
-    R.edit=function(id){const result=old(id);setTimeout(install,120);setTimeout(install,450);return result};
+    R.edit=function(id){const result=old(id);setTimeout(install,70);setTimeout(install,250);return result};
   }
 }
-function boot(){wrapReservations();setTimeout(install,500)}
+function boot(){
+  wrapReservations();
+  setTimeout(install,350);
+  const preload=()=>void loadFleet();
+  if('requestIdleCallback' in window)requestIdleCallback(preload,{timeout:1800});else setTimeout(preload,900);
+}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-window.addEventListener('focus',()=>setTimeout(install,120));
-window.LariosVehicleIndependent={refresh(){fleetPromise=null;return install()},install};
+window.addEventListener('focus',()=>setTimeout(install,80));
+window.LariosVehicleIndependent={refresh(){fleetPromise=null;fleetCache=[];void loadFleet();return install()},install,match:matchAfterLoad};
 })();
