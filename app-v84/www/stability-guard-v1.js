@@ -6,18 +6,14 @@ if(!Native)return;
 window.__lrNativeMutationObserver=Native;
 window.MutationObserver=function(callback){
   const source=String(callback||'');
-  if(!/patchForm/.test(source)||!/reservation/.test(source))return new Native(callback);
-  let timer=0,lastRecords=[],lastObserver=null;
-  return new Native(function(records,observer){
-    lastRecords=records;lastObserver=observer;
-    if(timer)return;
-    timer=setTimeout(function(){
-      timer=0;
-      const reservation=document.getElementById('reservation');
-      if(!reservation||reservation.classList.contains('hidden'))return;
-      try{callback(lastRecords,lastObserver)}catch(e){console.warn('Larios stability observer',e)}
-    },120);
-  });
+  // larios-fixes legacy observer re-runs patchForm whenever patchForm itself
+  // changes classes. On Safari/iPad this can create a self-triggering UI loop.
+  // patchForm already runs explicitly when a reservation is opened, so this
+  // observer is unnecessary and is replaced by a no-op observer.
+  if(/patchForm/.test(source)&&/reservation/.test(source)){
+    return new Native(function(){});
+  }
+  return new Native(callback);
 };
 window.MutationObserver.prototype=Native.prototype;
 window.MutationObserver.toString=()=>Native.toString();
