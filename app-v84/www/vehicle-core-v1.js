@@ -123,7 +123,7 @@ function wrapReservations(){
 function boot(){
   wrapReservations();
   install();
-  const preload=()=>void loadFleetOnce();
+  const preload=()=>void loadFleetOnce().then(()=>applyMatch());
   if('requestIdleCallback' in window)requestIdleCallback(preload,{timeout:1200});
   else setTimeout(preload,400);
 }
