@@ -15,10 +15,14 @@ function patch(){
       o.x=x+10;
     }
 
-    // Card expiry: center farther right and a touch lower inside CAD. box.
+    // Card expiry: keep it geometrically centered in the CAD. value box.
     if(Math.abs(y-703)<0.2 && x<330){
-      o.x=x+10;
-      o.y=y-3;
+      try{
+        const size=Number(o.size||7.2);
+        const tw=o.font?.widthOfTextAtSize?o.font.widthOfTextAtSize(String(text),size):0;
+        o.x=303-(tw/2);
+        o.y=703;
+      }catch(_){ }
     }
 
     // Vehicle registration: move away from the printed label into the value area.
