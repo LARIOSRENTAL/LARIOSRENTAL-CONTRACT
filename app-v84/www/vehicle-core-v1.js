@@ -2,6 +2,7 @@
 'use strict';
 let fleetPromise=null;
 let fleet=[];
+let guardTimer=null;
 const $=id=>document.getElementById(id);
 const norm=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 
@@ -15,6 +16,7 @@ function legacyBlocker(){
   el.id='vehicle_select';
   el.dataset.lrCoreBlocker='1';
   el.hidden=true;
+  el.style.display='none';
   el.tabIndex=-1;
   el.setAttribute('aria-hidden','true');
   form.appendChild(el);
@@ -24,10 +26,18 @@ function legacyBlocker(){
 function purgeSuggestions(){
   const independent=$('vehicle_select_independent');
   if(independent)independent.remove();
+  const legacy=$('vehicle_select');
+  if(legacy&&legacy.dataset.lrCoreBlocker!=='1')legacy.remove();
   document.querySelectorAll('datalist').forEach(el=>{
     const id=(el.id||'').toLowerCase();
     if(id.includes('vehicle')||id.includes('plate')||id.includes('matric'))el.remove();
   });
+  const plate=$('vehicle_plate');
+  if(plate){
+    plate.removeAttribute('list');
+    plate.removeAttribute('data-list');
+    plate.removeAttribute('aria-autocomplete');
+  }
   legacyBlocker();
 }
 
@@ -75,7 +85,7 @@ function bindPlate(){
   plate.removeAttribute('list');
   plate.removeAttribute('data-list');
   plate.removeAttribute('aria-autocomplete');
-  plate.name='lr_vehicle_registration';
+  plate.name='lr_manual_plate_text';
   plate.autocomplete='off';
   plate.setAttribute('autocorrect','off');
   plate.setAttribute('autocapitalize','characters');
@@ -91,9 +101,24 @@ function bindPlate(){
 }
 
 function install(){
-  legacyBlocker();
+  purgeSuggestions();
   bindPlate();
-  legacyBlocker();
+  purgeSuggestions();
+}
+
+function scheduleGuard(){
+  if(guardTimer)return;
+  guardTimer=setTimeout(()=>{
+    guardTimer=null;
+    if(!$('reservation')?.classList.contains('hidden'))install();
+  },0);
+}
+
+function installDomGuard(){
+  if(window.__lrVehicleDomGuard)return;
+  window.__lrVehicleDomGuard=true;
+  const observer=new MutationObserver(scheduleGuard);
+  observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','list','data-list','aria-autocomplete']});
 }
 
 function wrapReservations(){
@@ -105,7 +130,8 @@ function wrapReservations(){
     R.edit=function(id){
       const result=oldEdit(id);
       setTimeout(install,0);
-      setTimeout(install,60);
+      setTimeout(install,30);
+      setTimeout(install,120);
       return result;
     };
   }
@@ -114,7 +140,8 @@ function wrapReservations(){
     R.openNew=function(){
       const result=oldNew();
       setTimeout(install,0);
-      setTimeout(install,60);
+      setTimeout(install,30);
+      setTimeout(install,120);
       return result;
     };
   }
@@ -122,6 +149,7 @@ function wrapReservations(){
 
 function boot(){
   wrapReservations();
+  installDomGuard();
   install();
   const preload=()=>void loadFleetOnce().then(()=>applyMatch());
   if('requestIdleCallback' in window)requestIdleCallback(preload,{timeout:1200});
