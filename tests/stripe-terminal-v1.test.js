@@ -17,6 +17,8 @@ assert.match(frontend, /lrTerminalAmount/);
 assert.match(frontend, /amount_cents/);
 assert.match(frontend, /cobro REAL/);
 assert.match(frontend, /terminal_cancel/);
+assert.match(frontend, /Comprobar lector/);
+assert.match(frontend, /Stripe.*REAL/);
 assert.match(frontend, /Esperando la tarjeta en el lector/);
 
 console.log('Stripe Terminal flow: ok');
