@@ -8,7 +8,9 @@ assert.match(backend, /terminal_verify/);
 assert.match(backend, /terminal_cancel/);
 assert.match(backend, /payment_method_types\[0\][\s\S]*card_present/);
 assert.match(backend, /process_payment_intent/);
+assert.match(backend, /process_config\[allow_redisplay\][\s\S]*limited/);
 assert.match(backend, /STRIPE_TERMINAL_LOCATION_ID/);
+assert.match(backend, /\(\?:sk\|rk\)_live_/);
 assert.match(backend, /enable_customer_cancellation/);
 assert.match(backend, /lr-terminal-/);
 

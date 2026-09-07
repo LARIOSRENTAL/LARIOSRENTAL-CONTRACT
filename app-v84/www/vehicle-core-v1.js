@@ -6,28 +6,11 @@ let guardTimer=null;
 const $=id=>document.getElementById(id);
 const norm=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 
-function legacyBlocker(){
-  let el=$('vehicle_select');
-  if(el&&el.dataset.lrCoreBlocker==='1')return el;
-  if(el)el.remove();
-  const form=$('reservationForm');
-  if(!form)return null;
-  el=document.createElement('select');
-  el.id='vehicle_select';
-  el.dataset.lrCoreBlocker='1';
-  el.hidden=true;
-  el.style.display='none';
-  el.tabIndex=-1;
-  el.setAttribute('aria-hidden','true');
-  form.appendChild(el);
-  return el;
-}
-
 function purgeSuggestions(){
   const independent=$('vehicle_select_independent');
   if(independent)independent.remove();
   const legacy=$('vehicle_select');
-  if(legacy&&legacy.dataset.lrCoreBlocker!=='1')legacy.remove();
+  if(legacy)legacy.remove();
   document.querySelectorAll('datalist').forEach(el=>{
     const id=(el.id||'').toLowerCase();
     if(id.includes('vehicle')||id.includes('plate')||id.includes('matric'))el.remove();
@@ -38,7 +21,6 @@ function purgeSuggestions(){
     plate.removeAttribute('data-list');
     plate.removeAttribute('aria-autocomplete');
   }
-  legacyBlocker();
 }
 
 function loadFleetOnce(){
@@ -54,6 +36,11 @@ function loadFleetOnce(){
     return fleet;
   })();
   return fleetPromise;
+}
+
+function refreshFleet(){
+  fleetPromise=null;
+  return loadFleetOnce().then(rows=>{applyMatch();return rows;});
 }
 
 function setValue(id,value){
@@ -159,5 +146,5 @@ function boot(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});
 else boot();
 window.addEventListener('pageshow',()=>setTimeout(install,0));
-window.LariosVehicleCore={install,match:applyMatch,load:loadFleetOnce};
+window.LariosVehicleCore={install,match:applyMatch,load:loadFleetOnce,refresh:refreshFleet};
 })();

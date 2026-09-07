@@ -141,4 +141,14 @@ const fleetMatch = bestFleetVehicle([
 ], 'MATRICULA: 4028 MIRC', {});
 assert.equal(fleetMatch.registration, '4028 MRC');
 
+const fuzzyKeyMatch = bestFleetVehicle([
+  {registration:'8487MVJ',make:'CITROEN',model:'C3',fuel_type:'GASOLINA'},
+  {registration:'7855MXL',make:'KIA',model:'PICANTO',fuel_type:'GASOLINA'},
+], `MATRICULA: 8487 MIVI
+ITROEN F
+MARCA:
+MODELO: ¢3
+FUEL: GASOLINA-UNLEADED`, {});
+assert.equal(fuzzyKeyMatch.registration, '8487MVJ');
+
 console.log('OK parser V6: permisos español, británico y europeo.');
