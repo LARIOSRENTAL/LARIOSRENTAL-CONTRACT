@@ -4,11 +4,11 @@ global.window=global;global.document={readyState:'loading',addEventListener(){},
 require('../app-v84/www/stripe-checkout-v1.js');
 assert.equal(global.LariosStripe.__test.isCard('Tarjeta'),true);
 assert.equal(global.LariosStripe.__test.isCard('Efectivo'),false);
-const ui=fs.readFileSync(require.resolve('../app-v84/www/stripe-checkout-v1.js'),'utf8');
-assert.match(ui,/saveDraft/);assert.match(ui,/location\.assign\(checkout\.checkout_url\)/);assert.match(ui,/stripe\('verify'/);assert.match(ui,/no se ha realizado ningún cargo/);
+const ui=fs.readFileSync(require.resolve('../app-v84/www/payment-methods-v1.js'),'utf8');
+assert.match(ui,/saveDraft/);assert.match(ui,/location\.assign\(d\.checkout_url\)/);assert.match(ui,/call\('verify'/);assert.match(ui,/Pago cancelado/);
 const checkout=fs.readFileSync(require.resolve('../supabase/functions/stripe-checkout/index.ts'),'utf8');
-assert.match(checkout,/2026-08-26\.dahlia/);assert.match(checkout,/Idempotency-Key/);assert.match(checkout,/amount_total/);assert.match(checkout,/payment_status === "paid"/);assert.match(checkout,/STRIPE_NOT_CONFIGURED/);
-assert.match(checkout,/payment_intent_data\[setup_future_usage\]/);assert.match(checkout,/off_session/);assert.match(checkout,/card_summary/);assert.match(checkout,/role !== "admin"/);assert.match(checkout,/card_access_audit/);assert.doesNotMatch(checkout,/card_number\s*[:=]|security_code\s*[:=]|cvc\s*[:=]/i);
+assert.match(checkout,/2026-08-26\.dahlia/);assert.match(checkout,/Idempotency-Key/);assert.match(checkout,/amount_total/);assert.match(checkout,/payment_status\s*!==\s*"paid"/);assert.match(checkout,/STRIPE_NOT_CONFIGURED/);
+assert.match(checkout,/payment_intent_data\[setup_future_usage\]/);assert.match(checkout,/off_session/);assert.match(checkout,/card_summary/);assert.match(checkout,/role\s*!==\s*"admin"/);assert.match(checkout,/card_access_audit/);assert.doesNotMatch(checkout,/card_number\s*[:=]|security_code\s*[:=]|cvc\s*[:=]/i);
 const webhook=fs.readFileSync(require.resolve('../supabase/functions/stripe-webhook/index.ts'),'utf8');
 assert.match(webhook,/Stripe-Signature/);assert.match(webhook,/HMAC/);assert.match(webhook,/amountMatches/);assert.match(webhook,/referenceMatches/);assert.match(webhook,/checkout\.session\.completed/);
 assert.match(webhook,/stripe_payment_methods/);assert.match(webhook,/expand\[\]=payment_method/);assert.doesNotMatch(webhook,/card_number\s*[:=]|security_code\s*[:=]|cvc\s*[:=]/i);

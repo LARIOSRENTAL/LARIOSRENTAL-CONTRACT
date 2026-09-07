@@ -1,163 +1,52 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
-const cors = {
-  "Access-Control-Allow-Origin": "https://lariosrental.github.io",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
-};
-const env = (name: string) => (Deno.env.get(name) || "").trim();
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: cors });
-const stripeEnabled = () => env("STRIPE_ENABLED").toLowerCase() === "true" && env("STRIPE_SECRET_KEY").startsWith("sk_");
-const stripeApiVersion = () => env("STRIPE_API_VERSION") || "2026-08-26.dahlia";
-const appUrl = () => (env("STRIPE_APP_URL") || "https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/").replace(/\?.*$/, "");
-
-async function stripe(path: string, init: RequestInit = {}) {
-  const response = await fetch(`https://api.stripe.com${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${env("STRIPE_SECRET_KEY")}`,
-      "Stripe-Version": stripeApiVersion(),
-      ...(init.headers || {}),
-    },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message || `Stripe returned ${response.status}`);
-  return data;
+const cors={"Access-Control-Allow-Origin":"https://lariosrental.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json"};
+const env=(n:string)=>(Deno.env.get(n)||"").trim();
+const json=(v:unknown,s=200)=>new Response(JSON.stringify(v),{status:s,headers:cors});
+const stripeKey=()=>env("STRIPE_SECRET_KEY");
+const stripeEnabled=()=>stripeKey().startsWith("sk_test_")||(stripeKey().startsWith("sk_live_")&&env("STRIPE_ENABLED").toLowerCase()==="true");
+const terminalLocation=()=>env("STRIPE_TERMINAL_LOCATION_ID");
+const terminalEnabled=()=>stripeEnabled()&&/^tml_[A-Za-z0-9_]+$/.test(terminalLocation());
+const stripeVersion=()=>env("STRIPE_API_VERSION")||"2026-08-26.dahlia";
+const appUrl=()=>(env("STRIPE_APP_URL")||"https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/").replace(/\?.*$/,"");
+async function stripe(path:string,init:RequestInit={}){const r=await fetch(`https://api.stripe.com${path}`,{...init,headers:{Authorization:`Bearer ${stripeKey()}`,"Stripe-Version":stripeVersion(),...(init.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error?.message||`Stripe returned ${r.status}`);return d;}
+async function getContract(service:any,id:string){const {data,error}=await service.from("contracts").select("id,contract_number,total,payment_method,app_payload,customer_id,updated_at").eq("id",id).single();if(error||!data)throw new Error("Contract not found");return data;}
+async function getCustomer(service:any,id:string|null){if(!id)return null;const {data}=await service.from("customers").select("id,email,full_name").eq("id",id).maybeSingle();return data||null;}
+async function ensureStripeCustomer(service:any,contract:any){if(contract.customer_id){const {data:saved}=await service.from("stripe_payment_methods").select("stripe_customer_id").eq("customer_id",contract.customer_id).eq("reusable",true).order("created_at",{ascending:false}).limit(1).maybeSingle();if(/^cus_[A-Za-z0-9_]+$/.test(String(saved?.stripe_customer_id||"")))return saved.stripe_customer_id;}
+  const c=await getCustomer(service,contract.customer_id);const p=new URLSearchParams();if(c?.email)p.set("email",c.email);if(c?.full_name)p.set("name",c.full_name);p.set("metadata[contract_id]",contract.id);const sc=await stripe("/v1/customers",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:p});return sc.id;
 }
+async function appendEvent(service:any,contractId:string,event:any){const {data}=await service.from("contracts").select("app_payload").eq("id",contractId).single();const payload=data?.app_payload||{};const events=Array.isArray(payload.payment_events)?payload.payment_events:[];events.push({...event,at:new Date().toISOString()});await service.from("contracts").update({app_payload:{...payload,payment_events:events.slice(-50)},updated_at:new Date().toISOString()}).eq("id",contractId);}
+async function saveMethod(service:any,contractId:string,customerId:string|null,stripeCustomerId:string,pmId:string,actorId:string|null){if(!/^pm_[A-Za-z0-9_]+$/.test(pmId)||!/^cus_[A-Za-z0-9_]+$/.test(stripeCustomerId))return null;const pm=await stripe(`/v1/payment_methods/${encodeURIComponent(pmId)}`);const card=pm?.card;if(pm?.type!=="card"||!/^\d{4}$/.test(String(card?.last4||"")))return null;const now=new Date().toISOString();const {error}=await service.from("stripe_payment_methods").upsert({contract_id:contractId,customer_id:customerId||null,stripe_customer_id:stripeCustomerId,stripe_payment_method_id:pmId,card_brand:String(card.brand||"card").slice(0,40),card_last4:String(card.last4),exp_month:Number(card.exp_month),exp_year:Number(card.exp_year),reusable:true,consented_at:now,created_by:actorId,updated_at:now},{onConflict:"contract_id"});if(error)throw new Error(error.message);await service.from("contracts").update({card_last4:String(card.last4),updated_at:now}).eq("id",contractId);return{brand:String(card.brand||"card"),last4:String(card.last4),exp_month:Number(card.exp_month),exp_year:Number(card.exp_year),reusable:true};}
+async function markPaid(service:any,contract:any,kind:string,reference:string,amountCents:number,actorId:string|null,card:any=null){const now=new Date().toISOString();await service.from("contracts").update({payment_method:"Tarjeta",app_payload:{...(contract.app_payload||{}),payment_status:"paid",payment_channel:kind,payment_reference:reference,payment_amount_cents:amountCents,payment_paid_at:now},updated_at:now}).eq("id",contract.id);await appendEvent(service,contract.id,{type:"payment",channel:kind,reference,amount_cents:amountCents,status:"paid",created_by:actorId});return{paid:true,status:"paid",amount_cents:amountCents,contract_id:contract.id,card};}
+async function saveCheckoutCard(service:any,contract:any,session:any,actorId:string|null){if(session.payment_status!=="paid"||!session.payment_intent)return null;const pi=await stripe(`/v1/payment_intents/${encodeURIComponent(String(session.payment_intent))}?expand[]=payment_method`);const m=pi.payment_method;const pmId=typeof m==="string"?m:String(m?.id||"");const cus=typeof pi.customer==="string"?pi.customer:String(pi.customer?.id||session.customer||"");return saveMethod(service,contract.id,contract.customer_id,cus,pmId,actorId);}
+async function saveTerminalCard(service:any,contract:any,pi:any,actorId:string|null){const cp=pi?.latest_charge?.payment_method_details?.card_present;const generated=String(cp?.generated_card||"");const cus=typeof pi.customer==="string"?pi.customer:String(pi.customer?.id||"");if(!generated)return null;return saveMethod(service,contract.id,contract.customer_id,cus,generated,actorId);}
 
-async function saveReusablePaymentMethod(service: any, payment: any, session: any, actorId: string | null) {
-  if (session.payment_status !== "paid" || !session.payment_intent) return null;
-  const intent = await stripe(`/v1/payment_intents/${encodeURIComponent(String(session.payment_intent))}?expand[]=payment_method`);
-  const method = intent.payment_method;
-  const methodId = typeof method === "string" ? method : String(method?.id || "");
-  const customerId = typeof intent.customer === "string" ? intent.customer : String(intent.customer?.id || session.customer || "");
-  const card = typeof method === "object" ? method?.card : null;
-  if (!/^pm_[A-Za-z0-9_]+$/.test(methodId) || !/^cus_[A-Za-z0-9_]+$/.test(customerId) || method?.type !== "card" || !/^\d{4}$/.test(String(card?.last4 || ""))) {
-    throw new Error("Stripe did not return a reusable card token");
+Deno.serve(async(req:Request)=>{
+ if(req.method==="OPTIONS")return new Response("ok",{headers:cors});if(req.method!=="POST")return json({error:"Method not allowed"},405);
+ const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");if(!jwt)return json({error:"Authentication required"},401);
+ const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});const {data:auth,error:authError}=await service.auth.getUser(jwt);const role=auth.user?.app_metadata?.role;if(authError||!auth.user||!["employee","admin"].includes(role))return json({error:"Not authorized"},403);
+ const body=await req.json().catch(()=>({}));const action=String(body.action||"status");
+ if(action==="status")return json({configured:stripeEnabled(),terminal_configured:terminalEnabled(),activation_pending:!stripeEnabled(),mode:stripeKey().startsWith("sk_live_")?"live":"test",terminal_supported:true,tap_to_pay_native_required:true});
+ if(action==="bank_confirm"){try{const id=String(body.contract_id||"");if(!/^[0-9a-f-]{36}$/i.test(id))return json({error:"Invalid contract"},400);const c=await getContract(service,id);const cents=Math.round(Number(c.total||0)*100);const now=new Date().toISOString();await service.from("contracts").update({payment_method:"Banco",app_payload:{...(c.app_payload||{}),payment_status:"paid",payment_channel:"bank",payment_amount_cents:cents,payment_paid_at:now},updated_at:now}).eq("id",id);await appendEvent(service,id,{type:"payment",channel:"bank",amount_cents:cents,status:"paid",created_by:auth.user.id});return json({paid:true,status:"paid",amount_cents:cents,contract_id:id});}catch(e){return json({error:e instanceof Error?e.message:String(e)},500)}}
+ if(!stripeEnabled())return json({error:"STRIPE_NOT_CONFIGURED",activation_pending:true},503);
+ try{
+  if(action==="card_summary"){if(role!=="admin")return json({error:"Administrator access required"},403);const id=String(body.contract_id||"");if(!/^[0-9a-f-]{36}$/i.test(id))return json({error:"Invalid contract"},400);const {data:m,error}=await service.from("stripe_payment_methods").select("card_brand,card_last4,exp_month,exp_year,reusable").eq("contract_id",id).maybeSingle();if(error)throw error;await service.from("card_access_audit").insert({contract_id:id,accessed_by:auth.user.id,action:"view_masked"});return json(m?{available:true,source:"stripe",brand:m.card_brand,last4:m.card_last4,exp_month:m.exp_month,exp_year:m.exp_year,reusable:!!m.reusable}:{available:false,source:"none",reusable:false});
   }
-  const expMonth = Number(card.exp_month), expYear = Number(card.exp_year);
-  if (!Number.isInteger(expMonth) || expMonth < 1 || expMonth > 12 || !Number.isInteger(expYear)) throw new Error("Stripe returned invalid card metadata");
-  const { data: contract, error: contractError } = await service.from("contracts").select("customer_id").eq("id", payment.contract_id).single();
-  if (contractError) throw new Error(contractError.message);
-  const now = new Date().toISOString();
-  const { error } = await service.from("stripe_payment_methods").upsert({
-    contract_id: payment.contract_id,
-    customer_id: contract.customer_id || null,
-    stripe_customer_id: customerId,
-    stripe_payment_method_id: methodId,
-    card_brand: String(card.brand || "card").slice(0, 40),
-    card_last4: String(card.last4),
-    exp_month: expMonth,
-    exp_year: expYear,
-    reusable: true,
-    consented_at: now,
-    created_by: actorId,
-    updated_at: now,
-  }, { onConflict: "contract_id" });
-  if (error) throw new Error(error.message);
-  await service.from("contracts").update({ card_last4: String(card.last4), updated_at: now }).eq("id", payment.contract_id);
-  return { brand: String(card.brand || "card"), last4: String(card.last4), exp_month: expMonth, exp_year: expYear, reusable: true };
-}
-
-async function markFromSession(service: any, payment: any, session: any, eventId = "", actorId: string | null = null) {
-  if (String(session.client_reference_id || "") !== String(payment.contract_id) || String(session.metadata?.contract_id || "") !== String(payment.contract_id)) throw new Error("Stripe contract reference mismatch");
-  if (Number(session.amount_total || 0) !== Number(payment.amount_cents)) throw new Error("Stripe amount mismatch");
-  const paid = session.payment_status === "paid";
-  const status = paid ? "paid" : session.status === "expired" ? "expired" : "open";
-  const now = new Date().toISOString();
-  const { error: paymentError } = await service.from("stripe_payments").update({
-    status, payment_intent_id: session.payment_intent ? String(session.payment_intent) : null,
-    livemode: !!session.livemode, paid_at: paid ? now : null, last_event_id: eventId || payment.last_event_id || null,
-    failure_message: null, updated_at: now,
-  }).eq("id", payment.id);
-  if (paymentError) throw new Error(paymentError.message);
-  if (paid) {
-    const { data: contract, error } = await service.from("contracts").select("app_payload").eq("id", payment.contract_id).single();
-    if (error) throw new Error(error.message);
-    const { error: contractError } = await service.from("contracts").update({
-      payment_method: "Tarjeta",
-      app_payload: { ...(contract.app_payload || {}), payment_status: "paid", stripe_checkout_session_id: session.id, stripe_payment_intent_id: session.payment_intent || null, stripe_amount_cents: payment.amount_cents, stripe_paid_at: now },
-      updated_at: now,
-    }).eq("id", payment.contract_id);
-    if (contractError) throw new Error(contractError.message);
+  if(action==="create"){const id=String(body.contract_id||"");if(!/^[0-9a-f-]{36}$/i.test(id))return json({error:"Invalid contract"},400);const c=await getContract(service,id);if(c.payment_method!=="Tarjeta")return json({error:"Select card payment first"},409);const cents=Math.round(Number(c.total||0)*100);if(cents<=0)return json({error:"The contract total must be greater than zero"},409);const {data:existing}=await service.from("stripe_payments").select("*").eq("contract_id",id).eq("amount_cents",cents).eq("status","open").gt("expires_at",new Date().toISOString()).order("created_at",{ascending:false}).limit(1).maybeSingle();if(existing?.checkout_url)return json({checkout_url:existing.checkout_url,session_id:existing.checkout_session_id,reused:true,mode:existing.livemode?"live":"test"});const customer=await getCustomer(service,c.customer_id);const p=new URLSearchParams();p.set("mode","payment");p.set("ui_mode","hosted_page");p.set("locale","es");p.set("payment_method_types[0]","card");p.set("client_reference_id",c.id);p.set("metadata[contract_id]",c.id);p.set("metadata[contract_number]",`LR-${String(c.contract_number).padStart(6,"0")}`);p.set("line_items[0][quantity]","1");p.set("line_items[0][price_data][currency]","eur");p.set("line_items[0][price_data][unit_amount]",String(cents));p.set("line_items[0][price_data][product_data][name]",`Alquiler Larios Rental · LR-${String(c.contract_number).padStart(6,"0")}`);p.set("line_items[0][price_data][product_data][description]","Importe total del contrato de alquiler");p.set("payment_intent_data[setup_future_usage]","off_session");p.set("custom_text[submit][message]","Al pagar, autorizas a Larios Rental a guardar de forma segura este método en Stripe para cargos posteriores justificados relacionados con el contrato.");p.set("customer_creation","always");if(customer?.email)p.set("customer_email",customer.email);p.set("success_url",`${appUrl()}?stripe=success&session_id={CHECKOUT_SESSION_ID}&contract_id=${encodeURIComponent(c.id)}`);p.set("cancel_url",`${appUrl()}?stripe=cancel&contract_id=${encodeURIComponent(c.id)}`);const s=await stripe("/v1/checkout/sessions",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","Idempotency-Key":`lr-${c.id}-${cents}`},body:p});const {error:ins}=await service.from("stripe_payments").insert({contract_id:c.id,checkout_session_id:s.id,amount_cents:cents,currency:"eur",status:"open",checkout_url:s.url,livemode:!!s.livemode,expires_at:s.expires_at?new Date(s.expires_at*1000).toISOString():null,created_by:auth.user.id});if(ins)throw ins;return json({checkout_url:s.url,session_id:s.id,reused:false,mode:s.livemode?"live":"test"});
   }
-  const card = paid ? await saveReusablePaymentMethod(service, payment, session, actorId || payment.created_by || null) : null;
-  return { paid, status, amount_cents: payment.amount_cents, contract_id: payment.contract_id, card };
-}
-
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!jwt) return json({ error: "Authentication required" }, 401);
-  const service = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data: authData, error: authError } = await service.auth.getUser(jwt);
-  const role = authData.user?.app_metadata?.role;
-  if (authError || !authData.user || !["employee", "admin"].includes(role)) return json({ error: "Not authorized" }, 403);
-  const body = await req.json().catch(() => ({}));
-  const action = String(body.action || "status");
-  if (action === "status") return json({ configured: stripeEnabled(), activation_pending: !stripeEnabled(), mode: env("STRIPE_SECRET_KEY").startsWith("sk_live_") ? "live" : "test" });
-  if (action === "card_summary") {
-    if (role !== "admin") return json({ error: "Administrator access required" }, 403);
-    const contractId = String(body.contract_id || "");
-    if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
-    const { data: method, error } = await service.from("stripe_payment_methods").select("card_brand,card_last4,exp_month,exp_year,reusable").eq("contract_id", contractId).maybeSingle();
-    if (error) return json({ error: error.message }, 500);
-    const { data: contract } = method ? { data: null } : await service.from("contracts").select("card_last4,payment_method").eq("id", contractId).maybeSingle();
-    const { error: auditError } = await service.from("card_access_audit").insert({ contract_id: contractId, accessed_by: authData.user.id, action: "view_masked" });
-    if (auditError) return json({ error: auditError.message }, 500);
-    if (method) return json({ available: true, source: "stripe", brand: method.card_brand, last4: method.card_last4, exp_month: method.exp_month, exp_year: method.exp_year, reusable: !!method.reusable });
-    if (/^\d{4}$/.test(String(contract?.card_last4 || ""))) return json({ available: true, source: "legacy", brand: null, last4: contract.card_last4, exp_month: null, exp_year: null, reusable: false });
-    return json({ available: false, source: "none", reusable: false });
+  if(action==="verify"){const sid=String(body.session_id||""),id=String(body.contract_id||"");const {data:pmt,error}=await service.from("stripe_payments").select("*").eq("checkout_session_id",sid).eq("contract_id",id).single();if(error||!pmt)return json({error:"Payment not found"},404);const s=await stripe(`/v1/checkout/sessions/${encodeURIComponent(sid)}`);const c=await getContract(service,id);if(String(s.client_reference_id||"")!==id||Number(s.amount_total||0)!==Number(pmt.amount_cents))throw new Error("Stripe reconciliation mismatch");if(s.payment_status!=="paid")return json({paid:false,status:s.status||"open",contract_id:id});const card=await saveCheckoutCard(service,c,s,auth.user.id);await service.from("stripe_payments").update({status:"paid",payment_intent_id:s.payment_intent?String(s.payment_intent):null,livemode:!!s.livemode,paid_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",pmt.id);return json(await markPaid(service,c,"checkout",sid,pmt.amount_cents,auth.user.id,card));
   }
-  if (!stripeEnabled()) return json({ error: "STRIPE_NOT_CONFIGURED", activation_pending: true }, 503);
-
-  try {
-    if (action === "create") {
-      const contractId = String(body.contract_id || "");
-      if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
-      const { data: contract, error } = await service.from("contracts").select("id,contract_number,total,payment_method,app_payload,customer_id,updated_at").eq("id", contractId).single();
-      if (error || !contract) return json({ error: "Contract not found" }, 404);
-      if (contract.payment_method !== "Tarjeta") return json({ error: "Select card payment first" }, 409);
-      const amountCents = Math.round(Number(contract.total || 0) * 100);
-      if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return json({ error: "The contract total must be greater than zero" }, 409);
-      const { data: existing } = await service.from("stripe_payments").select("*").eq("contract_id", contractId).eq("amount_cents", amountCents).eq("status", "open").gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (existing?.checkout_url) return json({ checkout_url: existing.checkout_url, session_id: existing.checkout_session_id, reused: true, mode: existing.livemode ? "live" : "test" });
-      const { data: customer } = contract.customer_id ? await service.from("customers").select("email,full_name").eq("id", contract.customer_id).maybeSingle() : { data: null };
-      const { data: savedMethod } = contract.customer_id ? await service.from("stripe_payment_methods").select("stripe_customer_id").eq("customer_id", contract.customer_id).eq("reusable", true).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
-      const params = new URLSearchParams();
-      params.set("mode", "payment"); params.set("ui_mode", "hosted_page"); params.set("locale", "es"); params.set("payment_method_types[0]", "card");
-      params.set("client_reference_id", contract.id); params.set("metadata[contract_id]", contract.id); params.set("metadata[contract_number]", `LR-${String(contract.contract_number).padStart(6, "0")}`);
-      params.set("line_items[0][quantity]", "1"); params.set("line_items[0][price_data][currency]", "eur"); params.set("line_items[0][price_data][unit_amount]", String(amountCents));
-      params.set("line_items[0][price_data][product_data][name]", `Alquiler Larios Rental · LR-${String(contract.contract_number).padStart(6, "0")}`);
-      params.set("line_items[0][price_data][product_data][description]", "Importe total del contrato de alquiler");
-      params.set("payment_intent_data[setup_future_usage]", "off_session");
-      params.set("custom_text[submit][message]", "Al pagar, autorizas a Larios Rental a guardar de forma segura este método en Stripe para cargos posteriores justificados relacionados con el contrato.");
-      if (/^cus_[A-Za-z0-9_]+$/.test(String(savedMethod?.stripe_customer_id || ""))) params.set("customer", savedMethod.stripe_customer_id);
-      else {
-        params.set("customer_creation", "always");
-        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer?.email || "")) params.set("customer_email", customer.email);
-      }
-      params.set("success_url", `${appUrl()}?stripe=success&session_id={CHECKOUT_SESSION_ID}&contract_id=${encodeURIComponent(contract.id)}`);
-      params.set("cancel_url", `${appUrl()}?stripe=cancel&contract_id=${encodeURIComponent(contract.id)}`);
-      const session = await stripe("/v1/checkout/sessions", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Idempotency-Key": `lr-${contract.id}-${amountCents}` }, body: params });
-      const { error: insertError } = await service.from("stripe_payments").insert({ contract_id: contract.id, checkout_session_id: session.id, amount_cents: amountCents, currency: "eur", status: "open", checkout_url: session.url, livemode: !!session.livemode, expires_at: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : null, created_by: authData.user.id });
-      if (insertError) throw new Error(insertError.message);
-      await service.from("contracts").update({ app_payload: { ...(contract.app_payload || {}), payment_status: "pending", stripe_checkout_session_id: session.id, stripe_amount_cents: amountCents }, updated_at: new Date().toISOString() }).eq("id", contract.id);
-      return json({ checkout_url: session.url, session_id: session.id, reused: false, mode: session.livemode ? "live" : "test" });
-    }
-    if (action === "verify") {
-      const sessionId = String(body.session_id || ""), contractId = String(body.contract_id || "");
-      if (!/^cs_(test_|live_)?[A-Za-z0-9_]+$/.test(sessionId) || !/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid payment reference" }, 400);
-      const { data: payment, error } = await service.from("stripe_payments").select("*").eq("checkout_session_id", sessionId).eq("contract_id", contractId).single();
-      if (error || !payment) return json({ error: "Payment not found" }, 404);
-      const session = await stripe(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`);
-      return json(await markFromSession(service, payment, session, "", authData.user.id));
-    }
-    return json({ error: "Unknown action" }, 400);
-  } catch (error) {
-    return json({ error: error instanceof Error ? error.message : String(error) }, 502);
+  if(action==="terminal_readers"){if(!terminalEnabled())return json({error:"STRIPE_TERMINAL_NOT_CONFIGURED",activation_pending:true},503);const location=terminalLocation();const r=await stripe(`/v1/terminal/readers?location=${encodeURIComponent(location)}&limit=20`);return json({mode:stripeKey().startsWith("sk_live_")?"live":"test",readers:(r.data||[]).map((x:any)=>({id:x.id,label:x.label||x.id,status:x.status||"unknown",device_type:x.device_type||"",location:typeof x.location==="string"?x.location:x.location?.id||null})).filter((x:any)=>x.location===location)});
   }
+  if(action==="terminal_create"){if(!terminalEnabled())return json({error:"STRIPE_TERMINAL_NOT_CONFIGURED",activation_pending:true},503);const id=String(body.contract_id||""),readerId=String(body.reader_id||""),cents=Number(body.amount_cents);if(!/^[0-9a-f-]{36}$/i.test(id)||!/^tmr_[A-Za-z0-9_]+$/.test(readerId))return json({error:"Referencia de contrato o lector no válida"},400);if(!Number.isSafeInteger(cents)||cents<50||cents>99999999)return json({error:"El importe debe estar entre 0,50 € y 999.999,99 €"},400);const c=await getContract(service,id);if(c.payment_method!=="Tarjeta")return json({error:"Selecciona Tarjeta como forma de pago"},409);const reader=await stripe(`/v1/terminal/readers/${encodeURIComponent(readerId)}`);const location=typeof reader.location==="string"?reader.location:reader.location?.id||"";if(location!==terminalLocation())return json({error:"El lector no pertenece a la ubicación autorizada"},403);if(reader.status!=="online")return json({error:"El lector Stripe no está en línea"},409);if(reader.action?.status==="in_progress")return json({error:"El lector está ocupado con otra operación"},409);const cus=await ensureStripeCustomer(service,c);const requestId=/^[A-Za-z0-9_-]{8,80}$/.test(String(body.request_id||""))?String(body.request_id):crypto.randomUUID();const p=new URLSearchParams();p.set("amount",String(cents));p.set("currency","eur");p.set("payment_method_types[0]","card_present");p.set("capture_method","automatic");p.set("customer",cus);p.set("setup_future_usage","off_session");p.set("description",`Larios Rental · LR-${String(c.contract_number).padStart(6,"0")}`);p.set("metadata[contract_id]",id);p.set("metadata[purpose]","rental");p.set("metadata[channel]","terminal");const pi=await stripe("/v1/payment_intents",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","Idempotency-Key":`lr-terminal-${id}-${requestId}`},body:p});const {error:ins}=await service.from("stripe_payments").insert({contract_id:id,checkout_session_id:`terminal:${pi.id}`,payment_intent_id:pi.id,amount_cents:cents,currency:"eur",status:"open",checkout_url:null,livemode:!!pi.livemode,created_by:auth.user.id});if(ins&&!/duplicate|unique/i.test(ins.message||""))throw ins;const q=new URLSearchParams();q.set("payment_intent",pi.id);q.set("process_config[enable_customer_cancellation]","true");const processed=await stripe(`/v1/terminal/readers/${encodeURIComponent(readerId)}/process_payment_intent`,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:q});await appendEvent(service,id,{type:"payment",channel:"terminal",reference:pi.id,amount_cents:cents,status:"processing",reader_id:readerId,created_by:auth.user.id});return json({started:true,payment_intent_id:pi.id,reader_id:readerId,reader_action:processed.action?.status||"in_progress",amount_cents:cents,mode:pi.livemode?"live":"test"});
+  }
+  if(action==="terminal_verify"){const id=String(body.contract_id||""),piId=String(body.payment_intent_id||""),readerId=String(body.reader_id||"");if(!/^[0-9a-f-]{36}$/i.test(id)||!/^pi_[A-Za-z0-9_]+$/.test(piId)||!/^tmr_[A-Za-z0-9_]+$/.test(readerId))return json({error:"Referencia de pago no válida"},400);const {data:pmt,error}=await service.from("stripe_payments").select("*").eq("contract_id",id).eq("payment_intent_id",piId).single();if(error||!pmt)return json({error:"Pago de Terminal no encontrado"},404);const c=await getContract(service,id);const pi=await stripe(`/v1/payment_intents/${encodeURIComponent(piId)}?expand[]=latest_charge`);if(String(pi.metadata?.contract_id||"")!==id||Number(pi.amount||0)!==Number(pmt.amount_cents))throw new Error("Stripe Terminal reconciliation mismatch");if(pi.status==="succeeded"){const card=await saveTerminalCard(service,c,pi,auth.user.id);await service.from("stripe_payments").update({status:"paid",livemode:!!pi.livemode,paid_at:new Date().toISOString(),failure_message:null,updated_at:new Date().toISOString()}).eq("id",pmt.id);return json(await markPaid(service,c,"terminal",pi.id,Number(pi.amount_received||pi.amount||0),auth.user.id,card));}const reader=await stripe(`/v1/terminal/readers/${encodeURIComponent(readerId)}`);const location=typeof reader.location==="string"?reader.location:reader.location?.id||"";if(location!==terminalLocation())return json({error:"El lector no pertenece a la ubicación autorizada"},403);const failed=reader.action?.status==="failed";const message=failed?String(reader.action?.api_error?.message||reader.action?.failure_message||pi.last_payment_error?.message||"El pago no se ha completado"):null;if(failed)await service.from("stripe_payments").update({failure_message:message,updated_at:new Date().toISOString()}).eq("id",pmt.id);return json({paid:false,status:failed?"failed":"processing",intent_status:pi.status,reader_action:reader.action?.status||null,failure_message:message,contract_id:id});
+  }
+  if(action==="terminal_cancel"){const id=String(body.contract_id||""),piId=String(body.payment_intent_id||""),readerId=String(body.reader_id||"");if(!/^[0-9a-f-]{36}$/i.test(id)||!/^pi_[A-Za-z0-9_]+$/.test(piId)||!/^tmr_[A-Za-z0-9_]+$/.test(readerId))return json({error:"Referencia de cancelación no válida"},400);const {data:pmt,error}=await service.from("stripe_payments").select("*").eq("contract_id",id).eq("payment_intent_id",piId).single();if(error||!pmt)return json({error:"Pago de Terminal no encontrado"},404);const reader=await stripe(`/v1/terminal/readers/${encodeURIComponent(readerId)}`);const location=typeof reader.location==="string"?reader.location:reader.location?.id||"";if(location!==terminalLocation())return json({error:"El lector no pertenece a la ubicación autorizada"},403);if(reader.action?.status==="in_progress")await stripe(`/v1/terminal/readers/${encodeURIComponent(readerId)}/cancel_action`,{method:"POST"});const pi=await stripe(`/v1/payment_intents/${encodeURIComponent(piId)}?expand[]=latest_charge`);if(pi.status==="succeeded"){const c=await getContract(service,id);const card=await saveTerminalCard(service,c,pi,auth.user.id);await service.from("stripe_payments").update({status:"paid",livemode:!!pi.livemode,paid_at:new Date().toISOString(),failure_message:null,updated_at:new Date().toISOString()}).eq("id",pmt.id);return json(await markPaid(service,c,"terminal",pi.id,Number(pi.amount_received||pi.amount||0),auth.user.id,card));}if(pi.status!=="canceled")await stripe(`/v1/payment_intents/${encodeURIComponent(piId)}/cancel`,{method:"POST"});await service.from("stripe_payments").update({status:"failed",failure_message:"Cancelado por el usuario",updated_at:new Date().toISOString()}).eq("id",pmt.id);await appendEvent(service,id,{type:"payment",channel:"terminal",reference:piId,status:"canceled",reader_id:readerId,created_by:auth.user.id});return json({canceled:true,paid:false});
+  }
+  if(action==="additional_charge"){const id=String(body.contract_id||""),amount=Number(body.amount||0),reason=String(body.reason||"").trim();if(!reason)return json({error:"Indica el motivo del cargo"},400);const cents=Math.round(amount*100);if(!Number.isSafeInteger(cents)||cents<=0||cents>1000000)return json({error:"Importe no válido"},400);const c=await getContract(service,id);const {data:m,error}=await service.from("stripe_payment_methods").select("stripe_customer_id,stripe_payment_method_id,reusable").eq("contract_id",id).maybeSingle();if(error||!m?.reusable)return json({error:"No hay una tarjeta tokenizada disponible"},409);const p=new URLSearchParams();p.set("amount",String(cents));p.set("currency","eur");p.set("customer",m.stripe_customer_id);p.set("payment_method",m.stripe_payment_method_id);p.set("off_session","true");p.set("confirm","true");p.set("description",reason);p.set("metadata[contract_id]",id);p.set("metadata[reason]",reason);const pi=await stripe("/v1/payment_intents",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","Idempotency-Key":`lr-extra-${id}-${cents}-${encodeURIComponent(reason).slice(0,40)}`},body:p});if(pi.status!=="succeeded")return json({paid:false,status:pi.status,requires_action:pi.status==="requires_action",payment_intent_id:pi.id});await appendEvent(service,id,{type:"additional_charge",channel:"saved_card",reference:pi.id,amount_cents:cents,reason,status:"paid",created_by:auth.user.id});return json({paid:true,status:"paid",amount_cents:cents,payment_intent_id:pi.id,contract_id:id});
+  }
+  return json({error:"Unknown action"},400);
+ }catch(e){return json({error:e instanceof Error?e.message:String(e)},502)}
 });
