@@ -266,6 +266,8 @@ async function handler(req: Request) {
     try {
       if (!code) {
         if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
+        if (expectedServices > 0.009) throw new Error(`Este contrato incluye ${expectedServices.toFixed(2)} € en seguro, conductor joven o extras. Se ha detenido el envío para no crear una reserva incompleta en Renthub hasta activar el mapeo de Servicios.`);
+        if (Number(contract.discount_percent || 0) > 0) throw new Error("Este contrato tiene descuento. Se ha detenido el envío hasta confirmar el campo de descuento de la API de Renthub.");
         const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
         if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
         const names = splitName(customer.full_name), phone = splitPhone(customer.phone), form = new FormData();
