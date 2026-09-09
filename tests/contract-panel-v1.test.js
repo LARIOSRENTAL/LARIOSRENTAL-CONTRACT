@@ -42,4 +42,5 @@ assert.match(edge,/\|\| "132"/);
 assert.match(edge,/form\.set\("pickup_at_location", pickupAddress\)/);
 assert.match(edge,/form\.set\("dropoff_at_location", dropoffAddress\)/);
 assert.match(edge,/Renthub no admite crear reservas con una entrega anterior/);
+assert.doesNotMatch(edge,/form\.set\("pricelist"/);
 console.log('contract panel and Renthub cache: ok');
