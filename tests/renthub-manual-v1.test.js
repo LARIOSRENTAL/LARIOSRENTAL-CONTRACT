@@ -29,7 +29,7 @@ assert.match(edge,/renthubCategoryName/);
 assert.match(edge,/"50cc": "m1"/);
 assert.match(edge,/"125cc": "m2"/);
 assert.doesNotMatch(edge,/config\/locations/);
-assert.match(edge,/if \(pricelist\) form\.set\("pricelist"/);
+assert.doesNotMatch(edge,/form\.set\("pricelist"/);
 assert.match(edge,/El teléfono del cliente debe tener 9 cifras españolas/);
 assert.match(edge,/renthub_api_error/);
 assert.match(edge,/Renthub \$\{response\.status\} en \$\{endpoint\}/);
