@@ -164,15 +164,19 @@ async function automaticMappings(contract: any) {
   const categories = Array.isArray(categoryResponse?.result) ? categoryResponse.result : [];
   const target = renthubCategoryName(contract.category);
   const category = categories.find((item: any) => normalize(item?.name) === target);
-  const timetable = parameterResponse?.result?.opening?.timetable || {};
-  const defaultLocation = env("RENTHUB_DEFAULT_LOCATION_ID") || Object.keys(timetable)[0] || "1";
-  const modelMap = parseMap("RENTHUB_MODEL_MAP"), locationMap = parseMap("RENTHUB_LOCATION_MAP"), pricelistMap = parseMap("RENTHUB_PRICELIST_MAP");
+  const otherLocation = env("RENTHUB_OTHER_LOCATION_ID") || "132";
+  const modelMap = parseMap("RENTHUB_MODEL_MAP"), pricelistMap = parseMap("RENTHUB_PRICELIST_MAP");
   const group = normalize(contract.category).replace(/^grupo\s+/, "");
+  const pickupAddress = String(contract.delivery_location || "").trim();
+  const dropoffAddress = String(contract.return_location || pickupAddress).trim();
   return {
     model: modelMap[group] || modelMap[normalize(contract.category)] || String(category?.id || ""),
-    pickup: locationMap[normalize(contract.delivery_location)] || defaultLocation,
-    dropoff: locationMap[normalize(contract.return_location)] || defaultLocation,
+    pickup: otherLocation,
+    dropoff: otherLocation,
+    pickupAddress,
+    dropoffAddress,
     pricelist: pricelistMap[group] || env("RENTHUB_PRICELIST_ID"),
+    minimumStart: String(parameterResponse?.result?.opening?.min_date || "").slice(0, 16),
   };
 }
 
@@ -222,7 +226,7 @@ async function handler(req: Request) {
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   void vehicle;
-  const { model, pickup, dropoff, pricelist } = await automaticMappings(contract);
+  const { model, pickup, dropoff, pickupAddress, dropoffAddress, pricelist, minimumStart } = await automaticMappings(contract);
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
@@ -250,6 +254,7 @@ async function handler(req: Request) {
     let code = String(contract.renthub_contract_id || ""), inserted: any = null;
     try {
       if (!code) {
+        if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
         const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
         if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
         const names = splitName(customer.full_name), phone = splitPhone(customer.phone), form = new FormData();
@@ -261,7 +266,10 @@ async function handler(req: Request) {
           if (/^[A-Za-z]{2}$/.test(customer.country || "")) form.set("country", customer.country.toUpperCase());
         }
         form.set("model", model); if (pricelist) form.set("pricelist", pricelist); form.set("start_datetime", start); form.set("end_datetime", end);
-        form.set("pickup_location", pickup); form.set("dropoff_location", dropoff); form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
+        form.set("pickup_location", pickup); form.set("dropoff_location", dropoff);
+        if (pickupAddress) form.set("pickup_at_location", pickupAddress);
+        if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
+        form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
         form.set("overwrite_rental_rate", expectedTotal.toFixed(2));
         form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
         if (Number(contract.franchise || 0) > 0) form.set("overwrite_damage_franchise", Number(contract.franchise).toFixed(2));
