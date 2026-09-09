@@ -32,6 +32,8 @@ assert.doesNotMatch(edge,/config\/locations/);
 assert.match(edge,/form\.set\("pricelist", pricelist\)/);
 assert.match(edge,/overwrite_rental_rate", expectedRental\.toFixed\(2\)/);
 assert.match(edge,/contractServiceTotal/);
+assert.match(edge,/para no crear una reserva incompleta en Renthub/);
+assert.match(edge,/hasta confirmar el campo de descuento/);
 assert.match(edge,/El teléfono del cliente debe tener 9 cifras españolas/);
 assert.match(edge,/renthub_api_error/);
 assert.match(edge,/Renthub \$\{response\.status\} en \$\{endpoint\}/);
