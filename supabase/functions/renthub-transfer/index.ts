@@ -155,6 +155,16 @@ const renthubCategoryName = (category: unknown) => {
   };
   return aliases[value] || value;
 };
+function renthubPricelist(contract: any) {
+  const map = parseMap("RENTHUB_PRICELIST_MAP");
+  const tariff = contract.season_94 ? "94" : "78";
+  return map[tariff] || map[`tarifa ${tariff}`] || (contract.season_94 ? "2" : "1");
+}
+function contractServiceTotal(contract: any) {
+  const rental = Number(contract.rental_total || 0);
+  const discount = rental * Math.max(0, Number(contract.discount_percent || 0)) / 100;
+  return Math.max(0, Number(contract.total || 0) - (rental - discount));
+}
 
 async function automaticMappings(contract: any) {
   const [categoryResponse, parameterResponse] = await Promise.all([
@@ -212,7 +222,6 @@ async function handler(req: Request) {
   if (!config.enabled || !config.ready || !apiConnected) return json({ error: "RENTHUB_NOT_CONFIGURED", message: apiError || "Renthub no está configurado", activation_pending: true, missing: config.missing }, 503);
 
   if (action === "refresh_cache") return json({ refreshed: await refreshCatalogueCache(service, userData.user.id), cache: await cacheStatus(service) });
-
   const contractId = String(body.contract_id || "");
   if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
   const { data: contract, error: contractError } = await service.from("contracts").select("*").eq("id", contractId).single();
@@ -229,7 +238,10 @@ async function handler(req: Request) {
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
-  const verificationHash = await digest({ contract_id: contract.id, start, end, model, pickup, dropoff, total: expectedTotal, deposit: Number(contract.deposit || 0) });
+  const expectedRental = Number(contract.rental_total || 0);
+  const expectedServices = contractServiceTotal(contract);
+  const pricelist = renthubPricelist(contract);
+  const verificationHash = await digest({ contract_id: contract.id, start, end, model, pickup, dropoff, pricelist, rental: expectedRental, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0) });
 
   async function verify(code: string) {
     const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
@@ -269,7 +281,8 @@ async function handler(req: Request) {
         if (pickupAddress) form.set("pickup_at_location", pickupAddress);
         if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
         form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
-        form.set("overwrite_rental_rate", expectedTotal.toFixed(2));
+        form.set("pricelist", pricelist);
+        form.set("overwrite_rental_rate", expectedRental.toFixed(2));
         form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
         if (Number(contract.franchise || 0) > 0) form.set("overwrite_damage_franchise", Number(contract.franchise).toFixed(2));
         const age = ageAt(customer.birth_date || driver?.birth_date, contract.delivery_date); if (age !== null) form.set("age", String(age));
