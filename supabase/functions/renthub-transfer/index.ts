@@ -165,7 +165,7 @@ async function automaticMappings(contract: any) {
   const target = renthubCategoryName(contract.category);
   const category = categories.find((item: any) => normalize(item?.name) === target);
   const otherLocation = env("RENTHUB_OTHER_LOCATION_ID") || "132";
-  const modelMap = parseMap("RENTHUB_MODEL_MAP"), pricelistMap = parseMap("RENTHUB_PRICELIST_MAP");
+  const modelMap = parseMap("RENTHUB_MODEL_MAP");
   const group = normalize(contract.category).replace(/^grupo\s+/, "");
   const pickupAddress = String(contract.delivery_location || "").trim();
   const dropoffAddress = String(contract.return_location || pickupAddress).trim();
@@ -175,7 +175,6 @@ async function automaticMappings(contract: any) {
     dropoff: otherLocation,
     pickupAddress,
     dropoffAddress,
-    pricelist: pricelistMap[group] || env("RENTHUB_PRICELIST_ID"),
     minimumStart: String(parameterResponse?.result?.opening?.min_date || "").slice(0, 16),
   };
 }
@@ -226,7 +225,7 @@ async function handler(req: Request) {
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   void vehicle;
-  const { model, pickup, dropoff, pickupAddress, dropoffAddress, pricelist, minimumStart } = await automaticMappings(contract);
+  const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart } = await automaticMappings(contract);
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
@@ -265,7 +264,7 @@ async function handler(req: Request) {
           if (customer.address) form.set("address", customer.address); if (customer.city) form.set("city", customer.city); if (customer.postal_code) form.set("zip", customer.postal_code);
           if (/^[A-Za-z]{2}$/.test(customer.country || "")) form.set("country", customer.country.toUpperCase());
         }
-        form.set("model", model); if (pricelist) form.set("pricelist", pricelist); form.set("start_datetime", start); form.set("end_datetime", end);
+        form.set("model", model); form.set("start_datetime", start); form.set("end_datetime", end);
         form.set("pickup_location", pickup); form.set("dropoff_location", dropoff);
         if (pickupAddress) form.set("pickup_at_location", pickupAddress);
         if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
