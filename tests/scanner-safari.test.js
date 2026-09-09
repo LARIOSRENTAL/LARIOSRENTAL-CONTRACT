@@ -3,6 +3,7 @@ const { join } = require('node:path');
 const assert = require('node:assert/strict');
 
 const scanner = readFileSync(join(__dirname, '..', 'app-v84', 'www', 'scanner-v5.js'), 'utf8');
+const form = readFileSync(join(__dirname, '..', 'app-v84', 'www', 'scanner.js'), 'utf8');
 const html = readFileSync(join(__dirname, '..', 'app-v84', 'www', 'index.html'), 'utf8');
 
 assert.match(scanner, /Scanner V6 WEB · LLAVERO OCR/);
@@ -28,5 +29,7 @@ assert.match(scanner, /result\.name=`\$\{given\} \$\{sur\}`/);
 assert.match(scanner, /findNumbered\(lines,'8'\)/);
 assert.match(html, /scanner-v5\.js\?v=v6web-free7-20260907/);
 assert.match(html, /scanner-lock-v6\.js\?v=4/);
+assert.match(form, /Precio alquiler \(editable\)<input id="rental_price"/);
+assert.doesNotMatch(form, /id="rental_price"[^>]*readonly/);
 
 console.log('OK scanner: permisos mediante Scanner V6 WEB gratuito, llaveros por OCR y grupos separados.');

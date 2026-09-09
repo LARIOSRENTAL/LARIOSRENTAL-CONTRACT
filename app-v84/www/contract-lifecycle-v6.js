@@ -112,7 +112,7 @@ function hydrateFinancials(x){if(!x||x.status!=='draft')return;for(const [id,key
 function patchPrices(){
   const form=$('reservationForm');if(!form)return;
   for(const id of ['rental_price','insurance_total','franchise','young_driver_amount']){
-    const el=$(id);if(!el)continue;el.readOnly=false;el.removeAttribute('readonly');
+    const el=$(id);if(!el)continue;el.readOnly=false;el.removeAttribute('readonly');el.disabled=false;el.removeAttribute('disabled');
     if(el.dataset.lifecyclePrice!=='1'){el.dataset.lifecyclePrice='1';el.addEventListener('input',()=>{el.dataset.manualPrice='1';setTimeout(authoritativeTotal,0)})}
   }
   const days=Math.max(1,number($('rental_days')?.value)||1);
