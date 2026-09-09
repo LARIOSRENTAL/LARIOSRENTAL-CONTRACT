@@ -10,6 +10,8 @@ const cors = {
 const env = (name: string) => (Deno.env.get(name) || "").trim();
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: cors });
 const normalize = (value: unknown) => String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const installationUrl = () => (env("RENTHUB_INSTALLATION_URL") || "https://lariosrental.renthubsoftware.com").replace(/\/$/, "");
+let partnerSecret = env("RENTHUB_SECRET_TOKEN");
 
 function parseMap(name: string): Record<string, string> {
   try {
@@ -17,11 +19,16 @@ function parseMap(name: string): Record<string, string> {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [normalize(key), String(item)]));
   } catch { return {}; }
 }
+async function loadPartnerSecret(service: any) {
+  if (partnerSecret) return partnerSecret;
+  const { data, error } = await service.rpc("app_get_renthub_secret");
+  if (!error && data) partnerSecret = String(data).trim();
+  return partnerSecret;
+}
 function configuration() {
-  const required = ["RENTHUB_INSTALLATION_URL", "RENTHUB_SECRET_TOKEN", "RENTHUB_PRICELIST_ID", "RENTHUB_MODEL_MAP", "RENTHUB_LOCATION_MAP"];
-  const missing = required.filter((key) => !env(key));
+  const missing = partnerSecret ? [] : ["RENTHUB_SECRET_TOKEN"];
   const documentReady = !!env("RENTHUB_USER_API_EMAIL") && !!env("RENTHUB_USER_API_PASSWORD");
-  const enabled = env("RENTHUB_ENABLED").toLowerCase() === "true";
+  const enabled = !!partnerSecret;
   return {
     enabled, ready: missing.length === 0, missing, documentReady,
     purgeReady: enabled && missing.length === 0 && documentReady && env("RENTHUB_PURGE_ENABLED").toLowerCase() === "true",
@@ -31,16 +38,15 @@ function configuration() {
 let tokenCache: { token: string; expiresAt: number } | null = null;
 async function partnerToken(force = false) {
   if (!force && tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.token;
-  const base = env("RENTHUB_INSTALLATION_URL").replace(/\/$/, "");
-  const response = await fetch(`${base}/api/partner/token/${encodeURIComponent(env("RENTHUB_SECRET_TOKEN"))}`, { headers: { Accept: "application/json" } });
+  if (!partnerSecret) throw new Error("Renthub secret is not configured");
+  const response = await fetch(`${installationUrl()}/api/partner/token/${encodeURIComponent(partnerSecret)}`, { headers: { Accept: "application/json" } });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.result?.token) throw new Error(`Renthub authentication failed (${response.status})`);
   tokenCache = { token: data.result.token, expiresAt: data.result.expires_at ? Date.parse(data.result.expires_at) : Date.now() + 600_000 };
   return tokenCache.token;
 }
 async function renthubFetch(path: string, init: RequestInit = {}, retry = true): Promise<any> {
-  const base = env("RENTHUB_INSTALLATION_URL").replace(/\/$/, "");
-  const response = await fetch(`${base}${path}`, { ...init, headers: { Accept: "application/json", "X-PartnerToken": await partnerToken(), ...(init.headers || {}) } });
+  const response = await fetch(`${installationUrl()}${path}`, { ...init, headers: { Accept: "application/json", "X-PartnerToken": await partnerToken(), ...(init.headers || {}) } });
   if (response.status === 401 && retry) { await partnerToken(true); return renthubFetch(path, init, false); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data?.status === false) throw new Error(data?.message || `Renthub returned ${response.status}`);
@@ -56,7 +62,6 @@ async function cacheStatus(service: any) {
 async function refreshCatalogueCache(service: any, userId: string) {
   const catalogues = [
     ["parameters", "/module/rental/api/partner/config/parameters"],
-    ["locations", "/module/rental/api/partner/config/locations"],
     ["categories", "/module/rental/api/partner/config/categories"],
   ] as const;
   const refreshed = [];
@@ -76,7 +81,7 @@ async function refreshCatalogueCache(service: any, userId: string) {
 let userTokenCache = "";
 async function userToken(force = false) {
   if (!force && userTokenCache) return userTokenCache;
-  const base = env("RENTHUB_INSTALLATION_URL").replace(/\/$/, ""), form = new FormData();
+  const base = installationUrl(), form = new FormData();
   form.set("email", env("RENTHUB_USER_API_EMAIL")); form.set("password", env("RENTHUB_USER_API_PASSWORD"));
   const response = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { Accept: "application/json" }, body: form });
   const data = await response.clone().json().catch(() => ({}));
@@ -91,7 +96,7 @@ async function uploadContractPdf(service: any, contract: any, bookingId: unknown
   const { data: pdf, error } = await service.storage.from("contracts").download(contract.pdf_path);
   if (error || !pdf) throw new Error(`Contract PDF could not be read: ${error?.message || "unknown error"}`);
   const form = new FormData(); form.append("file[]", pdf, `contrato-LR-${String(contract.contract_number).padStart(6, "0")}.pdf`);
-  const base = env("RENTHUB_INSTALLATION_URL").replace(/\/$/, "");
+  const base = installationUrl();
   let response = await fetch(`${base}/api/v1/upload/rental_reservation/${encodeURIComponent(String(bookingId))}/nsc_booking`, { method: "POST", headers: { "X-UserAuthToken": await userToken() }, body: form });
   if (response.status === 401) response = await fetch(`${base}/api/v1/upload/rental_reservation/${encodeURIComponent(String(bookingId))}/nsc_booking`, { method: "POST", headers: { "X-UserAuthToken": await userToken(true) }, body: form });
   if (!response.ok) throw new Error(`Renthub PDF upload failed (${response.status})`);
@@ -118,6 +123,33 @@ async function digest(value: unknown) {
   return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 const minute = (value: unknown) => String(value || "").slice(0, 16);
+const renthubCategoryName = (category: unknown) => {
+  const value = normalize(category).replace(/^grupo\s+/, "");
+  const aliases: Record<string, string> = {
+    "50cc": "m1", "125cc": "m2", "bicicleta": "b1", "e-bike": "b2", "ebike": "b2",
+  };
+  return aliases[value] || value;
+};
+
+async function automaticMappings(contract: any) {
+  const [categoryResponse, parameterResponse] = await Promise.all([
+    renthubFetch("/module/rental/api/partner/config/categories"),
+    renthubFetch("/module/rental/api/partner/config/parameters"),
+  ]);
+  const categories = Array.isArray(categoryResponse?.result) ? categoryResponse.result : [];
+  const target = renthubCategoryName(contract.category);
+  const category = categories.find((item: any) => normalize(item?.name) === target);
+  const timetable = parameterResponse?.result?.opening?.timetable || {};
+  const defaultLocation = env("RENTHUB_DEFAULT_LOCATION_ID") || Object.keys(timetable)[0] || "1";
+  const modelMap = parseMap("RENTHUB_MODEL_MAP"), locationMap = parseMap("RENTHUB_LOCATION_MAP"), pricelistMap = parseMap("RENTHUB_PRICELIST_MAP");
+  const group = normalize(contract.category).replace(/^grupo\s+/, "");
+  return {
+    model: modelMap[group] || modelMap[normalize(contract.category)] || String(category?.id || ""),
+    pickup: locationMap[normalize(contract.delivery_location)] || defaultLocation,
+    dropoff: locationMap[normalize(contract.return_location)] || defaultLocation,
+    pricelist: pricelistMap[group] || env("RENTHUB_PRICELIST_ID"),
+  };
+}
 
 async function handler(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -130,18 +162,26 @@ async function handler(req: Request) {
   if (userError || !userData.user || !["employee", "admin"].includes(role)) return json({ error: "Not authorized" }, 403);
 
   const body = await req.json().catch(() => ({}));
+  await loadPartnerSecret(service);
   const action = String(body.action || "status"), config = configuration();
+  let apiConnected = false, apiError = "";
+  if (config.ready) {
+    try { await partnerToken(); apiConnected = true; }
+    catch (error) { apiError = error instanceof Error ? error.message : String(error); }
+  }
   if (action === "status") return json({
-    configured: config.enabled && config.ready,
+    configured: config.enabled && config.ready && apiConnected,
+    api_connected: apiConnected,
+    api_error: apiError || null,
     purge_configured: config.purgeReady,
-    activation_pending: !config.enabled,
+    activation_pending: !(config.enabled && config.ready && apiConnected),
     document_upload_configured: config.documentReady,
     safe_delete_enabled: env("RENTHUB_PURGE_ENABLED").toLowerCase() === "true",
     missing: config.missing,
     cache: await cacheStatus(service), role, can_manage: role === "admin",
   });
   if (role !== "admin") return json({ error: "ADMIN_REQUIRED", message: "Solo una cuenta administradora puede realizar acciones de Renthub." }, 403);
-  if (!config.enabled || !config.ready) return json({ error: "RENTHUB_NOT_CONFIGURED", activation_pending: true, missing: config.missing }, 503);
+  if (!config.enabled || !config.ready || !apiConnected) return json({ error: "RENTHUB_NOT_CONFIGURED", message: apiError || "Renthub no está configurado", activation_pending: true, missing: config.missing }, 503);
 
   if (action === "refresh_cache") return json({ refreshed: await refreshCatalogueCache(service, userData.user.id), cache: await cacheStatus(service) });
 
@@ -157,11 +197,7 @@ async function handler(req: Request) {
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   void vehicle;
-  const modelMap = parseMap("RENTHUB_MODEL_MAP"), locationMap = parseMap("RENTHUB_LOCATION_MAP"), pricelistMap = parseMap("RENTHUB_PRICELIST_MAP");
-  const group = normalize(contract.category).replace(/^grupo\s+/, "");
-  const model = modelMap[group] || modelMap[normalize(contract.category)];
-  const pickup = locationMap[normalize(contract.delivery_location)], dropoff = locationMap[normalize(contract.return_location)];
-  const pricelist = pricelistMap[group] || env("RENTHUB_PRICELIST_ID");
+  const { model, pickup, dropoff, pricelist } = await automaticMappings(contract);
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
@@ -189,7 +225,7 @@ async function handler(req: Request) {
     let code = String(contract.renthub_contract_id || ""), inserted: any = null;
     try {
       if (!code) {
-        const missing = [!model && "model", !pricelist && "pricelist", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
+        const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
         if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
         const names = splitName(customer.full_name), phone = splitPhone(customer.phone), form = new FormData();
         form.set("partner_reservation_code", `LR-${String(contract.contract_number).padStart(6, "0")}`);
@@ -199,7 +235,7 @@ async function handler(req: Request) {
           if (customer.address) form.set("address", customer.address); if (customer.city) form.set("city", customer.city); if (customer.postal_code) form.set("zip", customer.postal_code);
           if (/^[A-Za-z]{2}$/.test(customer.country || "")) form.set("country", customer.country.toUpperCase());
         }
-        form.set("model", model); form.set("pricelist", pricelist); form.set("start_datetime", start); form.set("end_datetime", end);
+        form.set("model", model); if (pricelist) form.set("pricelist", pricelist); form.set("start_datetime", start); form.set("end_datetime", end);
         form.set("pickup_location", pickup); form.set("dropoff_location", dropoff); form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
         form.set("overwrite_rental_rate", expectedTotal.toFixed(2));
         form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));

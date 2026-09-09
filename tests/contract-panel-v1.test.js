@@ -27,5 +27,6 @@ assert.match(source,/Eliminar reserva cancelada/);
 const edge=fs.readFileSync(require.resolve('../supabase/functions/renthub-transfer/index.ts'),'utf8');
 assert.match(edge,/contains_personal_data: false/);
 assert.match(edge,/action === "refresh_cache"/);
-assert.match(edge,/config\/locations/);
+assert.match(edge,/config\/categories/);
+assert.doesNotMatch(edge,/config\/locations/);
 console.log('contract panel and Renthub cache: ok');
