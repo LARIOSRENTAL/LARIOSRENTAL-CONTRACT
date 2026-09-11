@@ -2,9 +2,43 @@
 'use strict';
 const nativeFetch=window.fetch.bind(window);
 function cloneOptions(opt,body){const o={...(opt||{})};o.body=body;return o}
+function toIsoDate(value){
+  const s=String(value??'').trim();if(!s)return s;
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m)return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if(!m)return s;
+  let y=Number(m[3]);if(y<100)y+=(y<=40?2000:1900);
+  const mo=Number(m[2]),d=Number(m[1]),x=new Date(Date.UTC(y,mo-1,d));
+  if(x.getUTCFullYear()!==y||x.getUTCMonth()!==mo-1||x.getUTCDate()!==d)return s;
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function normalizeSaveBody(body){
+  try{
+    const parsed=JSON.parse(String(body||'{}')),p=parsed?.p_payload;
+    if(!p||typeof p!=='object')return body;
+    for(const key of ['customer_birth_date','license_issue','license_expiry','additional_birth_date','additional_license_issue','additional_license_expiry','pickup_date','return_date']){
+      if(Object.prototype.hasOwnProperty.call(p,key)&&p[key])p[key]=toIsoDate(p[key]);
+    }
+    return JSON.stringify(parsed);
+  }catch(_){return body}
+}
+async function fetchTemplateWithFallback(input,opt){
+  let first=null;
+  try{first=await nativeFetch(input,opt);if(first.ok)return first}catch(e){console.warn('Primary contract template load failed',e)}
+  const fallbacks=[
+    'https://raw.githubusercontent.com/LARIOSRENTAL/LARIOSRENTAL-CONTRACT/agent/mobile-v84/static/assets/contrato-larios-normalizado.pdf',
+    'https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/static/assets/contrato-larios-normalizado.pdf'
+  ];
+  for(const url of fallbacks){try{const r=await nativeFetch(url,{cache:'no-store'});if(r.ok){console.warn('Recovered contract template from fallback',url);return r}}catch(e){console.warn('Template fallback failed',url,e)}}
+  if(first)return first;
+  throw new Error('No se pudo cargar la plantilla del contrato. Comprueba la conexión y vuelve a intentarlo.');
+}
 window.fetch=async function(input,opt){
   const url=typeof input==='string'?input:(input&&input.url)||'';
   const method=String(opt?.method||'GET').toUpperCase();
+
+  if(method==='GET'&&/assets\/contrato-larios-normalizado\.pdf(?:\?|$)/i.test(url))return fetchTemplateWithFallback(input,opt);
 
   // The email Edge Function intentionally returns HTTP 200 for Gmail/OAuth
   // diagnostics so Safari cannot hide the response behind a generic
@@ -29,17 +63,18 @@ window.fetch=async function(input,opt){
 
   const isSave=/\/rest\/v1\/rpc\/app_save_contract(?:\?|$)/.test(url) && method==='POST';
   if(!isSave)return nativeFetch(input,opt);
-  const response=await nativeFetch(input,opt);
+  const normalizedOpt=cloneOptions(opt,normalizeSaveBody(opt?.body));
+  const response=await nativeFetch(input,normalizedOpt);
   if(response.ok)return response;
   let text='';try{text=await response.clone().text()}catch(_){return response}
   if(!/23505|vehicles_registration_key|duplicate key value/i.test(text))return response;
   try{
-    const parsed=JSON.parse(String(opt?.body||'{}'));
+    const parsed=JSON.parse(String(normalizedOpt?.body||'{}'));
     if(!parsed?.p_payload?.vehicle_plate)return response;
     const retry=JSON.parse(JSON.stringify(parsed));
     retry.p_payload.vehicle_plate='';
     console.warn('Retrying contract save without vehicle insert after duplicate registration');
-    return nativeFetch(input,cloneOptions(opt,JSON.stringify(retry)));
+    return nativeFetch(input,cloneOptions(normalizedOpt,JSON.stringify(retry)));
   }catch(_){return response}
 };
 
@@ -88,4 +123,5 @@ function bind(){
 }
 let tries=0;const timer=setInterval(()=>{bind();if(++tries>120)clearInterval(timer)},250);
 window.addEventListener('focus',()=>setTimeout(recalc,50));
+console.log('Runtime hotfix: date normalization + PDF template recovery active');
 })();
