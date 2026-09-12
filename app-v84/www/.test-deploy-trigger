@@ -1,2 +1,2 @@
-2026-09-12T22:52:00+02:00
-Purpose: publish latest test/mobile-v84 compact reservation controls under /pruebas. No production runtime code changed.
+2026-09-12T23:17:00+02:00
+Purpose: republish latest test/mobile-v84 under /pruebas after direct test workflow failure. No production runtime code changed.
