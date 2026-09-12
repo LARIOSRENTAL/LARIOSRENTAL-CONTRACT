@@ -10,7 +10,6 @@ async function deleteRpc(id){
 }
 async function refreshAll(){
   try{await window.LariosContractPanel?.reload?.()}catch{}
-  try{await window.LariosContractPanel?.load?.()}catch{}
   try{const d=$('agendaDate')?.value;if(d)await window.LariosReservations?.loadAgenda?.(d)}catch{}
 }
 async function remove(id,label){
@@ -25,33 +24,44 @@ async function remove(id,label){
 }
 function installOverride(){
   const current=window.LariosAdminReservations||{};
-  if(current.__secureDeleteV1)return true;
   current.remove=remove;
   current.__secureDeleteV1=true;
   window.LariosAdminReservations=current;
-  return true;
 }
-async function ensureDraftDeleteButtons(){
+function extractId(article){
+  for(const el of article.querySelectorAll('[onclick]')){
+    const s=el.getAttribute('onclick')||'';
+    const m=s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if(m)return m[0];
+  }
+  return '';
+}
+function patchDeleteButtons(){
+  installOverride();
   const body=$('lrContractPanelBody');if(!body)return;
-  let rows=[];try{
-    const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_list_contracts',{method:'POST',headers:headers(),body:'{}'});
-    if(!r.ok)return;rows=await r.json();if(!Array.isArray(rows))return;
-  }catch{return}
-  const byNumber=new Map(rows.filter(x=>x?.status==='draft').map(x=>[String(x.contract_number||''),x]));
   body.querySelectorAll('.lrCpRow').forEach(article=>{
-    if(article.dataset.deletePatchedV1==='1')return;
-    const number=article.querySelector('header b')?.textContent?.trim()||'';
-    const c=byNumber.get(number);if(!c)return;
+    const badge=article.querySelector('header em')?.textContent||'';
+    if(!/Contrato sin generar/i.test(badge))return;
+    const id=extractId(article);if(!id)return;
     const actions=article.querySelector('.lrCpActions');if(!actions)return;
     let btn=[...actions.querySelectorAll('button')].find(b=>/Eliminar reserva cancelada/i.test(b.textContent||''));
-    if(!btn){btn=document.createElement('button');btn.className='danger';btn.dataset.adminOnly='true';btn.textContent='Eliminar reserva cancelada';actions.appendChild(btn)}
+    if(!btn){
+      btn=document.createElement('button');
+      btn.className='danger';
+      btn.dataset.adminOnly='true';
+      btn.textContent='Eliminar reserva cancelada';
+      actions.appendChild(btn);
+    }
     btn.disabled=false;
-    btn.onclick=()=>remove(c.id,number||'esta reserva');
-    article.dataset.deletePatchedV1='1';
-  })
+    const number=article.querySelector('header b')?.textContent?.trim()||'esta reserva';
+    btn.onclick=()=>remove(id,number);
+  });
 }
 installOverride();
-let tries=0;const t=setInterval(()=>{installOverride();ensureDraftDeleteButtons();if(++tries>30)clearInterval(t)},500);
-const rootObserver=new MutationObserver(()=>{setTimeout(()=>{installOverride();ensureDraftDeleteButtons()},50)});
-rootObserver.observe(document.documentElement,{childList:true,subtree:true});
+[0,500,1200,2500].forEach(ms=>setTimeout(patchDeleteButtons,ms));
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(t&&((t.closest&&t.closest('[onclick*="LariosContractPanel.open"]'))||(t.closest&&t.closest('#lrContractPanel'))))setTimeout(patchDeleteButtons,250);
+},{passive:true});
+window.addEventListener('focus',()=>setTimeout(patchDeleteButtons,250));
 })();
