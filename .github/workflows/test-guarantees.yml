@@ -1,0 +1,68 @@
+name: Validate TEST guarantees
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/mobile-v84]
+    paths:
+      - scripts/install-test-guarantees.py
+      - tests/test-preauthorization.mjs
+      - supabase/functions/test-preauthorization/**
+      - app-v84/www/guarantee-panel-v1.js
+      - .github/workflows/test-guarantees.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: test-guarantees-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/test/mobile-v84'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/mobile-v84
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unit tests without network or card operations
+        run: node --test tests/test-preauthorization.mjs
+      - name: Activate on reviewed TEST baseline
+        run: python3 scripts/install-test-guarantees.py
+      - name: Verify public TEST configuration (no credentials)
+        run: |
+          curl --fail --silent --show-error --max-time 30 https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/test-preauthorization > test-preauthorization-capabilities.json
+          python3 -c 'import json; d=json.load(open("test-preauthorization-capabilities.json")); assert d["environment"]=="test"; print(d)'
+      - name: Commit only TEST form wiring
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "test/mobile-v84"
+          git diff --check
+          git add -- app-v84/www/reservation-compact-v1.js app-v84/www/index.html
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Wire TEST base guarantees and authorization panel'
+            git push origin HEAD:refs/heads/test/mobile-v84
+          fi
+          git rev-parse HEAD > test-guarantee-revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-guarantee-review
+          path: |
+            app-v84/www
+            supabase/functions/test-preauthorization
+            tests/test-preauthorization.mjs
+            test-preauthorization-capabilities.json
+            test-guarantee-revision.txt
+          retention-days: 7
+      - name: Publish through authorized production workflow without modifying production source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run web-preview.yml --repo "$GITHUB_REPOSITORY" --ref agent/mobile-v84
