@@ -1,0 +1,47 @@
+name: Repair TEST editor stability
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/mobile-v84]
+    paths:
+      - scripts/fix-test-editor-stability.py
+      - .github/workflows/repair-test-editor.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: repair-test-editor
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/test/mobile-v84'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/mobile-v84
+      - name: Apply hash-guarded source repair and validate JavaScript
+        run: python3 scripts/fix-test-editor-stability.py
+      - name: Commit only reviewed TEST files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "test/mobile-v84"
+          git diff --check
+          git add -- app-v84/www/reservation-compact-v1.js app-v84/www/role-access-v1.js app-v84/www/larios-fixes.js app-v84/www/v84-corrections.js app-v84/www/contract-lifecycle-v6.js app-v84/www/final-authority.js app-v84/www/index.html
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Fix TEST editor mutation loops and preserve manual prices'
+            git push origin HEAD:refs/heads/test/mobile-v84
+          fi
+          printf 'TEST source: %s\n' "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish through the existing authorized Pages workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run web-preview.yml --repo "$GITHUB_REPOSITORY" --ref agent/mobile-v84
