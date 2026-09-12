@@ -1,6 +1,6 @@
 name: Publish V8.4 Web Preview
 
-# Production source of truth: agent/mobile-v84
+# Production stays at root. Isolated test branch is published under /pruebas/.
 on:
   workflow_dispatch:
   push:
@@ -27,14 +27,29 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout production
+        uses: actions/checkout@v4
+        with:
+          ref: agent/mobile-v84
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          ref: test/mobile-v84
+          path: test-source
       - uses: actions/configure-pages@v5
-      - name: Prepare original contract assets
+      - name: Prepare production and isolated test site
         run: |
           mkdir -p app-v84/www/assets app-v84/www/vendor
           cp static/assets/contrato-larios-normalizado.pdf app-v84/www/assets/
           cp static/assets/damage-map.png app-v84/www/assets/
           cp static/vendor/pdf-lib.min.js app-v84/www/vendor/
+          rm -rf app-v84/www/pruebas
+          mkdir -p app-v84/www/pruebas
+          cp -R test-source/app-v84/www/. app-v84/www/pruebas/
+          mkdir -p app-v84/www/pruebas/assets app-v84/www/pruebas/vendor
+          cp test-source/static/assets/contrato-larios-normalizado.pdf app-v84/www/pruebas/assets/
+          cp test-source/static/assets/damage-map.png app-v84/www/pruebas/assets/
+          cp test-source/static/vendor/pdf-lib.min.js app-v84/www/pruebas/vendor/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app-v84/www
