@@ -30,7 +30,29 @@ function installDeposit(){const old=$('deposit');if(!old||$('lrDepositBox'))retu
 
 let loadedId='';async function loadDepositForCurrentContract(){const id=window.LariosCurrentContractId||'';if(!id||id===loadedId||!$('deposit_cash'))return;loadedId=id;try{const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/test_app_contract_record',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_contract_id:id})});if(!r.ok)return;const x=await r.json();const cash=Number(x?.deposit_cash||0),pre=Number(x?.preauthorization||0),method=String(x?.deposit_method||'');$('deposit_cash').value=money(cash);$('preauthorization').value=money(pre);$('deposit_cash_selected').checked=method==='cash'||cash>0;$('preauth_selected').checked=method==='preauthorization'||pre>0;if($('deposit_cash_selected').checked&&$('preauth_selected').checked)$('preauth_selected').checked=false;syncDepositState()}catch(e){}}
 
-const originalFetch=window.fetch.bind(window);window.fetch=async function(input,init){try{const url=typeof input==='string'?input:String(input?.url||'');if(/\/rest\/v1\/rpc\/(?:test_)?app_save_contract(?:\?|$)/.test(url)&&init?.body){const parsed=JSON.parse(init.body);const p=parsed?.p_payload;if(p&&$('lrDepositBox')){syncDepositState();const cashSel=$('deposit_cash_selected')?.checked,preSel=$('preauth_selected')?.checked;if(['50CC','125CC'].includes(String(p.vehicle_group||'').toUpperCase().replace(/^GRUPO\s+/,''))&&!cashSel&&!preSel){return new Response('En motos de 50cc y 125cc debes seleccionar Depósito efectivo o Preautorización.',{status:400,headers:{'Content-Type':'text/plain'}})}p.deposit_cash=cashSel?money($('deposit_cash')?.value):'0.00';p.preauthorization=preSel?money($('preauthorization')?.value):'0.00';p.deposit_method=cashSel?'cash':preSel?'preauthorization':'';p.deposit=cashSel?p.deposit_cash:preSel?p.preauthorization:'0.00';init={...init,body:JSON.stringify(parsed)}}}catch(e){}return originalFetch(input,init)};
+const originalFetch=window.fetch.bind(window);
+window.fetch=async function(input,init){
+  try{
+    const url=typeof input==='string'?input:String(input?.url||'');
+    if(/\/rest\/v1\/rpc\/(?:test_)?app_save_contract(?:\?|$)/.test(url)&&init?.body){
+      const parsed=JSON.parse(init.body);
+      const p=parsed?.p_payload;
+      if(p&&$('lrDepositBox')){
+        syncDepositState();
+        const cashSel=$('deposit_cash_selected')?.checked,preSel=$('preauth_selected')?.checked;
+        if(['50CC','125CC'].includes(String(p.vehicle_group||'').toUpperCase().replace(/^GRUPO\s+/,''))&&!cashSel&&!preSel){
+          return new Response('En motos de 50cc y 125cc debes seleccionar Depósito efectivo o Preautorización.',{status:400,headers:{'Content-Type':'text/plain'}});
+        }
+        p.deposit_cash=cashSel?money($('deposit_cash')?.value):'0.00';
+        p.preauthorization=preSel?money($('preauthorization')?.value):'0.00';
+        p.deposit_method=cashSel?'cash':preSel?'preauthorization':'';
+        p.deposit=cashSel?p.deposit_cash:preSel?p.preauthorization:'0.00';
+        init={...init,body:JSON.stringify(parsed)};
+      }
+    }
+  }catch(e){}
+  return originalFetch(input,init);
+};
 
 function patch(){installStyles();protectManualPrices();compactOptionalSections();installDeposit();loadDepositForCurrentContract();syncDepositState()}
 const form=$('reservationForm');if(form){const obs=new MutationObserver(()=>requestAnimationFrame(patch));obs.observe(form,{childList:true,subtree:true})}
