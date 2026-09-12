@@ -8,79 +8,16 @@ const n=id=>Number(String($(id)?.value||'0').replace(',','.'))||0;
 const v=id=>String($(id)?.value||'').trim();
 const checked=id=>!!$(id)?.checked;
 function headers(){return{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'}}
-async function loadPricing(force=false){
-  if(pricing&&!force)return pricing;
-  if(loading)return loading;
-  loading=(async()=>{
-    const r=await fetch(cfg.supabaseUrl+'/rest/v1/pricing?select=*&active=eq.true&order=category',{headers:headers()});
-    if(!r.ok)throw new Error(await r.text());
-    pricing=await r.json();
-    return pricing;
-  })().finally(()=>loading=null);
-  return loading;
-}
+async function loadPricing(force=false){if(pricing&&!force)return pricing;if(loading)return loading;loading=(async()=>{const r=await fetch(cfg.supabaseUrl+'/rest/v1/pricing?select=*&active=eq.true&order=category',{headers:headers()});if(!r.ok)throw new Error(await r.text());pricing=await r.json();return pricing})().finally(()=>loading=null);return loading}
 function groupCode(){return v('vehicle_group').toUpperCase().replace(/^GRUPO\s+/,'').replace(/[_ ]/g,'-')}
 function categoryKey(){const g=groupCode();if(g==='50CC')return'50cc';if(g==='125CC')return'125cc';return nonCars.includes(g)?g:(g?'Grupo '+g:'')}
 function rowForGroup(){const k=categoryKey().toUpperCase();return (pricing||[]).find(x=>String(x.category||'').toUpperCase()===k)||null}
-function baseRental(row,days){
-  if(!row)return 0;
-  if(row.pricing_type==='daily_tiers'){
-    const daily=days<=3?row.tier_1_3_daily:days<=7?row.tier_4_7_daily:row.tier_8_plus_daily;
-    return Number(daily||0)*days;
-  }
-  if(days<=7)return Number(row['day_'+days]||0);
-  return Number(row.day_7||0)+Number(row.extra_day||0)*(days-7);
-}
-function extrasTotal(days){
-  let total=0;
-  const defs={child_seat:[6,40],carplay:[6,40],gps:[6,40],booster:[5,25],gloves:[5,25],bike_seat:[5,25],phone_holder:[5,25]};
-  Object.entries(defs).forEach(([k,[daily,max]])=>{
-    const box=$('v2_'+k)||$('fx_'+k); if(!box?.checked)return;
-    const qty=Math.max(1,Number(($('v2_'+k+'_qty')||$('fx_'+k+'_qty'))?.value||1));
-    const p=$('v2_'+k+'_price');
-    const unit=p&&p.dataset.manualPrice==='1'?(Number(p.value)||0):Math.min(days*daily,max);
-    total+=qty*unit;
-  });
-  if(checked('v2_additional_driver')){
-    const qty=Math.max(1,n('v2_additional_driver_qty')||1),p=$('v2_additional_driver_price');
-    total+=qty*(p&&p.dataset.manualPrice==='1'?(Number(p.value)||0):5);
-  }
-  for(const i of [1,2]){if(v('v2_custom'+i+'_name'))total+=Math.max(1,n('v2_custom'+i+'_qty')||1)*n('v2_custom'+i+'_price')}
-  return total;
-}
-function recalc(){
-  if(!pricing||!$('rental_price'))return;
-  const row=rowForGroup(); if(!row)return;
-  const days=Math.max(1,Math.floor(n('rental_days')||1));
-  const qty=['BICICLETA','E-BIKE'].includes(groupCode())?Math.max(1,n('vehicle_quantity')||1):1;
-  let rental=baseRental(row,days)*qty;
-  if(checked('tariff94'))rental*=1+Number($('tariff94')?.dataset.markup||row.season_94_markup||20)/100;
-  let insurance=0;
-  if(!nonCars.includes(groupCode())&&checked('full_insurance'))insurance=(Number(row.insurance_first_day||0)+Math.max(0,days-1)*Number(row.insurance_extra_day||0))*qty;
-  const young=checked('young_driver')?n('young_driver_amount'):0;
-  const extras=extrasTotal(days);
-  const parking=!nonCars.includes(groupCode())&&/(aeropuerto|airport|easy\s*parking)/i.test(v('return_location'))?15:0;
-  const discount=rental*Math.max(0,n('discount_percent'))/100;
-  const total=Math.max(0,rental-discount+insurance+young+extras+parking);
-  $('rental_price').value=money(rental);
-  if($('insurance_total'))$('insurance_total').value=money(insurance);
-  if($('franchise'))$('franchise').value=money(checked('full_insurance')?0:Number(row.franchise||0));
-  if($('contract_total'))$('contract_total').value=money(total);
-  const box=$('priceBreakdown');
-  if(box)box.innerHTML=`<div class="priceLine"><span>Alquiler</span><b>${money(rental)} €</b></div><div class="priceLine"><span>Seguro</span><b>${money(insurance)} €</b></div><div class="priceLine"><span>Conductor &lt;25</span><b>${money(young)} €</b></div><div class="priceLine"><span>Extras</span><b>${money(extras)} €</b></div><div class="priceLine"><span>Easy Parking</span><b>${money(parking)} €</b></div><div class="priceLine"><span>Descuento</span><b>-${money(discount)} €</b></div><div class="priceLine priceTotal"><span>Total</span><b>${money(total)} €</b></div>`;
-}
-async function recalcReady(){try{await loadPricing();recalc();setTimeout(recalc,120);setTimeout(recalc,500)}catch(e){console.warn('pricing-autocalc:',e)}}
-function bind(){
-  const form=$('reservationForm'); if(!form||form===boundForm)return;
-  boundForm=form;
-  const ids=['vehicle_group','vehicle_quantity','rental_days','pickup_date','pickup_time','return_date','return_time','tariff94','full_insurance','insurance_total','young_driver','young_driver_amount','discount_percent','return_location'];
-  ids.forEach(id=>{const e=$(id);if(!e||e.dataset.autoPriceV2==='1')return;e.dataset.autoPriceV2='1';const fn=()=>setTimeout(recalcReady,0);e.addEventListener('change',fn);e.addEventListener('input',fn)});
-  form.querySelectorAll('[id^="v2_"],[id^="fx_"]').forEach(e=>{if(e.dataset.autoPriceV2==='1')return;e.dataset.autoPriceV2='1';const fn=()=>setTimeout(recalcReady,0);e.addEventListener('change',fn);e.addEventListener('input',fn)});
-  recalcReady();
-}
+function baseRental(row,days){if(!row)return 0;if(row.pricing_type==='daily_tiers'){const daily=days<=3?row.tier_1_3_daily:days<=7?row.tier_4_7_daily:row.tier_8_plus_daily;return Number(daily||0)*days}if(days<=7)return Number(row['day_'+days]||0);return Number(row.day_7||0)+Number(row.extra_day||0)*(days-7)}
+function extrasTotal(days){let total=0;const defs={child_seat:[6,40],carplay:[6,40],gps:[6,40],booster:[5,25],gloves:[5,25],bike_seat:[5,25],phone_holder:[5,25]};Object.entries(defs).forEach(([k,[daily,max]])=>{const box=$('v2_'+k)||$('fx_'+k);if(!box?.checked)return;const qty=Math.max(1,Number(($('v2_'+k+'_qty')||$('fx_'+k+'_qty'))?.value||1));const p=$('v2_'+k+'_price');const unit=p&&p.dataset.manualPrice==='1'?(Number(p.value)||0):Math.min(days*daily,max);total+=qty*unit});if(checked('v2_additional_driver')){const qty=Math.max(1,n('v2_additional_driver_qty')||1),p=$('v2_additional_driver_price');total+=qty*(p&&p.dataset.manualPrice==='1'?(Number(p.value)||0):5)}for(const i of [1,2]){if(v('v2_custom'+i+'_name'))total+=Math.max(1,n('v2_custom'+i+'_qty')||1)*n('v2_custom'+i+'_price')}return total}
+function recalc(forceAuto=false){if(!pricing||!$('rental_price'))return;const row=rowForGroup();if(!row)return;const days=Math.max(1,Math.floor(n('rental_days')||1));const qty=['BICICLETA','E-BIKE'].includes(groupCode())?Math.max(1,n('vehicle_quantity')||1):1;let autoRental=baseRental(row,days)*qty;if(checked('tariff94'))autoRental*=1+Number($('tariff94')?.dataset.markup||row.season_94_markup||20)/100;let autoInsurance=0;if(!nonCars.includes(groupCode())&&checked('full_insurance'))autoInsurance=(Number(row.insurance_first_day||0)+Math.max(0,days-1)*Number(row.insurance_extra_day||0))*qty;const rp=$('rental_price'),ip=$('insurance_total');if(forceAuto||rp.dataset.manualPrice!=='1')rp.value=money(autoRental);if(ip&&(forceAuto||ip.dataset.manualPrice!=='1'))ip.value=money(autoInsurance);const rental=n('rental_price'),insurance=n('insurance_total');const young=checked('young_driver')?n('young_driver_amount'):0;const extras=extrasTotal(days);const parking=!nonCars.includes(groupCode())&&/(aeropuerto|airport|easy\s*parking)/i.test(v('return_location'))?15:0;const discount=rental*Math.max(0,n('discount_percent'))/100;const total=Math.max(0,rental-discount+insurance+young+extras+parking);if($('franchise'))$('franchise').value=money(checked('full_insurance')?0:Number(row.franchise||0));if($('contract_total'))$('contract_total').value=money(total);const box=$('priceBreakdown');if(box)box.innerHTML=`<div class="priceLine"><span>Alquiler</span><b>${money(rental)} €</b></div><div class="priceLine"><span>Seguro</span><b>${money(insurance)} €</b></div><div class="priceLine"><span>Conductor &lt;25</span><b>${money(young)} €</b></div><div class="priceLine"><span>Extras</span><b>${money(extras)} €</b></div><div class="priceLine"><span>Easy Parking</span><b>${money(parking)} €</b></div><div class="priceLine"><span>Descuento</span><b>-${money(discount)} €</b></div><div class="priceLine priceTotal"><span>Total</span><b>${money(total)} €</b></div>`}
+async function recalcReady(forceAuto=false){try{await loadPricing();recalc(forceAuto);setTimeout(()=>recalc(forceAuto),120)}catch(e){console.warn('pricing-autocalc:',e)}}
+function manualMoney(id){const e=$(id);if(!e||e.dataset.manualMoneyV2==='1')return;e.dataset.manualMoneyV2='1';e.inputMode='decimal';e.addEventListener('input',()=>{e.dataset.manualPrice='1';recalcReady(false)});e.addEventListener('blur',()=>{if(String(e.value).trim()==='')e.value='0.00';else e.value=money(n(id));recalcReady(false)})}
+function bind(){const form=$('reservationForm');if(!form||form===boundForm)return;boundForm=form;manualMoney('rental_price');manualMoney('insurance_total');const ids=['vehicle_group','vehicle_quantity','rental_days','pickup_date','pickup_time','return_date','return_time','tariff94','full_insurance','young_driver','young_driver_amount','discount_percent','return_location'];ids.forEach(id=>{const e=$(id);if(!e||e.dataset.autoPriceV2==='1')return;e.dataset.autoPriceV2='1';const fn=()=>{if(['vehicle_group','vehicle_quantity','rental_days','pickup_date','pickup_time','return_date','return_time','tariff94','full_insurance'].includes(id)){if($('rental_price'))$('rental_price').dataset.manualPrice='0';if($('insurance_total'))$('insurance_total').dataset.manualPrice='0'}setTimeout(()=>recalcReady(false),0)};e.addEventListener('change',fn);e.addEventListener('input',fn)});form.querySelectorAll('[id^="v2_"],[id^="fx_"]').forEach(e=>{if(e.dataset.autoPriceV2==='1')return;e.dataset.autoPriceV2='1';const fn=()=>setTimeout(()=>recalcReady(false),0);e.addEventListener('change',fn);e.addEventListener('input',fn)});recalcReady(false)}
 function onReservationVisibility(){const s=$('reservation');if(s&&!s.classList.contains('hidden'))setTimeout(bind,20)}
-const observer=new MutationObserver(onReservationVisibility);
-function start(){const s=$('reservation');if(s)observer.observe(s,{attributes:true,attributeFilter:['class']});onReservationVisibility();setTimeout(()=>loadPricing().catch(()=>{}),250)}
-window.LariosAutoPricing={recalculate:recalcReady,reload:()=>loadPricing(true).then(()=>recalc())};
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
+const observer=new MutationObserver(onReservationVisibility);function start(){const s=$('reservation');if(s)observer.observe(s,{attributes:true,attributeFilter:['class']});onReservationVisibility();setTimeout(()=>loadPricing().catch(()=>{}),250)}window.LariosAutoPricing={recalculate:recalcReady,reload:()=>loadPricing(true).then(()=>recalc(false))};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();
