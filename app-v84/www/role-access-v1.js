@@ -37,7 +37,8 @@ function identityBar(){
   const top=document.querySelector('.top');if(!top)return;
   let bar=$('lrIdentityBar');if(!bar){bar=document.createElement('div');bar.id='lrIdentityBar';bar.className='lrIdentityBar';($('status')||top.lastElementChild)?.insertAdjacentElement('afterend',bar)}
   bar.classList.toggle('hidden',!token);
-  bar.innerHTML=`<button type="button" class="lrRoleChip ${esc(state.role)}" onclick="LariosAccess.openPermissions()"><span>${isAdmin()?'◆':isEmployee()?'●':'!'}</span>${esc(label())}</button><button type="button" class="lrPermissionLink" onclick="LariosAccess.openPermissions()">Ver permisos</button>`;
+  const identity=`<button type="button" class="lrRoleChip ${esc(state.role)}" onclick="LariosAccess.openPermissions()"><span>${isAdmin()?'◆':isEmployee()?'●':'!'}</span>${esc(label())}</button><button type="button" class="lrPermissionLink" onclick="LariosAccess.openPermissions()">Ver permisos</button>`;
+  if(bar.innerHTML!==identity)bar.innerHTML=identity;
 }
 function reservationGuide(){
   const form=$('reservationForm');if(!form||form.querySelector(':scope > .lrEditableGuide'))return;
@@ -52,7 +53,7 @@ function pricingGuide(){
   const pricing=$('pricing');if(!pricing||$('lrPricingAccessNote'))return;
   const note=document.createElement('div');note.id='lrPricingAccessNote';note.className='lrPricingAccessNote';note.textContent=isAdmin()?'Consulta de tarifas · su modificación es administrativa.':'Consulta de tarifas · 🔒 modificar la tabla oficial requiere un administrador.';pricing.insertAdjacentElement('afterend',note);
 }
-function markVersion(){const footer=document.querySelector('.foot');if(footer){footer.textContent=footer.textContent.replace(/ · PERMISOS V\d+/g,'').trim()+' · PERMISOS V2'}}
+function markVersion(){const footer=document.querySelector('.foot');if(footer){const text=footer.textContent.replace(/ · PERMISOS V\d+/g,'').trim()+' · PERMISOS V2';if(footer.textContent!==text)footer.textContent=text}}
 function decorate(){
   if(decorating)return;decorating=true;
   requestAnimationFrame(()=>{

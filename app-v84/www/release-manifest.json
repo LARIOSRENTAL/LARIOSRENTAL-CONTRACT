@@ -1,0 +1,16 @@
+{
+  "release": "REAL - GARANTIAS 1",
+  "approved_test_commit": "0235183bbff9678aea7961407bca0ca34b5aa978",
+  "previous_production_commit": "665e7c881150ed4cf752b95b42a827546fcd737a",
+  "files": {
+    "larios-fixes.js": "dc12365a588bd8a86c214bad84c8883fcae72cfd45c96ef620c4515b567e6091",
+    "v84-corrections.js": "0968ae4d207df4893ef5ceb33bc1a7b2898d2a1232e54d69a1484c4f89a83f3b",
+    "role-access-v1.js": "4be6b5da7c97d71a78af69634bc1deec5e8ba9c8805652eeb2c862e9ac6c88d9",
+    "contract-lifecycle-v6.js": "8d79b35e55225e6383aad6a441face80477a7bd512cd5a3c6faebdd6f24b3530",
+    "final-authority.js": "2546a5c38d4f2e69b336b4e06d06a4f52a3d584a833cf9b18df4bc8d5fa09ac4",
+    "pricing-autocalc-v2.js": "83e77c2ce3a543e709270c73999ed87a1efa00f8cc62c2ac54996c3c0e2776d4",
+    "reservation-compact-v1.js": "9506c5d196779e9f9ebaa52ba616c9c006699e9cd10805e224473eb2826a73af",
+    "guarantee-panel-v1.js": "a138dac9ecb45524dabb06d089daeee48cfd37e38ca90a978ea85dd88a183236",
+    "index.html": "77ed65383d94049e7c097734d6f3f0e8f0b9c4f818670daa6fcb07c263366587"
+  }
+}
