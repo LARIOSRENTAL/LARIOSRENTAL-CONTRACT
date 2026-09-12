@@ -1,0 +1,82 @@
+name: Validate production guarantees
+on:
+  workflow_dispatch:
+  push:
+    branches: [release/guarantees-production-20260913]
+    paths:
+      - scripts/promote-approved-guarantees.py
+      - tests/production-guarantees-browser.py
+      - .github/workflows/validate-production-guarantees.yml
+permissions:
+  contents: write
+concurrency:
+  group: validate-production-guarantees
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/release/guarantees-production-20260913'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/guarantees-production-20260913
+      - uses: actions/checkout@v4
+        with:
+          ref: 665e7c881150ed4cf752b95b42a827546fcd737a
+          path: .baseline
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0235183bbff9678aea7961407bca0ca34b5aa978
+          path: .approved
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build from pinned production and approved test revisions
+        run: python3 scripts/promote-approved-guarantees.py .baseline .approved
+      - name: Test server logic without network or payments
+        working-directory: .baseline
+        run: node --test tests/production-preauthorization.mjs
+      - name: Install browser test dependencies
+        run: |
+          python3 -m pip install playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+      - name: Browser checks with intercepted synthetic data
+        run: python3 tests/production-guarantees-browser.py .baseline
+      - name: Save validated release files only
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "release/guarantees-production-20260913"
+          python3 - <<'PY'
+          import importlib.util, shutil
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('promotion','scripts/promote-approved-guarantees.py')
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          paths=['app-v84/www/'+name for name in m.FILES+['index.html','release-manifest.json']]
+          paths+=['supabase/functions/preauthorization/index.ts','tests/production-preauthorization.mjs']
+          for rel in paths:
+              target=Path(rel); target.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(Path('.baseline')/rel,target)
+          PY
+          git diff --check
+          git add -- app-v84/www/larios-fixes.js app-v84/www/v84-corrections.js app-v84/www/role-access-v1.js app-v84/www/contract-lifecycle-v6.js app-v84/www/final-authority.js app-v84/www/pricing-autocalc-v2.js app-v84/www/reservation-compact-v1.js app-v84/www/guarantee-panel-v1.js app-v84/www/index.html app-v84/www/release-manifest.json supabase/functions/preauthorization/index.ts tests/production-preauthorization.mjs
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Promote approved editor and guarantees with production isolation'
+            git push origin HEAD:refs/heads/release/guarantees-production-20260913
+          fi
+          git rev-parse HEAD > production-release-revision.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-guarantees-validation
+          retention-days: 7
+          path: |
+            qa-results
+            production-release-revision.txt
+            .baseline/app-v84/www
+            .baseline/supabase/functions/preauthorization
+            .baseline/tests/production-preauthorization.mjs
