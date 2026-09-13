@@ -310,6 +310,8 @@ async function handler(req: Request) {
         if (pickupAddress) form.set("pickup_at_location", pickupAddress);
         if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
         form.set("resource", "freesale");
+        form.set("pm_prev_mezzo_id", "");
+        form.set("pm_current_model_id", model);
         form.set("ritiro", pickup);
         form.set("consegna", dropoff);
         form.set("internal_move", "0");
@@ -319,7 +321,7 @@ async function handler(req: Request) {
         form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
         if (Number(contract.franchise || 0) > 0) form.set("overwrite_damage_franchise", Number(contract.franchise).toFixed(2));
         const age = ageAt(customer.birth_date || driver?.birth_date, contract.delivery_date); if (age !== null) form.set("age", String(age));
-        console.log(JSON.stringify({ event: "renthub_transfer_create", contract_number: contract.contract_number, category: contract.category, model, resource: "freesale", pickup_location: pickup, dropoff_location: dropoff, has_pickup_address: !!pickupAddress, has_dropoff_address: !!dropoffAddress, rental_rate_net: renthubRentalRate.toFixed(4) }));
+        console.log(JSON.stringify({ event: "renthub_transfer_create", contract_number: contract.contract_number, category: contract.category, model, resource: "freesale", pm_prev_mezzo_id: "", pm_current_model_id: model, pickup_location: pickup, dropoff_location: dropoff, has_pickup_address: !!pickupAddress, has_dropoff_address: !!dropoffAddress, rental_rate_net: renthubRentalRate.toFixed(4) }));
         inserted = await renthubFetch("/module/rental/api/partner/booking/insert", { method: "POST", body: form });
         code = String(inserted?.result?.booking?.code || "");
         if (!code) throw new Error("Renthub did not return a booking code");

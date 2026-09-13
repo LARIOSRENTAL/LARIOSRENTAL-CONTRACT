@@ -26,7 +26,7 @@ Deno.serve(async(req:Request)=>{
   if(req.method!=="POST")return json({error:"Method not allowed"},405);
   const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
   if(!jwt)return json({error:"Authentication required"},401);
-  const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}}),{data:auth,error}=await service.auth.getUser(jwt),role=auth.user?.app_metadata?.role;
+  const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}}),actor=createClient(env("SUPABASE_URL"),env("SUPABASE_ANON_KEY"),{auth:{persistSession:false,autoRefreshToken:false},global:{headers:{Authorization:`Bearer ${jwt}`}}}),{data:auth,error}=await service.auth.getUser(jwt),role=auth.user?.app_metadata?.role;
   if(error||!auth.user||!["employee","admin"].includes(role))return json({error:"Not authorized"},403);
   const body=await req.json().catch(()=>({})),action=String(body.action||"create"),id=String(body.contract_id||"");
   if(!/^[0-9a-f-]{36}$/i.test(id))return json({error:"Contrato no válido"},400);
@@ -49,23 +49,25 @@ Deno.serve(async(req:Request)=>{
     form.set("model",map.model);form.set("start_datetime",start);form.set("end_datetime",end);
     form.set("pickup_location",map.pickup);form.set("dropoff_location",map.dropoff);
     if(pickupAddress)form.set("pickup_at_location",pickupAddress);if(dropoffAddress)form.set("dropoff_at_location",dropoffAddress);
-    // Captured from Renthub's own booking form on 2026-09-13. These fields make the intended state explicit:
-    // vehicle remains "Por asignar" (freesale), both places are "Otra Ubicación", and the real addresses stay separate.
-    form.set("resource","freesale");form.set("ritiro",map.pickup);form.set("consegna",map.dropoff);form.set("internal_move","0");
+    // Captured from Renthub's own booking form on 2026-09-13. The Partner endpoint
+    // needs the current model separately from the (empty) previous vehicle to avoid
+    // resolving an available concrete vehicle from the legacy `model` field.
+    form.set("resource","freesale");form.set("pm_prev_mezzo_id","");form.set("pm_current_model_id",map.model);
+    form.set("ritiro",map.pickup);form.set("consegna",map.dropoff);form.set("internal_move","0");
     form.set("booking_type","booking");form.set("send_confirmation_email","0");form.set("pricelist",pricelist(c));
     // Never send bicycle quantity as vehicle assignment. Quantity stays in Larios; Renthub receives the reservation price.
     const rentalGross=amount(c.rental_total)>0?amount(c.rental_total):amount(c.total);
     if(Number.isFinite(rentalGross)&&rentalGross>0){const rentalNet=netFromGross(rentalGross,c.vat_percent||21);form.set("overwrite_rental_rate",rentalNet.toFixed(4));}
     if(amount(c.deposit)>0)form.set("overwrite_deposit",amount(c.deposit).toFixed(2));
     if(amount(c.franchise)>0)form.set("overwrite_damage_franchise",amount(c.franchise).toFixed(2));
-    console.log(JSON.stringify({event:"renthub_booking_create",contract_number:c.contract_number,group:map.group,model:map.model,resource:"freesale",pickup:map.pickup,dropoff:map.dropoff,has_pickup_address:!!pickupAddress,has_dropoff_address:!!dropoffAddress,price_override:rentalGross>0}));
+    console.log(JSON.stringify({event:"renthub_booking_create",contract_number:c.contract_number,group:map.group,model:map.model,resource:"freesale",pm_prev_mezzo_id:"",pm_current_model_id:map.model,pickup:map.pickup,dropoff:map.dropoff,has_pickup_address:!!pickupAddress,has_dropoff_address:!!dropoffAddress,price_override:rentalGross>0}));
     const inserted=await rh("/module/rental/api/partner/booking/insert",{method:"POST",body:form}),code=String(inserted?.result?.booking?.code||"");
     if(!code)throw Error("Renthub no devolvió código de reserva");
-    await requireWrite(service.from("contracts").update({renthub_contract_id:code,renthub_sync_status:"reservation_created",renthub_last_sync_at:new Date().toISOString(),renthub_sync_error:null,app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff}}).eq("id",id),"No se pudo guardar el código de Renthub");
+    await requireWrite(actor.from("contracts").update({renthub_contract_id:code,renthub_sync_status:"reservation_created",renthub_last_sync_at:new Date().toISOString(),renthub_sync_error:null,app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff}}).eq("id",id),"No se pudo guardar el código de Renthub");
     return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:map.pickup,dropoff_location:map.dropoff});
   }catch(e){
     const message=e instanceof Error?e.message:String(e);console.error(JSON.stringify({event:"renthub_booking_error",contract_id:id,error:message}));
-    const write=await service.from("contracts").update({renthub_sync_status:"failed",renthub_sync_error:message}).eq("id",id);
+    const write=await actor.from("contracts").update({renthub_sync_status:"failed",renthub_sync_error:message}).eq("id",id);
     if(write.error)console.error(JSON.stringify({event:"renthub_booking_error_write_failed",contract_id:id,error:write.error.message}));
     return json({error:message},502);
   }
