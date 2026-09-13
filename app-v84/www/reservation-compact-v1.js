@@ -37,26 +37,22 @@ const originalFetch=window.fetch.bind(window);
 window.fetch=async function(input,init){
   try{
     const url=typeof input==='string'?input:String(input?.url||'');
-    if(/\/rest\/v1\/rpc\/app_save_contract(?:\?|$)/.test(url)&&init?.body){
+    if(/\/rest\/v1\/rpc\/(?:test_)?app_save_contract(?:\?|$)/.test(url)&&init?.body){
       const parsed=JSON.parse(init.body);
       const p=parsed?.p_payload;
       if(p&&$('lrDepositBox')&&!$('reservation')?.classList.contains('hidden')&&p.id&&p.id===window.LariosCurrentContractId){
         syncDepositState();
         const cashSel=$('deposit_cash_selected')?.checked,preSel=$('preauth_selected')?.checked;
-        if(['50CC','125CC'].includes(String(p.vehicle_group||'').toUpperCase().replace(/^GRUPO\s+/,''))&&!cashSel&&!preSel){
-          return new Response('En motos de 50cc y 125cc debes seleccionar Depósito efectivo o Preautorización.',{status:400,headers:{'Content-Type':'text/plain'}});
-        }
         p.rental_price_manual=$('rental_price')?.dataset.manualPrice==='1';
         p.insurance_total_manual=$('insurance_total')?.dataset.manualPrice==='1';
         p.deposit_cash=cashSel?money($('deposit_cash')?.value):'0.00';
         p.preauthorization=preSel?money($('preauthorization')?.value):'0.00';
         p.deposit_method=cashSel?'cash':preSel?'preauthorization':'';
         p.deposit=cashSel?p.deposit_cash:preSel?p.preauthorization:'0.00';
-        if(window.LariosGuarantees?.serialize)window.LariosGuarantees.serialize(p);
         init={...init,body:JSON.stringify(parsed)};
       }
     }
-  }catch(e){return new Response(JSON.stringify({message:e.message||'No se pudo validar la garantia'}),{status:409,headers:{'Content-Type':'application/json'}})}
+  }catch(e){}
   return originalFetch(input,init);
 };
 
