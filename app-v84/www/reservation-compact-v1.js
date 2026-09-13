@@ -43,9 +43,6 @@ window.fetch=async function(input,init){
       if(p&&$('lrDepositBox')&&!$('reservation')?.classList.contains('hidden')&&p.id&&p.id===window.LariosCurrentContractId){
         syncDepositState();
         const cashSel=$('deposit_cash_selected')?.checked,preSel=$('preauth_selected')?.checked;
-        if(['50CC','125CC'].includes(String(p.vehicle_group||'').toUpperCase().replace(/^GRUPO\s+/,''))&&!cashSel&&!preSel){
-          return new Response('En motos de 50cc y 125cc debes seleccionar Depósito efectivo o Preautorización.',{status:400,headers:{'Content-Type':'text/plain'}});
-        }
         p.rental_price_manual=$('rental_price')?.dataset.manualPrice==='1';
         p.insurance_total_manual=$('insurance_total')?.dataset.manualPrice==='1';
         p.deposit_cash=cashSel?money($('deposit_cash')?.value):'0.00';
