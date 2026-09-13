@@ -1,1 +1,1 @@
-Purpose: publish TEST Flow 2C with ahora handling and expanded 50cc/125cc shorthand under /pruebas. Production runtime files are unchanged by this trigger.
+Purpose: publish TEST Flow 2C parser fixes under /pruebas: ahora=current Madrid date/time; 2 125 = 2x125cc; 3x50 = 3 motos 50cc. Production runtime files are unchanged by this trigger.
