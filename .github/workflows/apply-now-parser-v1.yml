@@ -1,0 +1,75 @@
+name: Apply ahora parser v1
+
+on:
+  push:
+    branches: [test/mobile-v84]
+    paths:
+      - ".github/workflows/apply-now-parser-v1.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/mobile-v84
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch ahora handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app-v84/www/reservation-quick-v3.js')
+          s=p.read_text()
+          start=s.index('\nfunction compact(raw){')
+          end=s.index('\nfunction parseQuick(raw)', start)
+          new=r'''
+function currentMadridTime(){const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());return parts.find(x=>x.type==='hour').value+':'+parts.find(x=>x.type==='minute').value}
+function compact(raw){
+ if(!base)throw Error('Parser base no disponible');
+ let s=String(raw||'').trim(),day='',isNow=false;
+ if(/\bahora\b/i.test(s)){
+   isNow=true;day='today';s=s.replace(/\bahora\b/ig,' ').trim();
+   s=currentMadridTime()+' '+s;
+ }else if(/\bhoy\b/i.test(s)){
+   day='today';s=s.replace(/\bhoy\b/ig,' ');
+ }else if(/\bma[nñ]ana\b/i.test(s)){
+   day='tomorrow';s=s.replace(/\bma[nñ]ana\b/ig,' ');
+ }
+ const phone=phoneFrom(s);if(phone)s=s.replace(phone,' ');
+ const p=base(s.replace(/\s+/g,' ').trim()),gi=groupInfo(raw),literalDate=dateFrom(raw);
+ if(gi.group){p.vehicle_group=gi.group;p.vehicle_quantity=String(qtyForStoredReservation(gi))}
+ if(literalDate&&!day)p.pickup_date=literalDate;
+ if(day==='today')p.pickup_date=localDate();
+ if(day==='tomorrow')p.pickup_date=addDays(localDate(),1);
+ if(isNow)p.pickup_time=currentMadridTime();
+ if(day||literalDate){p.return_date=addDays(p.pickup_date,Math.max(1,Number(p.rental_days)||1));if(isNow)p.return_time=p.pickup_time}
+ if(phone)p.customer_phone=phone;
+ const nm=String(raw).match(/\b\d+\s*(?:d[ií]a|d[ií]as|dia|dias|d)\b\s+([A-Za-zÀ-ÿ' -]{2,50}?)\s+(?=\+\d)/i);
+ if(nm){p.customer_name=nm[1].trim();if(p.pickup_location?.endsWith(p.customer_name))p.pickup_location=p.pickup_location.slice(0,-p.customer_name.length).trim()}
+ p.return_location=p.return_location||p.pickup_location;p.agency=collaborator(raw);return p
+}'''
+          s=s[:start]+new+s[end:]
+          s=s.replace("version:'flow2b-20260913'","version:'flow2c-now-20260913'")
+          p.write_text(s)
+
+          p=Path('app-v84/www/index.html');s=p.read_text()
+          s=s.replace('reservation-quick-v3.js?v=flow2-20260913','reservation-quick-v3.js?v=flow2c-now-20260913')
+          s=s.replace('PRUEBAS · FLUJO 2</h1>','PRUEBAS · FLUJO 2C</h1>')
+          s=s.replace('V8.4 · FLUJO 2</footer>','V8.4 · FLUJO 2C</footer>')
+          p.write_text(s)
+          PY
+          node --check app-v84/www/reservation-quick-v3.js
+          grep -q "flow2c-now-20260913" app-v84/www/index.html
+          grep -q "currentMadridTime" app-v84/www/reservation-quick-v3.js
+      - name: Commit change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app-v84/www/reservation-quick-v3.js app-v84/www/index.html
+          git commit -m "Support ahora as current date and time"
+          git push origin HEAD:test/mobile-v84
