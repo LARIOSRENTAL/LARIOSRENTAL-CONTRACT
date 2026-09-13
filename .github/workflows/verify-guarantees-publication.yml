@@ -1,0 +1,56 @@
+name: Verify guarantees publication
+on:
+  workflow_dispatch:
+  push:
+    branches: [release/guarantees-production-20260913]
+    paths: [.github/workflows/verify-guarantees-publication.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2cacdd542eb0d8881ccd4094da0f96e5a62d417a
+      - name: Public service health and unauthenticated rejection only
+        run: |
+          mkdir -p verification
+          curl --fail --silent --show-error --max-time 30 https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/preauthorization > verification/service.json
+          python3 -c 'import json; d=json.load(open("verification/service.json")); assert d["environment"]=="production"; assert d["tap_supported"]==False; print(d)'
+          status=$(curl --silent --show-error --max-time 30 -o verification/unauthenticated.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"action":"status","environment":"production"}' https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/preauthorization)
+          test "$status" = 401
+      - name: Verify public Pages bytes match the validated release
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,time,urllib.request
+          from pathlib import Path
+          base='https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/'
+          expected=json.loads(Path('app-v84/www/release-manifest.json').read_text())
+          last=None
+          for attempt in range(18):
+              try:
+                  req=urllib.request.Request(base+'release-manifest.json?verify='+str(time.time_ns()),headers={'Cache-Control':'no-cache'})
+                  deployed=json.load(urllib.request.urlopen(req,timeout=25))
+                  assert deployed==expected, 'Release manifest differs'
+                  for name,digest in expected['files'].items():
+                      req=urllib.request.Request(base+name+'?verify='+str(time.time_ns()),headers={'Cache-Control':'no-cache'})
+                      content=urllib.request.urlopen(req,timeout=25).read()
+                      assert hashlib.sha256(content).hexdigest()==digest, name+' differs'
+                  report={'matched':True,'release':expected['release'],'checked_files':list(expected['files']),'approved_test_commit':expected['approved_test_commit']}
+                  Path('verification/pages.json').write_text(json.dumps(report,indent=2))
+                  print(json.dumps(report))
+                  break
+              except Exception as error:
+                  last=error
+                  print('Awaiting publication:',str(error),flush=True)
+                  if attempt==17: raise
+                  time.sleep(15)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-publication-verification
+          path: verification
+          retention-days: 7
