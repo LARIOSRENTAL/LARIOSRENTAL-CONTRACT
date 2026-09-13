@@ -1,1 +1,1 @@
-Purpose: publish TEST Flow 2C parser fixes under /pruebas: ahora=current Madrid date/time; 2 125 = 2x125cc; 3x50 = 3 motos 50cc. Production runtime files are unchanged by this trigger.
+Purpose: republish final TEST Flow 2C parser cleanup under /pruebas: ahora=current Madrid date/time; 2 125 = 2x125cc; 3x50 = 3 motos 50cc; scooter quantity tokens do not contaminate location. Production runtime files are unchanged by this trigger.
