@@ -1,0 +1,123 @@
+name: Promote Flow 2C production
+
+on:
+  push:
+    branches: [agent/mobile-v84]
+    paths:
+      - ".github/workflows/promote-flow2c-production.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mobile-v84
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch validated TEST sources
+        run: git fetch origin test/mobile-v84:test/mobile-v84
+      - name: Promote validated runtime changes selectively
+        run: |
+          git show test/mobile-v84:app-v84/www/reservation-quick-v3.js > app-v84/www/reservation-quick-v3.js
+          git show test/mobile-v84:app-v84/www/reservation-quick-v4.js > app-v84/www/reservation-quick-v4.js
+          git show test/mobile-v84:app-v84/www/workflow-improvements-v1.js > app-v84/www/workflow-improvements-v1.js
+
+          python - <<'PY'
+          from pathlib import Path
+          ROOT=Path('app-v84/www')
+
+          # Allow 50/125cc reservations to be saved as drafts without choosing guarantee.
+          p=ROOT/'reservation-compact-v1.js'; s=p.read_text()
+          block="""        if(['50CC','125CC'].includes(String(p.vehicle_group||'').toUpperCase().replace(/^GRUPO\\s+/,''))&&!cashSel&&!preSel){
+          return new Response('En motos de 50cc y 125cc debes seleccionar Depósito efectivo o Preautorización.',{status:400,headers:{'Content-Type':'text/plain'}});
+        }
+"""
+          if block in s: s=s.replace(block,'',1)
+          p.write_text(s)
+
+          # Persist all data before Stripe and preserve current contract status.
+          p=ROOT/'stripe-bridge-v1.js'; s=p.read_text()
+          s=s.replace("id:window.LariosCurrentContractId||'',status:'draft',","id:window.LariosCurrentContractId||'',status:window.LariosWorkflow?.currentStatus?.()||'draft',",1)
+          s=s.replace("payment_method:'Tarjeta',franchise:","payment_method:val('payment_method')||'Tarjeta',cash_without_card:chk('cash_without_card'),agency:val('agency'),franchise:",1)
+          p.write_text(s)
+
+          # Payment Checkout: save first and reopen the exact same reservation.
+          p=ROOT/'payment-methods-v1.js'; s=p.read_text()
+          old="async function saveDraft(){const b=window.LariosStripeBridge;if(!b?.saveDraft)throw new Error('La reserva aún no está preparada');const d=await b.saveDraft();return d?.id||currentId()}"
+          new="async function saveDraft(){if(window.LariosWorkflow?.saveOpenReservation){const d=await window.LariosWorkflow.saveOpenReservation();return d?.id||currentId()}const b=window.LariosStripeBridge;if(!b?.saveDraft)throw new Error('La reserva aún no está preparada');const d=await b.saveDraft();return d?.id||currentId()}"
+          if old in s: s=s.replace(old,new,1)
+          s=s.replace("sessionStorage.setItem('lr_return_contract',id);status('Abriendo Stripe Checkout…');","sessionStorage.setItem('lr_return_contract',id);sessionStorage.setItem('lr_resume_contract',id);status('Abriendo Stripe Checkout…');",1)
+          old="async function reopen(id){try{if(window.LariosReservations?.loadAgenda)await window.LariosReservations.loadAgenda($('agendaDate')?.value);setTimeout(()=>window.LariosReservations?.edit?.(id),50)}catch(e){console.warn(e)}}"
+          new="async function reopen(id){try{if(window.LariosWorkflow?.resumeContract)return window.LariosWorkflow.resumeContract(id);if(window.LariosReservations?.loadAgenda)await window.LariosReservations.loadAgenda($('agendaDate')?.value);setTimeout(()=>window.LariosReservations?.edit?.(id),50)}catch(e){console.warn(e)}}"
+          if old in s: s=s.replace(old,new,1)
+          p.write_text(s)
+
+          # Preauthorization: persist reservation before leaving for Stripe and reopen same reservation on return.
+          p=ROOT/'guarantee-panel-v1.js'; s=p.read_text()
+          old="busy=true;syncForm();try{await loadTariffs();"
+          new="busy=true;syncForm();try{await window.LariosWorkflow?.saveOpenReservation?.();await loadTariffs();"
+          if old in s: s=s.replace(old,new,1)
+          old="window.open(u.href,'_blank','noopener,noreferrer');message('Al terminar en Stripe, vuelve y pulsa Comprobar estado.');poll(h.contract_id);return"
+          new="sessionStorage.setItem('lr_resume_contract',h.contract_id);location.assign(u.href);return"
+          if old in s: s=s.replace(old,new,1)
+          old="if(target)window.addEventListener('larios:agenda-controls-ready',()=>open(target),{once:true})"
+          if old in s: s=s.replace(old,"if(target){sessionStorage.setItem('lr_resume_contract',target);setTimeout(()=>window.LariosWorkflow?.resumeContract?.(target),500)}",1)
+          p.write_text(s)
+
+          # Contract generation and editing existing generated contracts.
+          p=ROOT/'contract-flow-final.js'; s=p.read_text()
+          s=s.replace("payment_method:val('payment_method'),franchise:","payment_method:val('payment_method'),cash_without_card:chk('cash_without_card'),agency:val('agency'),franchise:",1)
+          s=s.replace("const cardDigits=val('card_number').replace(/\\D/g,'');const d={card_number:cardDigits?'**** '+cardDigits.slice(-4):'',card_expiry:'',","const cardDigits=val('card_number').replace(/\\D/g,'');const d={card_number:chk('cash_without_card')?'EFECTIVO SIN TARJETA':(cardDigits?'**** '+cardDigits.slice(-4):''),card_expiry:'',",1)
+          old="if(!val('customer_name'))return alert('Falta el nombre del cliente.');const btn="
+          new="if(!val('customer_name'))return alert('Falta el nombre del cliente.');const flowError=window.LariosWorkflow?.validateContractReady?.()||'';if(flowError)return alert(flowError);const btn="
+          if old in s: s=s.replace(old,new,1)
+          old="function install(){if(!window.LariosReservations||LariosReservations.__finalFlowV2)return;"
+          if old in s:
+              new="""async function currentRecord(){if(!editingId)return null;const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_contract_record',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_contract_id:editingId})});if(!r.ok)throw new Error(await r.text());return r.json()}
+async function updateExistingContract(current){ensureExtras();syncAdditional();recalcExtras();if(window.LariosValidation?.validate&&!LariosValidation.validate())return;const saved=await saveRpc(payload(current?.status||'confirmed')),pdf=await buildOfficialPdf(saved);await storePdf(saved,pdf.blob);alert('Cambios guardados. Se ha actualizado el mismo contrato '+contractNo(saved)+' y su PDF.');if(window.LariosReservations?.close)LariosReservations.close();setTimeout(()=>{if(typeof changeAgendaDate==='function')changeAgendaDate()},120);return saved}
+function install(){if(!window.LariosReservations||LariosReservations.__finalFlowV2)return;"""
+              s=s.replace(old,new,1)
+          old="LariosReservations.save=function(status){if(status==='confirmed')return finalize();return oldSave(status)}"
+          new="LariosReservations.save=async function(status){if(status==='confirmed')return finalize();if(status==='draft'&&editingId){try{const current=await currentRecord();if(current&&current.status!=='draft')return updateExistingContract(current)}catch(e){alert('No se pudo actualizar el contrato existente: '+e.message);return}}return oldSave(status)}"
+          if old in s: s=s.replace(old,new,1)
+          p.write_text(s)
+
+          # Production index: keep REAL config, add validated parsers/controller, bust caches.
+          p=ROOT/'index.html'; s=p.read_text()
+          if 'reservation-quick-v3.js' not in s:
+              s=s.replace('<script src="reservation-quick-v2.js?v=1"></script>','<script src="reservation-quick-v2.js?v=1"></script><script src="reservation-quick-v3.js?v=flow2c-prod-20260913"></script><script src="reservation-quick-v4.js?v=flow2c-prod-20260913"></script>',1)
+          elif 'reservation-quick-v4.js' not in s:
+              s=s.replace('reservation-quick-v3.js?v=flow2c-prod-20260913"></script>','reservation-quick-v3.js?v=flow2c-prod-20260913"></script><script src="reservation-quick-v4.js?v=flow2c-prod-20260913"></script>',1)
+          if 'workflow-improvements-v1.js' not in s:
+              s=s.replace('</body>','<script src="workflow-improvements-v1.js?v=flow2c-prod-20260913"></script></body>',1)
+          s=s.replace('REAL · GARANTÍAS 1.1','REAL · FLUJO 2C')
+          s=s.replace('contract-flow-final.js?v=6','contract-flow-final.js?v=flow2c-prod-20260913')
+          s=s.replace('stripe-bridge-v1.js?v=1','stripe-bridge-v1.js?v=flow2c-prod-20260913')
+          s=s.replace('payment-methods-v1.js?v=3','payment-methods-v1.js?v=flow2c-prod-20260913')
+          s=s.replace('guarantee-panel-v1.js?v=cycle-qty1-20260913','guarantee-panel-v1.js?v=flow2c-prod-20260913')
+          s=s.replace('reservation-compact-v1.js?v=real-guarantees1-20260913','reservation-compact-v1.js?v=flow2c-prod-20260913')
+          p.write_text(s)
+          PY
+
+          for f in app-v84/www/reservation-quick-v3.js app-v84/www/reservation-quick-v4.js app-v84/www/workflow-improvements-v1.js app-v84/www/reservation-compact-v1.js app-v84/www/stripe-bridge-v1.js app-v84/www/payment-methods-v1.js app-v84/www/guarantee-panel-v1.js app-v84/www/contract-flow-final.js; do node --check "$f"; done
+
+          grep -q "REAL · FLUJO 2C" app-v84/www/index.html
+          grep -q "reservation-quick-v4.js?v=flow2c-prod-20260913" app-v84/www/index.html
+          grep -q "workflow-improvements-v1.js?v=flow2c-prod-20260913" app-v84/www/index.html
+          grep -q "Efectivo sin tarjeta" app-v84/www/workflow-improvements-v1.js
+          grep -q "scooterInfo" app-v84/www/reservation-quick-v4.js
+          grep -q "updateExistingContract" app-v84/www/contract-flow-final.js
+          grep -q "saveOpenReservation" app-v84/www/guarantee-panel-v1.js
+      - name: Commit production promotion
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app-v84/www
+          git commit -m "Promote Flow 2C validated reservation workflow to production"
+          git push origin HEAD:agent/mobile-v84
