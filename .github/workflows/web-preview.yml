@@ -50,20 +50,39 @@ jobs:
           cp test-source/static/assets/contrato-larios-normalizado.pdf app-v84/www/pruebas/assets/
           cp test-source/static/assets/damage-map.png app-v84/www/pruebas/assets/
           cp test-source/static/vendor/pdf-lib.min.js app-v84/www/pruebas/vendor/
-      - name: Force fresh JavaScript on every deployment
+      - name: Force fresh JavaScript and load quick parser authority last
         env:
           BUILD_SHA: ${{ github.sha }}
         run: |
           python3 - <<'PY'
           import os, re
           from pathlib import Path
+
           version = os.environ['BUILD_SHA'][:12]
-          for path in (Path('app-v84/www/index.html'), Path('app-v84/www/pruebas/index.html')):
+          prod = Path('app-v84/www/index.html')
+          test = Path('app-v84/www/pruebas/index.html')
+
+          for path in (prod, test):
               if not path.exists():
                   continue
               text = path.read_text(encoding='utf-8')
-              text = re.sub(r'src="([^"]+\.js)(?:\?[^"]*)?"', lambda m: f'src="{m.group(1)}?v={version}"', text)
+              text = re.sub(
+                  r'src="([^"]+\.js)(?:\?[^"]*)?"',
+                  lambda m: f'src="{m.group(1)}?v={version}"',
+                  text,
+              )
               path.write_text(text, encoding='utf-8')
+
+          if prod.exists():
+              text = prod.read_text(encoding='utf-8')
+              text = re.sub(
+                  r'<script[^>]+src="quick-reservation-authority-v1\.js[^\"]*"[^>]*></script>',
+                  '',
+                  text,
+              )
+              tag = f'<script src="quick-reservation-authority-v1.js?v={version}"></script>'
+              text = text.replace('</body>', tag + '</body>')
+              prod.write_text(text, encoding='utf-8')
           PY
       - uses: actions/upload-pages-artifact@v3
         with:
