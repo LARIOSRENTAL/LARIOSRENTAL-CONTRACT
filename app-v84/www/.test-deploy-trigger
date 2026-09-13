@@ -1,2 +1,2 @@
-2026-09-13T08:12:00+02:00
-Purpose: publish production bicycle/e-bike quantity-aware franchise and guarantee calculation. No Renthub calls, payment calls, or reservation data changed.
+2026-09-13T13:18:00+02:00
+Purpose: publish TEST Flow 2 reservation improvements under /pruebas. Production runtime files are unchanged by this trigger.
