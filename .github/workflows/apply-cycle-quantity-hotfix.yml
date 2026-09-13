@@ -1,0 +1,65 @@
+name: Apply cycle quantity guarantee hotfix
+
+on:
+  push:
+    branches: [agent/mobile-v84]
+    paths:
+      - ".github/workflows/apply-cycle-quantity-hotfix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mobile-v84
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch quantity-aware bicycle/e-bike guarantees
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p=Path('app-v84/www/pricing-autocalc-v2.js')
+          s=p.read_text()
+          old="if($('franchise'))$('franchise').value=money(checked('full_insurance')?0:Number(row.franchise||0));"
+          new="if($('franchise'))$('franchise').value=money(checked('full_insurance')?0:Number(row.franchise||0)*qty);"
+          if old not in s: raise SystemExit('pricing franchise anchor missing')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('app-v84/www/guarantee-panel-v1.js')
+          s=p.read_text()
+          old="const base=h?Number(h.amount_cents):tariffs?.get(code($('vehicle_group')?.value)),scooter=['50CC','125CC'].includes(code($('vehicle_group')?.value));"
+          new="const cat=code($('vehicle_group')?.value),qty=['BICICLETA','E-BIKE'].includes(cat)?Math.max(1,Number($('vehicle_quantity')?.value||1)):1,base=h?Number(h.amount_cents):Number(tariffs?.get(cat))*qty,scooter=['50CC','125CC'].includes(cat);"
+          if old not in s: raise SystemExit('guarantee amount anchor missing')
+          s=s.replace(old,new,1)
+          old="await loadTariffs();const n=tariffs.get(code($('vehicle_group')?.value));if(!Number.isFinite(n)||n<=0)throw Error('No hay franquicia base');"
+          new="await loadTariffs();const cat=code($('vehicle_group')?.value),qty=['BICICLETA','E-BIKE'].includes(cat)?Math.max(1,Number($('vehicle_quantity')?.value||1)):1,n=Number(tariffs.get(cat))*qty;if(!Number.isFinite(n)||n<=0)throw Error('No hay franquicia base');"
+          if old not in s: raise SystemExit('preauthorization start anchor missing')
+          s=s.replace(old,new,1)
+          old="if(e.target?.id==='vehicle_group')syncForm()"
+          new="if(['vehicle_group','vehicle_quantity'].includes(e.target?.id))syncForm()"
+          if old not in s: raise SystemExit('guarantee change listener anchor missing')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('app-v84/www/index.html')
+          s=p.read_text()
+          s=s.replace('pricing-autocalc-v2.js?v=real-guarantees1-20260913','pricing-autocalc-v2.js?v=cycle-qty1-20260913')
+          s=s.replace('guarantee-panel-v1.js?v=real-guarantees1-20260913','guarantee-panel-v1.js?v=cycle-qty1-20260913')
+          s=s.replace('REAL · GARANTÍAS 1','REAL · GARANTÍAS 1.1')
+          p.write_text(s)
+          PY
+          node --check app-v84/www/pricing-autocalc-v2.js
+          node --check app-v84/www/guarantee-panel-v1.js
+          grep -q "cycle-qty1-20260913" app-v84/www/index.html
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app-v84/www/pricing-autocalc-v2.js app-v84/www/guarantee-panel-v1.js app-v84/www/index.html
+          git commit -m "Multiply bicycle guarantees by reservation quantity"
+          git push origin HEAD:agent/mobile-v84
