@@ -121,8 +121,6 @@ function splitPhone(value: string) {
     if (digits.length !== 9) throw new Error("El teléfono del cliente debe tener 9 cifras españolas o incluir el prefijo internacional con + (por ejemplo, +34).");
     return { prefix: "+34", mobile: digits };
   }
-  // Calling codes used most often by Larios Rental. Matching an assigned code
-  // avoids treating the first digit of the subscriber number as part of it.
   const callingCodes = [
     "1", "7", "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45", "46", "47", "48", "49",
     "51", "52", "53", "54", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94", "95", "98",
@@ -148,6 +146,18 @@ async function digest(value: unknown) {
   return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 const minute = (value: unknown) => String(value || "").slice(0, 16);
+const amount = (value: unknown) => Number(String(value ?? "0").trim().replace(/\s/g, "").replace(",", "."));
+function sameAmount(actualValue: unknown, expectedValue: unknown, vatValue: unknown) {
+  const actual = amount(actualValue), expected = amount(expectedValue), vat = Math.max(0, amount(vatValue));
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+  const factor = 1 + vat / 100;
+  return Math.abs(actual - expected) <= 0.03 || (factor > 1 && Math.abs(actual * factor - expected) <= 0.04);
+}
+async function requireWrite(resultPromise: PromiseLike<any>, label: string) {
+  const result = await resultPromise;
+  if (result?.error) throw new Error(`${label}: ${result.error.message}`);
+  return result;
+}
 const renthubCategoryName = (category: unknown) => {
   const value = normalize(category).replace(/^grupo\s+/, "");
   const aliases: Record<string, string> = {
@@ -164,6 +174,10 @@ function contractServiceTotal(contract: any) {
   const rental = Number(contract.rental_total || 0);
   const discount = rental * Math.max(0, Number(contract.discount_percent || 0)) / 100;
   return Math.max(0, Number(contract.total || 0) - (rental - discount));
+}
+function netFromGross(value: unknown, vatValue: unknown) {
+  const gross = amount(value), vat = Math.max(0, amount(vatValue));
+  return vat > 0 ? gross / (1 + vat / 100) : gross;
 }
 
 async function automaticMappings(contract: any) {
@@ -195,6 +209,7 @@ async function handler(req: Request) {
   const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!jwt) return json({ error: "Authentication required" }, 401);
   const service = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
+  const actor = createClient(env("SUPABASE_URL"), env("SUPABASE_ANON_KEY"), { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${jwt}` } } });
   const { data: userData, error: userError } = await service.auth.getUser(jwt);
   const role = userData.user?.app_metadata?.role;
   if (userError || !userData.user || !["employee", "admin"].includes(role)) return json({ error: "Not authorized" }, 403);
@@ -239,24 +254,36 @@ async function handler(req: Request) {
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
   const expectedRental = Number(contract.rental_total || 0);
+  const renthubRentalRate = netFromGross(expectedRental, contract.vat_percent);
   const expectedServices = contractServiceTotal(contract);
   const pricelist = renthubPricelist(contract);
-  const verificationHash = await digest({ contract_id: contract.id, start, end, model, pickup, dropoff, pricelist, rental: expectedRental, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0) });
+  const verificationHash = await digest({ contract_id: contract.id, start, end, model, pickup, dropoff, pricelist, rental_gross: expectedRental, rental_net: renthubRentalRate, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
   async function verify(code: string) {
     const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
     const booking = detail?.result?.booking || {};
     const locationMatches = (actual: any, expected: string) => [actual?.id, actual?.code, actual?.name].map(String).includes(String(expected));
+    const modelCandidates = [
+      detail?.result?.vehicle?.id,
+      detail?.result?.model?.id,
+      detail?.result?.vehicle?.model?.id,
+      detail?.result?.vehicle?.current_model_id,
+      booking?.model?.id,
+      booking?.model_id,
+      booking?.pm_current_model_id,
+    ].filter((value) => value !== undefined && value !== null && String(value) !== "").map(String);
+    const modelMatches = modelCandidates.length === 0 || modelCandidates.includes(String(model));
     const checks = {
       code: String(booking.code || "") === code,
       start: minute(booking.start_datetime) === minute(start), end: minute(booking.end_datetime) === minute(end),
-      total: Math.abs(Number(booking.total_amount) - expectedTotal) <= 0.02,
+      total: sameAmount(booking.total_amount, expectedTotal, contract.vat_percent),
       customer_email: normalize(detail?.result?.customer?.email) === normalize(customer?.email),
-      model: String(detail?.result?.vehicle?.id || "") === String(model),
+      model: modelMatches,
       pickup_location: locationMatches(booking.pickup_location, pickup),
       dropoff_location: locationMatches(booking.dropoff_location, dropoff),
       deposit: Math.abs(Number(booking?.franchises?.deposit || 0) - Number(contract.deposit || 0)) <= 0.02,
     };
+    console.log(JSON.stringify({ event: "renthub_booking_verify", contract_number: contract.contract_number, code, model_expected: String(model), model_candidates: modelCandidates, checks }));
     return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
   }
 
@@ -282,40 +309,41 @@ async function handler(req: Request) {
         form.set("pickup_location", pickup); form.set("dropoff_location", dropoff);
         if (pickupAddress) form.set("pickup_at_location", pickupAddress);
         if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
+        form.set("resource", "freesale");
+        form.set("ritiro", pickup);
+        form.set("consegna", dropoff);
+        form.set("internal_move", "0");
         form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
         form.set("pricelist", pricelist);
-        form.set("overwrite_rental_rate", expectedRental.toFixed(2));
+        form.set("overwrite_rental_rate", renthubRentalRate.toFixed(4));
         form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
         if (Number(contract.franchise || 0) > 0) form.set("overwrite_damage_franchise", Number(contract.franchise).toFixed(2));
         const age = ageAt(customer.birth_date || driver?.birth_date, contract.delivery_date); if (age !== null) form.set("age", String(age));
+        console.log(JSON.stringify({ event: "renthub_transfer_create", contract_number: contract.contract_number, category: contract.category, model, resource: "freesale", pickup_location: pickup, dropoff_location: dropoff, has_pickup_address: !!pickupAddress, has_dropoff_address: !!dropoffAddress, rental_rate_net: renthubRentalRate.toFixed(4) }));
         inserted = await renthubFetch("/module/rental/api/partner/booking/insert", { method: "POST", body: form });
         code = String(inserted?.result?.booking?.code || "");
         if (!code) throw new Error("Renthub did not return a booking code");
-        await service.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "sent_pending_verification", renthub_sync_error: null }).eq("id", contract.id);
+        await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "sent_pending_verification", renthub_sync_error: null, app_payload: { ...(contract.app_payload || {}), renthub_resource: "freesale", renthub_pickup_location_id: pickup, renthub_dropoff_location_id: dropoff } }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
       }
       let checked = await verify(code);
       let documentUploaded = contract.app_payload?.renthub_document_uploaded === true;
       if (config.documentReady && !documentUploaded) {
         await uploadContractPdf(service, contract, checked.booking.id);
         documentUploaded = true;
-        await service.from("contracts").update({ app_payload: { ...(contract.app_payload || {}), renthub_document_uploaded: true, renthub_document_uploaded_at: new Date().toISOString() } }).eq("id", contract.id);
+        await requireWrite(actor.from("contracts").update({ app_payload: { ...(contract.app_payload || {}), renthub_resource: "freesale", renthub_pickup_location_id: pickup, renthub_dropoff_location_id: dropoff, renthub_document_uploaded: true, renthub_document_uploaded_at: new Date().toISOString() } }).eq("id", contract.id), "No se pudo guardar el estado del documento de Renthub");
       }
       if (!checked.verified) {
         const message = `Renthub verification mismatch: ${Object.entries(checked.checks).filter(([, ok]) => !ok).map(([key]) => key).join(", ")}`;
-        await service.from("contracts").update({ renthub_sync_status: "verification_failed", renthub_sync_error: message }).eq("id", contract.id);
-        await service.from("renthub_sync_log").insert({ contract_id: contract.id, operation: "verify_booking", direction: "outbound", request_data: {}, response_data: { code, checks: checked.checks }, success: false, error_message: message, external_reference: code, verification_hash: verificationHash });
+        await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "verification_failed", renthub_sync_error: message }).eq("id", contract.id), "No se pudo guardar el error de verificación");
         return json({ error: message, verified: false, external_reference: code, checks: checked.checks }, 409);
       }
-      await Promise.all([
-        service.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "verified", renthub_last_sync_at: new Date().toISOString(), renthub_sync_error: null }).eq("id", contract.id),
-        customer?.id && inserted?.result?.customer?.code ? service.from("customers").update({ renthub_customer_id: String(inserted.result.customer.code) }).eq("id", customer.id) : Promise.resolve(),
-        service.from("renthub_sync_log").insert({ contract_id: contract.id, operation: "insert_and_verify_booking", direction: "outbound", request_data: {}, response_data: { code, booking_id: checked.booking.id, start_datetime: checked.booking.start_datetime, end_datetime: checked.booking.end_datetime, total_amount: checked.booking.total_amount, document_uploaded: documentUploaded }, success: true, external_reference: code, verification_hash: verificationHash, verified_at: new Date().toISOString() }),
-      ]);
+      await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "verified", renthub_last_sync_at: new Date().toISOString(), renthub_sync_error: null }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
+      if (customer?.id && inserted?.result?.customer?.code) await requireWrite(actor.from("customers").update({ renthub_customer_id: String(inserted.result.customer.code) }).eq("id", customer.id), "No se pudo guardar el cliente de Renthub");
       return json({ verified: true, external_reference: code, checks: checked.checks });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await service.from("contracts").update({ renthub_sync_status: code ? "verification_failed" : "failed", renthub_sync_error: message }).eq("id", contract.id);
-      await service.from("renthub_sync_log").insert({ contract_id: contract.id, operation: "send_booking", direction: "outbound", request_data: {}, response_data: code ? { code } : {}, success: false, error_message: message, external_reference: code || null, verification_hash: verificationHash });
+      console.error(JSON.stringify({ event: "renthub_transfer_error", contract_number: contract.contract_number, external_reference: code || null, detail: message }));
+      await actor.from("contracts").update({ ...(code ? { renthub_contract_id: code } : {}), renthub_sync_status: code ? "verification_failed" : "failed", renthub_sync_error: message }).eq("id", contract.id);
       return json({ error: message, external_reference: code || null }, 502);
     }
   }
