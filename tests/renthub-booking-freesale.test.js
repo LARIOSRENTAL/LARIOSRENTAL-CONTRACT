@@ -8,12 +8,7 @@ const contractTransfer = read('supabase/functions/renthub-transfer/index.ts');
 
 for (const [name, source] of [['renthub-booking', quickBooking], ['renthub-transfer', contractTransfer]]) {
   assert.match(source, /form\.set\("resource",\s*"freesale"\)/, `${name} must request Free Sale`);
-  if (name === 'renthub-booking') {
-    assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*map\.model\)/, `${name} must put the selected model in the Free Sale model field`);
-    assert.match(source, /form\.set\("pm_ms_id",\s*""\)/, `${name} must leave the concrete vehicle unassigned`);
-  } else {
-    assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*""\)/, `${name} must leave the Partner API legacy vehicle field empty`);
-  }
+  assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*""\)/, `${name} must leave the Partner API legacy vehicle field empty`);
   assert.match(source, /form\.set\("pm_current_model_id",\s*(?:map\.model|model)\)/, `${name} must send the selected model separately`);
   assert.match(source, /form\.set\("ritiro",\s*(?:map\.pickup|pickup)\)/, `${name} must send Renthub pickup location 132 mapping`);
   assert.match(source, /form\.set\("consegna",\s*(?:map\.dropoff|dropoff)\)/, `${name} must send Renthub dropoff location 132 mapping`);
@@ -21,8 +16,8 @@ for (const [name, source] of [['renthub-booking', quickBooking], ['renthub-trans
   assert.doesNotMatch(source, /form\.set\("(?:quantity|vehicle_quantity|resource_quantity)"/, `${name} must not assign bicycle inventory quantity`);
 }
 
-assert.match(quickBooking, /renthubWeb\("\/rental\/booking\/add",form\)/, 'quick booking must use Renthub internal Free Sale insertion');
-assert.doesNotMatch(quickBooking, /rh\("\/module\/rental\/api\/partner\/booking\/insert"/, 'quick booking must not use the availability-enforcing Partner insert');
+assert.match(quickBooking, /rh\("\/module\/rental\/api\/partner\/booking\/insert"/, 'quick booking must use the configured Partner Free Sale channel');
+assert.doesNotMatch(quickBooking, /RENTHUB_USER_API_(?:EMAIL|PASSWORD)/, 'quick booking must not require Renthub web-login credentials');
 assert.match(quickBooking, /m2:"15"/, '125cc/M2 must use the real Renthub model id');
 
 assert.match(quickBooking, /actor\.from\("contracts"\)\.update/, 'quick booking status writes must use the authenticated staff session');
