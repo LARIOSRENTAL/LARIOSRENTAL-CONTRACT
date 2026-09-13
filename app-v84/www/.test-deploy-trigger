@@ -1,2 +1,1 @@
-2026-09-13T13:52:00+02:00
-Purpose: publish TEST Flow 2B scooter quantity handling under /pruebas. Production runtime files are unchanged by this trigger.
+Purpose: publish TEST Flow 2C with ahora handling and expanded 50cc/125cc shorthand under /pruebas. Production runtime files are unchanged by this trigger.
