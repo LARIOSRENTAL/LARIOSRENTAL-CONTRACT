@@ -27,7 +27,7 @@ function loadFleetOnce(){
   if(fleetPromise)return fleetPromise;
   fleetPromise=(async()=>{
     try{
-      const rows=await api('vehicles?select=registration,make,model,fuel_type&order=registration');
+      const rows=await api('vehicles?select=registration,make,model,fuel_type,status&status=neq.retired&status=neq.sold&order=registration');
       fleet=Array.isArray(rows)?rows:[];
     }catch(e){
       console.warn('No se pudo precargar la flota',e);
@@ -52,7 +52,7 @@ function applyMatch(){
   const plate=$('vehicle_plate');
   if(!plate)return false;
   const key=norm(plate.value);
-  if(key.length<4)return false;
+  if(key.length<1)return false;
   const vehicle=fleet.find(v=>norm(v.registration)===key);
   if(!vehicle)return false;
   setValue('vehicle_model',[vehicle.make,vehicle.model].filter(Boolean).join(' '));
