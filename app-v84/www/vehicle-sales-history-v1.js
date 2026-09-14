@@ -5,6 +5,19 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 let installed=false,contractsCache=null;
 function headers(){return{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'}}
 function admin(){return !!window.LariosAccess?.isAdmin?.()}
+function patchActiveFleetFetch(){
+  if(window.__lrSoldFleetFetchPatched)return;window.__lrSoldFleetFetchPatched=true;
+  const nativeFetch=window.fetch.bind(window);
+  window.fetch=function(input,init){
+    try{
+      if(typeof input==='string'&&input.includes('/rest/v1/vehicles?')&&input.includes('status=neq.retired')&&!input.includes('status=neq.sold')){
+        const u=new URL(input,location.href);u.searchParams.append('status','neq.sold');input=u.toString();
+      }
+    }catch(_){ }
+    return nativeFetch(input,init);
+  };
+}
+patchActiveFleetFetch();
 async function rest(path,opt={}){const r=await fetch(cfg.supabaseUrl+'/rest/v1/'+path,{...opt,headers:{...headers(),...(opt.headers||{})}});if(!r.ok)throw new Error(await r.text());return r.status===204?null:r.json()}
 async function rpc(name,body={}){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:headers(),body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
 function fmtDate(v){if(!v)return'—';const s=String(v).slice(0,10),p=s.split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s}
@@ -19,7 +32,7 @@ async function historyFor(v){
     const changes=await rest(`contract_vehicle_changes?select=contract_id,old_vehicle_id,new_vehicle_id,old_vehicle_plate,new_vehicle_plate&or=(old_vehicle_id.eq.${encodeURIComponent(v.id)},new_vehicle_id.eq.${encodeURIComponent(v.id)},old_vehicle_plate.eq.${encodeURIComponent(plate)},new_vehicle_plate.eq.${encodeURIComponent(plate)})`);
     (changes||[]).forEach(x=>ids.add(x.contract_id));
   }catch(_){ }
-  return all.filter(c=>ids.has(c.id)).sort((a,b)=>String(b.delivery_date||b.created_at||'').localeCompare(String(a.delivery_date||a.created_at||''))||String(b.delivery_time||'').localeCompare(String(a.delivery_time||'')));
+  return all.filter(c=>ids.has(c.id)).sort((a,b)=>String(b.pickup_at||b.delivery_date||b.created_at||'').localeCompare(String(a.pickup_at||a.delivery_date||a.created_at||''))||String(b.delivery_time||'').localeCompare(String(a.delivery_time||'')));
 }
 function ensureModal(){
   if($('lrVehicleHistoryModal'))return;
@@ -43,6 +56,7 @@ async function sell(id){
   try{
     const r=await fetch(cfg.supabaseUrl+'/rest/v1/vehicles?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:{...headers(),Prefer:'return=minimal'},body:JSON.stringify({status:'sold',sold_at:new Date().toISOString(),updated_at:new Date().toISOString()})});
     if(!r.ok)throw new Error(await r.text());
+    document.querySelector(`.lrVmRow[data-id="${CSS.escape(id)}"]`)?.remove();
     await window.LariosVehicleManager?.reload?.();await window.LariosVehicleCore?.refresh?.().catch?.(()=>{});alert('Vehículo marcado como vendido y guardado en el registro de vendidos.');
   }catch(e){alert('No se pudo marcar como vendido. '+e.message)}
 }
@@ -71,5 +85,5 @@ function install(){
   new MutationObserver(decoratePanel).observe(document.body,{subtree:true,childList:true});decoratePanel();
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-window.LariosVehicleSalesHistory={sell,history:showHistory,sold:showSold,decorate:decoratePanel,version:'20260914-v1'};
+window.LariosVehicleSalesHistory={sell,history:showHistory,sold:showSold,decorate:decoratePanel,version:'20260914-v2'};
 })();
