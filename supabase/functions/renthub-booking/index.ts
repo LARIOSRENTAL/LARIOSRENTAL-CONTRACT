@@ -6,6 +6,7 @@ const env=(n:string)=>(Deno.env.get(n)||"").trim();
 const json=(v:unknown,s=200)=>new Response(JSON.stringify(v),{status:s,headers:cors});
 const norm=(v:unknown)=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 const base=()=>(env("RENTHUB_INSTALLATION_URL")||"https://lariosrental.renthubsoftware.com").replace(/\/$/,"");
+const freeSaleCredentialsReady=()=>!!env("RENTHUB_USER_API_EMAIL")&&!!env("RENTHUB_USER_API_PASSWORD");
 let secret=env("RENTHUB_SECRET_TOKEN"),tokenCache:any=null,webSession:any=null;
 
 function parseMap(n:string){try{const v=JSON.parse(env(n)||"{}");return Object.fromEntries(Object.entries(v).map(([k,x])=>[norm(k),String(x)]));}catch{return{};}}
@@ -47,7 +48,12 @@ async function mappings(c:any){const params=await rh("/module/rental/api/partner
 function displayDate(value:unknown){const [y,m,d]=String(value||"").slice(0,10).split("-");return y&&m&&d?`${d}/${m}/${y}`:String(value||"");}
 
 Deno.serve(async(req:Request)=>{
-  if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
+  if(req.method==="OPTIONS")return new Response("ok",{headers:{...cors,"X-Renthub-FreeSale-Ready":freeSaleCredentialsReady()?"yes":"no"}});
+  if(req.method==="GET"){
+    if(!freeSaleCredentialsReady())return json({ready:false,error:"Renthub Free Sale credentials are not configured"},503);
+    try{await renthubWebSession(true);return json({ready:true,web_login:true});}
+    catch(e){console.error(JSON.stringify({event:"renthub_freesale_health",error:String((e as Error)?.message||e)}));return json({ready:false,web_login:false,error:"Renthub web login failed"},503);}
+  }
   if(req.method!=="POST")return json({error:"Method not allowed"},405);
   const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
   if(!jwt)return json({error:"Authentication required"},401);
