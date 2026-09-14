@@ -9,7 +9,7 @@ const contractTransfer = read('supabase/functions/renthub-transfer/index.ts');
 for (const [name, source] of [['renthub-booking', quickBooking], ['renthub-transfer', contractTransfer]]) {
   assert.match(source, /form\.set\("resource",\s*"freesale"\)/, `${name} must request Free Sale`);
   if (name === 'renthub-booking') {
-    assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*map\.model\)/, `${name} must put the selected model in the Free Sale model field`);
+    assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*""\)/, `${name} must leave the previous vehicle/model field empty`);
     assert.match(source, /form\.set\("pm_ms_id",\s*""\)/, `${name} must leave the concrete vehicle unassigned`);
   } else {
     assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*""\)/, `${name} must leave the Partner API legacy vehicle field empty`);
@@ -26,6 +26,8 @@ assert.doesNotMatch(quickBooking, /rh\("\/module\/rental\/api\/partner\/booking\
 assert.match(quickBooking, /m2:"15"/, '125cc/M2 must use the real Renthub model id');
 assert.match(quickBooking, /form\.set\("pm_km_included","0"\)/, 'quick booking must send Renthub included kilometres');
 assert.match(quickBooking, /form\.set\("pm_extra_km_price","0"\)/, 'quick booking must send Renthub extra-kilometre price');
+assert.match(quickBooking, /form\.set\("pm_km_iniziali","0"\)/, 'quick booking must preserve the web form initial-km default');
+assert.match(quickBooking, /event:"renthub_web_error"/, 'Renthub web rejections must log safe response metadata');
 assert.match(quickBooking, /role!=="admin"/, 'only administrators may send a booking to Renthub');
 assert.match(quickBooking, /Object\.values\(data\?\.errors\|\|\{\}\)/, 'all Renthub validation messages must be surfaced');
 
