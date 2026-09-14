@@ -27,7 +27,9 @@ for (const [name, source] of [['renthub-booking', quickBooking], ['renthub-trans
 
 assert.match(quickBooking, /rh\("\/module\/rental\/api\/partner\/booking\/insert"/, 'quick booking must use the supported Renthub Partner insertion');
 assert.doesNotMatch(quickBooking, /renthubWeb\(/, 'quick booking must not use Renthub internal web endpoints');
-assert.match(quickBooking, /m2:"15"/, '125cc/M2 must use the real Renthub model id');
+assert.match(quickBooking, /config\/categories/, 'quick booking must resolve the group from Partner API categories');
+assert.match(quickBooking, /model:String\(cat\?\.id\|\|""\)/, 'quick booking must send the Partner category id, not an internal stored model id');
+assert.doesNotMatch(quickBooking, /RENTHUB_FREESALE_MODEL_MAP/, 'quick booking must not mix internal Renthub model ids with Partner categories');
 assert.match(quickBooking, /partner_api:true/, 'health check must verify the Partner API token');
 assert.match(quickBooking, /if\(error&&retry\)return loadSecret\(s,false\)/, 'Partner secret loading must retry one transient Supabase failure');
 assert.match(quickBooking, /Renthub no tiene Free Sale configurado/, 'availability rejection must explain the required Renthub configuration');
