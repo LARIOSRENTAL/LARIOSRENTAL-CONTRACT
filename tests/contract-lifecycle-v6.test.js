@@ -34,6 +34,7 @@ t.setPricing([rate]);
 const seasonal=t.extensionCalculation({vehicle_group:'A',vehicle_quantity:1,rental_days:1,total:93.6,discount_percent:0,full_insurance:false,young_driver:false,tariff94:true,tariff_markup_percent:20},1);
 assert.ok(Math.abs(seasonal.baseDelta-70.8)<0.001);
 const lifecycleSource=fs.readFileSync(require.resolve('../app-v84/www/contract-lifecycle-v6.js'),'utf8');
+assert.match(lifecycleSource,/if\(isReturn&&x\.status!==['"]draft['"]/, 'extension and vehicle-change actions must only appear on return cards');
 assert.match(lifecycleSource,/el\.disabled=false;el\.removeAttribute\('disabled'\)/);
 assert.match(lifecycleSource,/generateBtn\.addEventListener\('pointerup',activate/);
 assert.match(lifecycleSource,/generateBtn\.addEventListener\('touchend',activate/);

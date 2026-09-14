@@ -2,6 +2,7 @@
 'use strict';
 const state={role:'loading',email:'',ready:false};
 const staffRoles=new Set(['employee','admin']);
+const employeePanels=new Set(['vehicles','contracts']);
 let installed=false,decorating=false;
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -29,7 +30,7 @@ async function userRequest(retry=true){
   return response.json();
 }
 function permissionsMarkup(){
-  return `<div class="lrPermissionsShell"><div class="lrPermissionsHead"><div><b>Permisos de la cuenta</b><span>${esc(state.email||'Usuario identificado')} · ${esc(label())}</span></div><button type="button" onclick="LariosAccess.closePermissions()">×</button></div><div class="lrPermissionIntro ${isAdmin()?'admin':'employee'}"><b>${isAdmin()?'Acceso administrativo completo':'Acceso operativo de empleado'}</b><span>${isAdmin()?'Puedes realizar también las acciones sensibles indicadas en morado.':'Los campos con borde azul son editables. Los controles con candado requieren un administrador.'}</span></div><div class="lrPermissionGrid"><section><h3>Empleado</h3><ul><li>Crear y editar reservas mientras sean borradores.</li><li>Modificar el precio particular, descuento, depósito, seguro y extras.</li><li>Generar el contrato y enviarlo al cliente.</li><li>Ampliar, cambiar el vehículo y completar la devolución.</li></ul></section><section class="admin"><h3>Solo administrador</h3><ul><li>Enviar uno o todos los contratos a Renthub.</li><li>Actualizar la caché técnica de Renthub.</li><li>Eliminar una copia local ya verificada.</li><li>Modificar tarifas oficiales, roles o registros bloqueados.</li></ul></section></div><p class="lrPermissionsFoot">El contrato generado queda bloqueado para todos. Los cambios posteriores deben quedar documentados mediante Ampliar reserva o Cambio de vehículo.</p></div>`;
+  return `<div class="lrPermissionsShell"><div class="lrPermissionsHead"><div><b>Permisos de la cuenta</b><span>${esc(state.email||'Usuario identificado')} · ${esc(label())}</span></div><button type="button" onclick="LariosAccess.closePermissions()">×</button></div><div class="lrPermissionIntro ${isAdmin()?'admin':'employee'}"><b>${isAdmin()?'Acceso administrativo completo':'Acceso operativo de empleado'}</b><span>${isAdmin()?'Puedes realizar también las acciones sensibles indicadas en morado.':'Puedes trabajar con reservas, contratos y vehículos. Los contratos generados quedan bloqueados.'}</span></div><div class="lrPermissionGrid"><section><h3>Empleado</h3><ul><li>Crear y editar reservas mientras sean borradores.</li><li>Generar el contrato y enviarlo al cliente.</li><li>Consultar los paneles de Contratos y Vehículos.</li><li>Completar la devolución y las operaciones permitidas desde su fecha.</li></ul></section><section class="admin"><h3>Solo administrador</h3><ul><li>Editar contratos después de generarlos.</li><li>Acceder a Clientes y a la gestión de Renthub.</li><li>Enviar o actualizar reservas en Renthub.</li><li>Modificar tarifas, permisos o registros bloqueados.</li></ul></section></div><p class="lrPermissionsFoot">Los empleados no pueden editar ni regenerar un contrato una vez generado.</p></div>`;
 }
 function openPermissions(){let panel=$('lrPermissionsPanel');if(!panel){panel=document.createElement('section');panel.id='lrPermissionsPanel';panel.className='lrPermissionsPanel';document.body.appendChild(panel)}panel.innerHTML=permissionsMarkup();panel.classList.add('open');document.body.style.overflow='hidden'}
 function closePermissions(){$('lrPermissionsPanel')?.classList.remove('open');document.body.style.overflow=''}
@@ -53,14 +54,47 @@ function pricingGuide(){
   const pricing=$('pricing');if(!pricing||$('lrPricingAccessNote'))return;
   const note=document.createElement('div');note.id='lrPricingAccessNote';note.className='lrPricingAccessNote';note.textContent=isAdmin()?'Consulta de tarifas · su modificación es administrativa.':'Consulta de tarifas · 🔒 modificar la tabla oficial requiere un administrador.';pricing.insertAdjacentElement('afterend',note);
 }
-function markVersion(){const footer=document.querySelector('.foot');if(footer){const text=footer.textContent.replace(/ · PERMISOS V\d+/g,'').trim()+' · PERMISOS V2';if(footer.textContent!==text)footer.textContent=text}}
+function markVersion(){const footer=document.querySelector('.foot');if(footer){const text=footer.textContent.replace(/ · PERMISOS V\d+/g,'').trim()+' · PERMISOS V3';if(footer.textContent!==text)footer.textContent=text}const release=$('lrReleaseVersion');if(release&&!release.textContent.includes('UI PERMISOS 1'))release.textContent+=' · UI PERMISOS 1'}
+function guardPanelOpen(){
+  if(!window.__lariosEmployeePanelGuard&&typeof window.openScreen==='function'){
+    const original=window.openScreen;
+    window.openScreen=function(type){if(isEmployee()&&!employeePanels.has(String(type))){alert('Este panel es solo para administradores.');return}return original(type)};
+    window.__lariosEmployeePanelGuard=true;
+  }
+  const panel=window.LariosContractPanel;
+  if(panel&&!panel.__employeeAccessGuard&&typeof panel.open==='function'){
+    const original=panel.open;
+    panel.open=function(){if(isEmployee())return window.openScreen?.('contracts');return original()};
+    panel.__employeeAccessGuard=true;
+  }
+}
+function limitEmployeePanels(){
+  for(const id of ['n-customers','n-documents','n-drivers','n-damages','n-renthub_sync_log'])$(id)?.closest('button.card')?.classList.toggle('hidden',isEmployee());
+  const contracts=$('n-contracts')?.closest('button.card');
+  if(contracts&&isEmployee()){
+    const current=contracts.getAttribute('onclick')||'';
+    if(/LariosContractPanel/.test(current))contracts.dataset.adminOnclick=current;
+    contracts.setAttribute('onclick',"openScreen('contracts')");
+  }else if(contracts?.dataset.adminOnclick)contracts.setAttribute('onclick',contracts.dataset.adminOnclick);
+}
+function lockGeneratedContract(){
+  const form=$('reservationForm'),generated=!!window.LariosCurrentContractId&&form?.dataset.contractStatus&&form.dataset.contractStatus!=='draft',locked=isEmployee()&&generated;
+  if(!form)return;
+  form.querySelectorAll('input,select,textarea,button').forEach(control=>{
+    if(locked&&control.dataset.employeeLocked===undefined){control.dataset.employeeLocked=control.disabled?'disabled':'enabled';control.disabled=true}
+    else if(!locked&&control.dataset.employeeLocked!==undefined){if(control.dataset.employeeLocked==='enabled')control.disabled=false;delete control.dataset.employeeLocked}
+  });
+  let note=form.querySelector(':scope > .lrGeneratedEmployeeLock');
+  if(locked&&!note){note=document.createElement('div');note.className='lrGeneratedEmployeeLock';note.style.cssText='display:grid;gap:3px;padding:12px 13px;margin-bottom:14px;border:1px solid #fecaca;background:#fff1f2;color:#991b1b;border-radius:11px';note.innerHTML='<b>Contrato bloqueado</b><span style="font-size:12px">Solo un administrador puede editar o regenerar este contrato.</span>';form.insertBefore(note,form.firstChild)}
+  if(!locked)note?.remove();
+}
 function decorate(){
   if(decorating)return;decorating=true;
   requestAnimationFrame(()=>{
     document.body.classList.toggle('lrRoleAdmin',isAdmin());
     document.body.classList.toggle('lrRoleEmployee',isEmployee());
     document.body.classList.toggle('lrRoleMissing',state.ready&&!isStaff());
-    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();
+    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();guardPanelOpen();limitEmployeePanels();lockGeneratedContract();
     document.querySelectorAll('[data-admin-only="true"]').forEach(button=>{
       if(!isAdmin())button.disabled=true;
       button.setAttribute('aria-disabled',String(button.disabled));

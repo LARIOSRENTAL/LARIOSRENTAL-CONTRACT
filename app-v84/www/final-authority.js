@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-function installRoleAccess(){if(document.querySelector('script[data-role-access],script[src*="role-access-v1.js"]'))return;const s=document.createElement('script');s.src='role-access-v1.js?v=4-stability2';s.dataset.roleAccess='1';document.body.appendChild(s)}
+function installRoleAccess(){if(document.querySelector('script[data-role-access],script[src*="role-access-v1.js"]'))return;const s=document.createElement('script');s.src='role-access-v1.js?v=5-employee-scope1';s.dataset.roleAccess='1';document.body.appendChild(s)}
 function installAdminUsers(){if(document.querySelector('script[data-admin-users],script[src*="admin-users-v1.js"]'))return;const s=document.createElement('script');s.src='admin-users-v1.js?v=3';s.dataset.adminUsers='1';document.body.appendChild(s)}
 function installUserProfile(){if(document.querySelector('script[data-user-profile],script[src*="user-profile-v1.js"]'))return;const s=document.createElement('script');s.src='user-profile-v1.js?v=1';s.dataset.userProfile='1';document.body.appendChild(s)}
 function installPasswordAccess(){if(document.querySelector('script[data-password-access],script[src*="auth-access-v1.js"]'))return;const s=document.createElement('script');s.src='auth-access-v1.js?v=1';s.dataset.passwordAccess='1';document.body.appendChild(s)}

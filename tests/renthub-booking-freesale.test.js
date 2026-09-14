@@ -24,6 +24,10 @@ for (const [name, source] of [['renthub-booking', quickBooking], ['renthub-trans
 assert.match(quickBooking, /renthubWeb\("\/rental\/booking\/add",form\)/, 'quick booking must use Renthub internal Free Sale insertion');
 assert.doesNotMatch(quickBooking, /rh\("\/module\/rental\/api\/partner\/booking\/insert"/, 'quick booking must not use the availability-enforcing Partner insert');
 assert.match(quickBooking, /m2:"15"/, '125cc/M2 must use the real Renthub model id');
+assert.match(quickBooking, /form\.set\("pm_km_included","0"\)/, 'quick booking must send Renthub included kilometres');
+assert.match(quickBooking, /form\.set\("pm_extra_km_price","0"\)/, 'quick booking must send Renthub extra-kilometre price');
+assert.match(quickBooking, /role!=="admin"/, 'only administrators may send a booking to Renthub');
+assert.match(quickBooking, /Object\.values\(data\?\.errors\|\|\{\}\)/, 'all Renthub validation messages must be surfaced');
 
 assert.match(quickBooking, /actor\.from\("contracts"\)\.update/, 'quick booking status writes must use the authenticated staff session');
 assert.doesNotMatch(quickBooking, /service\.from\("contracts"\)\.update/, 'quick booking must not use the restricted service client for contract updates');

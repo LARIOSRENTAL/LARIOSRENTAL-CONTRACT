@@ -35,7 +35,11 @@ async function renthubWeb(path:string,body:URLSearchParams,retry=true){
   const raw=await response.text(),location=response.headers.get("location")||"";
   if(retry&&(response.status===401||response.status===403||/\/auth\/login/i.test(location))){webSession=null;return renthubWeb(path,body,false);}
   let data:any={};try{data=raw?JSON.parse(raw):{}}catch{}
-  if(!response.ok||data?.status===false||/<!doctype html|<html/i.test(raw)){const detail=String(data?.message||data?.error||raw||`Renthub ${response.status}`).replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,500);throw Error(detail||`Renthub ${response.status}`);}return data;
+  if(!response.ok||data?.status===false||/<!doctype html|<html/i.test(raw)){
+    const validation=Object.values(data?.errors||{}).flat().map(String).filter(Boolean).join(" ");
+    const detail=String(validation||data?.message||data?.error||raw||`Renthub ${response.status}`).replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,700);
+    throw Error(detail||`Renthub ${response.status}`);
+  }return data;
 }
 function groupName(c:unknown){const v=norm(c).replace(/^grupo\s+/,"");return({"50cc":"m1","125cc":"m2","bicicleta":"b1","e-bike":"b2","ebike":"b2"} as any)[v]||v;}
 function pricelist(c:any){const m=parseMap("RENTHUB_PRICELIST_MAP"),t=c.season_94?"94":"78";return m[t]||m[`tarifa ${t}`]||(c.season_94?"2":"1");}
@@ -58,7 +62,7 @@ Deno.serve(async(req:Request)=>{
   const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
   if(!jwt)return json({error:"Authentication required"},401);
   const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}}),actor=createClient(env("SUPABASE_URL"),env("SUPABASE_ANON_KEY"),{auth:{persistSession:false,autoRefreshToken:false},global:{headers:{Authorization:`Bearer ${jwt}`}}}),{data:auth,error}=await service.auth.getUser(jwt),role=auth.user?.app_metadata?.role;
-  if(error||!auth.user||!["employee","admin"].includes(role))return json({error:"Not authorized"},403);
+  if(error||!auth.user||role!=="admin")return json({error:"Solo un administrador puede enviar reservas a Renthub"},403);
   const body=await req.json().catch(()=>({})),action=String(body.action||"create"),id=String(body.contract_id||"");
   if(!/^[0-9a-f-]{36}$/i.test(id))return json({error:"Contrato no válido"},400);
   await loadSecret(service);if(!secret)return json({error:"Renthub no está configurado"},503);
@@ -86,6 +90,7 @@ Deno.serve(async(req:Request)=>{
     form.set("resource","freesale");form.set("ritiro",map.pickup);form.set("consegna",map.dropoff);form.set("internal_move","0");form.set("pm_internal_move","0");
     form.set("booking_type","booking");form.set("pm_stato_prenotazione","aperta");form.set("pm_operatore_apertura",env("RENTHUB_OPERATOR_ID")||"4");form.set("origine",env("RENTHUB_ORIGIN_ID")||"10");form.set("pm_list_id",pricelist(c));form.set("pm_vat_key",String(c.vat_percent||21));form.set("pm_lang_key","es_ES");form.set("pm_preventivo","rental_prev_std");
     form.set("pm_discount","0");form.set("costo_servizi","0");form.set("costo_servizi_with_vat","0");form.set("pm_costo_km_extra","0");form.set("pm_pickup_delivery_price","0");form.set("pm_addebito_fuori_orario","0");form.set("pm_addebito_benzina","0");form.set("pm_addebito_consegna_altro_luogo","0");form.set("pm_addebito_franchigia","0");form.set("pm_advance","0");
+    form.set("pm_km_included","0");form.set("pm_extra_km_price","0");
     // Never send bicycle quantity as a vehicle assignment. Quantity stays in Larios;
     // Renthub receives exactly the rental price calculated by this app.
     const rentalGross=amount(c.rental_total)>0?amount(c.rental_total):amount(c.total);
