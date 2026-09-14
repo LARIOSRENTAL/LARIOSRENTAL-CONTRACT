@@ -9,7 +9,7 @@ const contractTransfer = read('supabase/functions/renthub-transfer/index.ts');
 for (const [name, source] of [['renthub-booking', quickBooking], ['renthub-transfer', contractTransfer]]) {
   assert.match(source, /form\.set\("resource",\s*"freesale"\)/, `${name} must request Free Sale`);
   if (name === 'renthub-booking') {
-    assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*""\)/, `${name} must leave the previous vehicle/model field empty`);
+    assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*map\.model\)/, `${name} must populate Renthub's temporary Free Sale model selector`);
     assert.match(source, /form\.set\("pm_ms_id",\s*""\)/, `${name} must leave the concrete vehicle unassigned`);
   } else {
     assert.match(source, /form\.set\("pm_prev_mezzo_id",\s*""\)/, `${name} must leave the Partner API legacy vehicle field empty`);
