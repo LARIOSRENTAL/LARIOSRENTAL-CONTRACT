@@ -83,7 +83,10 @@ Deno.serve(async(req:Request)=>{
     const form=new URLSearchParams();
     form.set("pm_partner_reservation_code",`LR-${String(c.contract_number).padStart(6,"0")}`);
     form.set("anag_tipo","privato");form.set("anag_nome",names.name);form.set("anag_cognome",names.surname);form.set("anag_pref_int[0]",`+${phone.prefix}`);form.set("anag_telefono[0]",phone.mobile);form.set("type_anag_telefono[0]","cellulare");form.set("cell_preferred","0");form.set("anag_email[0]",email);form.set("mail_pref","0");form.set("anag_lang_key","es_ES");form.set("anag_consenti_campagna","1");
-    form.set("pm_prev_mezzo_id","");form.set("pm_current_model_id",map.model);form.set("pm_ms_id","");
+    // Renthub's web form uses pm_prev_mezzo_id as the model selector while the
+    // booking is being created. With pm_ms_id empty, it persists the result as
+    // resource=freesale and moves the model to pm_current_model_id itself.
+    form.set("pm_prev_mezzo_id",map.model);form.set("pm_current_model_id",map.model);form.set("pm_ms_id","");
     form.set("pm_data_inizio",displayDate(c.delivery_date));form.set("pm_ora_inizio",String(c.delivery_time||"").slice(0,5));form.set("pm_data_fine",displayDate(c.return_date));form.set("pm_ora_fine",String(c.return_time||"").slice(0,5));
     form.set("pm_ritiro_l_id",map.pickup);form.set("pm_consegna_l_id",map.dropoff);
     if(pickupAddress)form.set("pickup_at_location",pickupAddress);if(dropoffAddress)form.set("dropoff_at_location",dropoffAddress);
@@ -99,7 +102,7 @@ Deno.serve(async(req:Request)=>{
     if(Number.isFinite(rentalGross)&&rentalGross>0){form.set("calc_auto_tar","manuale");form.set("pm_tariffa_manuale",rentalGross.toFixed(2));form.set("tariffa_tot",rentalGross.toFixed(2));}else form.set("calc_auto_tar","attivo");
     form.set("pm_cauzione",Math.max(0,amount(c.deposit)).toFixed(2));form.set("pm_franchigia",Math.max(0,amount(c.franchise)).toFixed(2));form.set("pm_franchigia_danni",Math.max(0,amount(c.franchise)).toFixed(2));form.set("pm_franchigia_rca","0");
     form.set("print_contract","0");form.set("test_contract","0");form.set("out_img","");form.set("in_img","");form.set("print_preventivo","0");form.set("pm_voucher_model","");form.set("operator_code","");
-    console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"web_freesale",contract_number:c.contract_number,group:map.group,model:map.model,resource:"freesale",pm_prev_mezzo_id:"",pm_current_model_id:map.model,pm_ms_id:"",pickup:map.pickup,dropoff:map.dropoff,has_pickup_address:!!pickupAddress,has_dropoff_address:!!dropoffAddress,price_override:rentalGross>0}));
+    console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"web_freesale",contract_number:c.contract_number,group:map.group,model:map.model,resource:"freesale",model_selector:map.model,pm_current_model_id:map.model,pm_ms_id:"",pickup:map.pickup,dropoff:map.dropoff,has_pickup_address:!!pickupAddress,has_dropoff_address:!!dropoffAddress,price_override:rentalGross>0}));
     const inserted=await renthubWeb("/rental/booking/add",form),code=String(inserted?.code||inserted?.booking?.code||inserted?.result?.booking?.code||inserted?.id||"");
     if(!code)throw Error("Renthub no devolvió código de reserva");
     await requireWrite(actor.from("contracts").update({renthub_contract_id:code,renthub_sync_status:"reservation_created",renthub_last_sync_at:new Date().toISOString(),renthub_sync_error:null,app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff}}).eq("id",id),"No se pudo guardar el código de Renthub");
