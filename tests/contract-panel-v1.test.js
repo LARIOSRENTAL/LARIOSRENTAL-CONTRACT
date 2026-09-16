@@ -11,7 +11,9 @@ assert.equal(t.eligible({status:'draft',pdf_path:'contracts/test.pdf',renthub_sy
 assert.equal(t.eligible({status:'confirmed',pdf_path:null,renthub_sync_status:'pending'}),false);
 assert.equal(t.eligible({status:'confirmed',pdf_path:'contracts/test.pdf',renthub_sync_status:'verified'}),false);
 assert.equal(t.eligible({status:'confirmed',pdf_path:'contracts/test.pdf',renthub_sync_status:'pending',pickup_at:'2020-01-01T10:00:00Z'}),false);
+assert.equal(t.eligible({status:'confirmed',pdf_path:'contracts/test.pdf',renthub_sync_status:'pending',pickup_at:'2020-01-01T10:00:00Z',renthub_id:'YASPX-IFENH'}),true);
 assert.deepEqual(t.state({status:'confirmed',pickup_at:'2020-01-01T10:00:00Z'}),['Histórico · no enviable','muted']);
+assert.deepEqual(t.state({status:'confirmed',pickup_at:'2020-01-01T10:00:00Z',renthub_id:'YASPX-IFENH'}),['Pendiente de activar','wait']);
 const sorted=t.newestFirst([{contract_number:'LR-1',created_at:'2026-08-01T10:00:00Z'},{contract_number:'LR-3',created_at:'2026-09-01T10:00:00Z'},{contract_number:'LR-2',created_at:'2026-08-15T10:00:00Z'}]);
 assert.deepEqual(sorted.map(x=>x.contract_number),['LR-3','LR-2','LR-1']);
 const source=fs.readFileSync(require.resolve('../app-v84/www/contract-panel-v1.js'),'utf8');
@@ -34,6 +36,7 @@ assert.match(reservations,/targetStatus=generated&&status==='draft'\?current\.st
 assert.match(reservations,/Regenerar contrato y enviar/);
 const edge=fs.readFileSync(require.resolve('../supabase/functions/renthub-transfer/index.ts'),'utf8');
 assert.match(edge,/contains_personal_data: false/);
+assert.match(edge,/RENTHUB_USER_API_KEY/);
 assert.match(edge,/action === "refresh_cache"/);
 assert.match(edge,/config\/categories/);
 assert.doesNotMatch(edge,/config\/locations/);
