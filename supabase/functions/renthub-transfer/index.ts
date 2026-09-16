@@ -27,7 +27,7 @@ async function loadPartnerSecret(service: any) {
 }
 function configuration() {
   const missing = partnerSecret ? [] : ["RENTHUB_SECRET_TOKEN"];
-  const documentReady = !!env("RENTHUB_USER_API_EMAIL") && !!env("RENTHUB_USER_API_PASSWORD");
+  const documentReady = !!env("RENTHUB_USER_API_KEY") || (!!env("RENTHUB_USER_API_EMAIL") && !!env("RENTHUB_USER_API_PASSWORD"));
   const enabled = !!partnerSecret;
   return {
     enabled, ready: missing.length === 0, missing, documentReady,
@@ -88,15 +88,152 @@ async function refreshCatalogueCache(service: any, userId: string) {
 
 let userTokenCache = "";
 async function userToken(force = false) {
+  const configuredApiKey = env("RENTHUB_USER_API_KEY");
+  if (configuredApiKey) return configuredApiKey;
   if (!force && userTokenCache) return userTokenCache;
   const base = installationUrl(), form = new FormData();
   form.set("email", env("RENTHUB_USER_API_EMAIL")); form.set("password", env("RENTHUB_USER_API_PASSWORD"));
   const response = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { Accept: "application/json" }, body: form });
-  const data = await response.clone().json().catch(() => ({}));
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = {}; }
   const headerToken = response.headers.get("X-UserAuthToken") || response.headers.get("X-Auth-Token") || response.headers.get("Authorization") || "";
   userTokenCache = String(data?.result?.token || data?.token || headerToken).replace(/^Bearer\s+/i, "");
-  if (!response.ok || !userTokenCache) throw new Error(`Renthub user API authentication failed (${response.status})`);
+  if (!response.ok || !userTokenCache) {
+    const validation = data?.errors && typeof data.errors === "object"
+      ? Object.values(data.errors).flat().map(String).join(" ")
+      : "";
+    const detail = String(validation || data?.message || data?.error || raw || "sin detalle")
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+    console.error(JSON.stringify({ event: "renthub_user_auth_error", status: response.status, email_present: !!env("RENTHUB_USER_API_EMAIL"), password_present: !!env("RENTHUB_USER_API_PASSWORD"), detail }));
+    throw new Error(`Renthub user API authentication failed (${response.status}): ${detail}`);
+  }
   return userTokenCache;
+}
+
+async function userApiFetch(path: string, init: RequestInit = {}, retry = true): Promise<any> {
+  const response = await fetch(`${installationUrl()}${path}`, {
+    ...init,
+    headers: { Accept: "application/json", "X-UserAuthToken": await userToken(), ...(init.headers || {}) },
+  });
+  if (response.status === 401 && retry) { await userToken(true); return userApiFetch(path, init, false); }
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = raw; }
+  if (!response.ok || data?.status === false) {
+    const detail = String(data?.message || data?.error || raw || "sin detalle").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 400);
+    throw new Error(`Renthub User API ${response.status} en ${path.split("?")[0]}: ${detail}`);
+  }
+  return data;
+}
+
+function arrayResult(data: any): any[] {
+  const value = data?.result?.data ?? data?.result?.items ?? data?.result ?? data?.data ?? data;
+  return Array.isArray(value) ? value : [];
+}
+const plateKey = (value: unknown) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+async function renthubVehicleByPlate(registration: string) {
+  const data = await userApiFetch("/en_GB/module/vehicle/api/v1/vehicle?vehicle_expand=model&vehicle_model_expand=type,category&per_page=1000");
+  const wanted = plateKey(registration);
+  const row = arrayResult(data).find((item: any) => plateKey(item?.registration || item?.plate || item?.license_plate || item?.number_plate || item?.targa || item?.ms_targa) === wanted);
+  if (!row?.id) throw new Error(`No se encontró la matrícula ${registration} en la flota de Renthub.`);
+  return row;
+}
+
+async function createRenthubRegistry(customer: any, driver: any) {
+  const names = splitName(customer?.full_name), phone = splitPhone(customer?.phone), form = new FormData();
+  form.set("type", "private"); form.set("name", names.name); form.set("surname", names.surname);
+  form.set("tax_code", String(customer?.document_number || driver?.licence_number || ""));
+  form.set("favorite", "0"); form.set("marketing_consent", "0");
+  form.set("telephones[0][prefix]", phone.prefix); form.set("telephones[0][number]", phone.mobile);
+  form.set("telephones[0][is_cell]", "1"); form.set("telephones[0][preferred]", "1");
+  form.set("emails[0][email]", String(customer?.email || "")); form.set("emails[0][preferred]", "1");
+  if (customer?.address) form.set("address", String(customer.address));
+  if (customer?.birth_date || driver?.birth_date) form.set("birth_date", String(customer?.birth_date || driver?.birth_date));
+  if (customer?.nationality) form.set("citizenship", String(customer.nationality));
+  if (customer?.document_number) form.set("id_number", String(customer.document_number));
+  if (driver?.licence_number) form.set("license_number", String(driver.licence_number));
+  if (driver?.licence_country) form.set("license_issue_country", String(driver.licence_country));
+  if (driver?.issue_date) form.set("license_issue_date", String(driver.issue_date));
+  if (driver?.expiry_date) form.set("license_expiration", String(driver.expiry_date));
+  const data = await userApiFetch("/module/registry/api/v1/registry", { method: "POST", body: form });
+  const registry = data?.result?.registry ?? data?.result ?? data?.data ?? data;
+  const id = typeof registry === "string" || typeof registry === "number" ? registry : registry?.id ?? registry?.anag_id;
+  if (!id) throw new Error("Renthub creó el cliente pero no devolvió su identificador.");
+  return { id: String(id), code: String(registry?.code || "") };
+}
+
+const renthubDate = (value: unknown) => {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || "");
+};
+function bookingUpdatePayload(contract: any, detail: any, registryId: string, renthubVehicleId: string) {
+  const booking = detail?.result?.booking || {}, model = detail?.result?.vehicle || detail?.result?.model || {};
+  const bookingId = String(booking.id || ""), modelId = String(model.id || booking.pm_current_model_id || "");
+  if (!bookingId || !modelId) throw new Error("Renthub no devolvió el ID de reserva o modelo necesario para actualizar.");
+  const pickup = String(booking.pickup_location?.id || "132"), dropoff = String(booking.dropoff_location?.id || pickup);
+  const fallbackAddress = String(contract.contract_number) === "62831" ? "PRUEBA LARIOS RENTAL" : "";
+  const pickupAddress = String(contract.delivery_location || contract.app_payload?.pickup_location || fallbackAddress).trim();
+  const dropoffAddress = String(contract.return_location || contract.app_payload?.return_location || pickupAddress).trim();
+  const form = new URLSearchParams(), values: Record<string, string> = {
+    dr_group: crypto.randomUUID(), dr_to_delete: "", booking_id: bookingId, pm_internal_move: "0",
+    pm_cancel_reason_id: "", calc_auto_tar: "non_attivo", pm_imr_id: "", pm_stato_prenotazione: "in_corso",
+    pm_list_id: String(booking.pricelist?.id || "1"), pm_tariffa_manuale: "0", pm_monthly_fee: "0", pm_monthly_duration: "0",
+    tariffa_tot: netFromGross(contract.total, contract.vat_percent).toFixed(4), pm_advance: "0",
+    costo_servizi_with_vat: "0", costo_servizi: "0", pm_costo_km_extra: "0", pm_pickup_delivery_price: "0", pm_discount: "0",
+    pm_addebito_fuori_orario: "0", pm_addebito_benzina: "0", pm_addebito_franchigia: "0", pm_addebito_consegna_altro_luogo: "0",
+    pm_vat_key: String(contract.vat_percent || 21), pm_cauzione: String(contract.deposit || 0), pm_franchigia: "0",
+    pm_franchigia_danni: String(contract.app_payload?.franchise ?? contract.franchise ?? booking.franchises?.damage ?? 0), pm_franchigia_rca: "0",
+    pm_prev_mezzo_id: modelId, pm_ms_id: renthubVehicleId, pm_operatore_apertura: env("RENTHUB_OPERATOR_ID") || "4", pm_operatore_chiusura: "",
+    pm_payment_method: "", pm_deposit_payment_method: "", pm_ritiro_l_id: pickup, pm_consegna_l_id: dropoff,
+    pickup_at_location: pickupAddress, dropoff_at_location: dropoffAddress, pm_consegna_effettiva_l_id: "",
+    pm_data_inizio: renthubDate(contract.delivery_date), pm_ora_inizio: String(contract.delivery_time || "").slice(0, 5),
+    pm_actual_end_date: "", pm_actual_end_time: "", pm_data_fine: renthubDate(contract.return_date), pm_ora_fine: String(contract.return_time || "").slice(0, 5),
+    pm_benzina_ritiro: "4", pm_benzina_consegna: "", pm_km_included: String(booking.kms?.included || 0),
+    pm_extra_km_price: String(booking.kms?.extra_km_price?.without_tax || 0), pm_km_iniziali: String(contract.current_km || 0), pm_km_finali: "0",
+    pm_flight_number: "", pm_flight_time: "", pm_pre_auth_code: "", pm_lang_key: "es_ES", pm_fattura_necessaria: "1",
+    pm_sectional_id: "", pm_auto_charge_dispute: "1", pm_automatic_send_cargos: "1", pm_note: "", pm_dettagli_contr_prev: "",
+    anag_id: registryId, anag_disabled: "1", com_id: "", "type_anag_telefono[0]": "cell", "card-cardgroup": crypto.randomUUID(),
+    pm_out_notes: "", pm_in_notes: "", sharedDamageDatatable_length: "10", payment_reference_group: "",
+    payment_reference_id: bookingId, payment_reference_type: "pm", substitutionDatatable_length: "10", checklist_out_active: "0", checklist_in_active: "0",
+    pm_contract_model: "", pm_preventivo: "rental_prev_std", refresh_reference_coverage_on_save: "0", pm_id: bookingId,
+    booking_opened_at: String(booking.created_at || ""), print_contract: "0", test_contract: "0", out_img: "", in_img: "",
+    print_preventivo: "0", pm_voucher_model: "rental_voucher", operator_code: "false",
+  };
+  Object.entries(values).forEach(([key, value]) => form.append(key, value));
+  for (const service of Array.isArray(booking.services) ? booking.services : []) {
+    const id = String(service.id || ""); if (!id) continue;
+    form.append(`sa[${id}]`, String(service.quantity || 1));
+    form.append(`sa_price[${id}]`, String(service.rate?.without_tax || 0));
+    form.append(`sa_tariffazione[${id}]`, service.rate_type === "fixed" ? "fissa" : "giornaliera");
+    form.append(`sa_max_days[${id}]`, String(service.max_days || 0));
+  }
+  return { form, bookingId, modelId, pickupAddress, dropoffAddress };
+}
+
+async function updateRenthubTestBooking(contract: any, customer: any, driver: any, vehicle: any, detail: any) {
+  if (String(contract.id) !== "c24d0e33-b968-449d-b542-a0613d4220a8" || String(contract.renthub_contract_id) !== "YASPX-IFENH") throw new Error("La prueba de actualización está limitada a LR-062831.");
+  const registration = String(
+    vehicle?.registration ||
+    contract.app_payload?.vehicle_plate ||
+    contract.app_payload?.registration ||
+    contract.vehicle_plate ||
+    "",
+  ).trim();
+  if (!registration) throw new Error("El contrato no tiene matrícula asignada.");
+  const renthubVehicle = await renthubVehicleByPlate(registration);
+  const registry = await createRenthubRegistry(customer, driver);
+  const payload = bookingUpdatePayload(contract, detail, registry.id, String(renthubVehicle.id));
+  const response = await fetch(`${installationUrl()}/rental/booking/add`, {
+    method: "POST", redirect: "manual",
+    headers: { Accept: "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-PartnerToken": await partnerToken(), "X-Requested-With": "XMLHttpRequest" },
+    body: payload.form,
+  });
+  const raw = await response.text(); let data: any = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch { data = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500); }
+  console.log(JSON.stringify({ event: "renthub_contract_update", contract_number: contract.contract_number, booking_id: payload.bookingId, status: response.status, vehicle_id: String(renthubVehicle.id), registry_id: registry.id, has_pickup_address: !!payload.pickupAddress, has_dropoff_address: !!payload.dropoffAddress }));
+  if (!response.ok || String(data?.id || "") !== payload.bookingId) throw new Error(`Renthub rechazó la actualización (${response.status}): ${typeof data === "string" ? data : JSON.stringify(data)}`);
+  return { booking_id: payload.bookingId, vehicle_id: String(renthubVehicle.id), registry_id: registry.id, pickup_at_location: payload.pickupAddress, dropoff_at_location: payload.dropoffAddress, response: data };
 }
 
 async function uploadContractPdf(service: any, contract: any, bookingId: unknown) {
@@ -243,12 +380,12 @@ async function handler(req: Request) {
   if (contractError || !contract) return json({ error: "Contract not found" }, 404);
   if (contract.status === "draft") return json({ error: "Generate the contract before sending it to Renthub" }, 409);
 
-  const [{ data: customer }, { data: vehicle }, { data: driver }] = await Promise.all([
+  const [{ data: customer }, { data: vehicle, error: vehicleError }, { data: driver }] = await Promise.all([
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.vehicle_id ? service.from("vehicles").select("*").eq("id", contract.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  void vehicle;
+  if (vehicleError) console.error(JSON.stringify({ event: "contract_vehicle_lookup_error", contract_number: contract.contract_number, vehicle_id: contract.vehicle_id, detail: vehicleError.message }));
   const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart } = await automaticMappings(contract);
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
@@ -289,7 +426,7 @@ async function handler(req: Request) {
 
   if (action === "send") {
     if (contract.renthub_sync_status === "verified" && contract.renthub_contract_id) return json({ verified: true, external_reference: contract.renthub_contract_id, already_sent: true });
-    let code = String(contract.renthub_contract_id || ""), inserted: any = null;
+    let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null;
     try {
       if (!code) {
         if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
@@ -328,6 +465,10 @@ async function handler(req: Request) {
         await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "sent_pending_verification", renthub_sync_error: null, app_payload: { ...(contract.app_payload || {}), renthub_resource: "freesale", renthub_pickup_location_id: pickup, renthub_dropoff_location_id: dropoff } }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
       }
       let checked = await verify(code);
+      if (String(contract.id) === "c24d0e33-b968-449d-b542-a0613d4220a8" && code === "YASPX-IFENH") {
+        updated = await updateRenthubTestBooking(contract, customer, driver, vehicle, checked.detail);
+        checked = await verify(code);
+      }
       let documentUploaded = contract.app_payload?.renthub_document_uploaded === true;
       if (config.documentReady && !documentUploaded) {
         await uploadContractPdf(service, contract, checked.booking.id);
@@ -341,7 +482,7 @@ async function handler(req: Request) {
       }
       await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "verified", renthub_last_sync_at: new Date().toISOString(), renthub_sync_error: null }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
       if (customer?.id && inserted?.result?.customer?.code) await requireWrite(actor.from("customers").update({ renthub_customer_id: String(inserted.result.customer.code) }).eq("id", customer.id), "No se pudo guardar el cliente de Renthub");
-      return json({ verified: true, external_reference: code, checks: checked.checks });
+      return json({ verified: true, external_reference: code, checks: checked.checks, updated });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(JSON.stringify({ event: "renthub_transfer_error", contract_number: contract.contract_number, external_reference: code || null, detail: message }));
