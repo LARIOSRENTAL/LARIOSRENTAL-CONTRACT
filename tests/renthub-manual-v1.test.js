@@ -30,7 +30,7 @@ assert.match(edge,/"50cc": "m1"/);
 assert.match(edge,/"125cc": "m2"/);
 assert.doesNotMatch(edge,/config\/locations/);
 assert.match(edge,/form\.set\("pricelist", pricelist\)/);
-assert.match(edge,/overwrite_rental_rate", expectedRental\.toFixed\(2\)/);
+assert.match(edge,/overwrite_rental_rate", renthubRentalRate\.toFixed\(4\)/);
 assert.match(edge,/contractServiceTotal/);
 assert.match(edge,/para no crear una reserva incompleta en Renthub/);
 assert.match(edge,/hasta confirmar el campo de descuento/);
