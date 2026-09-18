@@ -109,9 +109,9 @@ function installReturn(){
   console.log('Return without preauthorization override installed');
   return true;
 }
-function install(){installEditRecovery();installReturn();return editInstalled&&returnInstalled}
+function install(){return installReturn()}
 if(!install()){
-  let n=0;const t=setInterval(()=>{install();if((editInstalled&&returnInstalled)||++n>200)clearInterval(t)},100);
+  let n=0;const t=setInterval(()=>{install();if(returnInstalled||++n>80)clearInterval(t)},100);
 }
-window.LariosReturnWithoutPreauth={install,fillRecovered,version:'20260917-v2'};
+window.LariosReturnWithoutPreauth={install,fillRecovered,version:'20260918-v3'};
 })();
