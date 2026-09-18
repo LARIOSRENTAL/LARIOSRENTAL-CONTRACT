@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 let installed=false,current=null,loading=false,signatureBusy=false;
 function headers(extra={}){return{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,...extra}}
 async function rpc(name,body={}){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:headers({'Content-Type':'application/json'}),body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
-async function loadRecord(id){const all=await rpc('app_list_contracts',{});return(Array.isArray(all)?all:[]).find(x=>x.id===id)||null}
+async function loadRecord(id){return rpc('app_contract_record',{p_contract_id:id})}
 function setValue(id,v){const el=$(id);if(!el||v===undefined||v===null)return;el.value=String(v)}
 function setCheck(id,v){const el=$(id);if(el)el.checked=!!v}
 function money(v){const n=Number(String(v??'0').replace(',','.'));return Number.isFinite(n)?n.toFixed(2):String(v??'')}
@@ -51,10 +51,16 @@ function bindPersistence(){const cn=$('card_number'),ce=$('card_expiry');[cn,ce]
 function applyGenerated(x){restoreCore(x);restoreCard(x);restoreExtras(x);preservePrices(x);window.LariosMultiUnitVehicles?.build?.();restoreSignature(x);bindPersistence()}
 async function hydrate(id){
   if(!id||loading)return;loading=true;
-  try{const x=await loadRecord(id);if(!x)return;current=x;if(x.status==='draft')return;applyGenerated(x);setTimeout(()=>applyGenerated(x),120);setTimeout(()=>applyGenerated(x),450);setTimeout(()=>applyGenerated(x),900)}catch(e){console.warn('No se pudo restaurar el contrato generado',e)}finally{loading=false}
+  try{const x=await loadRecord(id);if(!x)return;current=x;if(x.status==='draft')return;applyGenerated(x);setTimeout(()=>applyGenerated(x),120)}catch(e){console.warn('No se pudo restaurar el contrato generado',e)}finally{loading=false}
 }
 function install(){
-  if(installed||!window.LariosReservations)return false;installed=true;const oldEdit=LariosReservations.edit.bind(LariosReservations);LariosReservations.edit=function(id){const out=oldEdit(id);setTimeout(()=>hydrate(id),20);return out};document.addEventListener('click',e=>{const t=String(e.target?.textContent||'');if(/Aceptar firma/i.test(t))setTimeout(persistSignature,180);if(/Generar contrato|Regenerar contrato/i.test(t)){setTimeout(persistCard,0);setTimeout(persistSignature,0)}},true);new MutationObserver(bindPersistence).observe(document.body,{childList:true,subtree:true});bindPersistence();console.log('Generated contract edit persistence installed');return true
+  if(installed||!window.LariosReservations)return false;
+  installed=true;
+  document.addEventListener('larios:reservation-opened',e=>{const id=e.detail?.id;if(id)setTimeout(()=>hydrate(id),0)});
+  document.addEventListener('click',e=>{const t=String(e.target?.textContent||'');if(/Aceptar firma/i.test(t))setTimeout(persistSignature,180);if(/Generar contrato|Regenerar contrato/i.test(t)){setTimeout(persistCard,0);setTimeout(persistSignature,0)}},true);
+  bindPersistence();
+  console.log('Generated contract edit persistence installed');
+  return true
 }
 if(!install()){let n=0,t=setInterval(()=>{if(install()||++n>100)clearInterval(t)},100)}
 window.LariosGeneratedContractEdit={hydrate,persistCard,persistSignature,version:'20260915-v2'};
