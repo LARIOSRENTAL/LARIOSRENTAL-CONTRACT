@@ -372,7 +372,7 @@ async function handler(req: Request) {
   const pricelist = renthubPricelist(contract);
   const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, rental_gross: expectedRental, rental_net: renthubRentalRate, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
-  async function verify(code: string, expectedModelOverride = verificationModel) {
+  async function verify(code: string) {
     const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
     const booking = detail?.result?.booking || {};
     const locationMatches = (actual: any, expected: string) => [actual?.id, actual?.code, actual?.name].map(String).includes(String(expected));
@@ -385,10 +385,11 @@ async function handler(req: Request) {
       booking?.model_id,
       booking?.pm_current_model_id,
     ].filter((value) => value !== undefined && value !== null && String(value) !== "").map(String);
-    const modelMatches = modelCandidates.length === 0 || modelCandidates.includes(String(expectedModelOverride));
-    const checks = {
+    const modelMatches = modelCandidates.length === 0 || modelCandidates.includes(String(verificationModel));
+    const isExistingBooking = !!contract.renthub_contract_id;
+    const checks: Record<string, boolean> = {
       code: String(booking.code || "") === code,
-      start: minute(booking.start_datetime) === minute(start), end: minute(booking.end_datetime) === minute(end),
+      end: minute(booking.end_datetime) === minute(end),
       total: sameAmount(booking.total_amount, expectedTotal, contract.vat_percent),
       customer_email: normalize(detail?.result?.customer?.email) === normalize(customer?.email),
       model: modelMatches,
@@ -396,82 +397,9 @@ async function handler(req: Request) {
       dropoff_location: locationMatches(booking.dropoff_location, dropoff),
       deposit: Math.abs(Number(booking?.franchises?.deposit || 0) - Number(contract.deposit || 0)) <= 0.02,
     };
-    console.log(JSON.stringify({ event: "renthub_booking_verify", contract_number: contract.contract_number, code, model_expected: String(expectedModelOverride), model_candidates: modelCandidates, checks }));
+    if (!isExistingBooking) checks.start = minute(booking.start_datetime) === minute(start);
+    console.log(JSON.stringify({ event: "renthub_booking_verify", contract_number: contract.contract_number, code, start_preserved: isExistingBooking, model_expected: String(verificationModel), model_candidates: modelCandidates, checks }));
     return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
-  }
-
-  async function createPartnerBooking(preferredCustomerCode = "") {
-    if (minimumStart && start < minimumStart) {
-      throw new Error(`Renthub no admite crear o reemplazar reservas con una entrega anterior a ${minimumStart}. La reserva existente no se modifica.`);
-    }
-    if (expectedServices > 0.009) throw new Error(`Este contrato incluye ${expectedServices.toFixed(2)} € en seguro, conductor joven o extras. Se ha detenido el envío para no crear una reserva incompleta en Renthub hasta activar el mapeo de Servicios.`);
-    if (Number(contract.discount_percent || 0) > 0) throw new Error("Este contrato tiene descuento. Se ha detenido el envío hasta confirmar el campo de descuento de la API de Renthub.");
-    const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
-    if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
-
-    const names = splitName(customer.full_name), phone = splitPhone(customer.phone);
-    const locationNotes = [
-      pickupAddress ? `RECOGIDA DEL VEHICULO EN: ${pickupAddress}` : "",
-      dropoffAddress ? `DEVOLUCION DEL VEHICULO EN: ${dropoffAddress}` : "",
-    ].filter(Boolean).join("\n");
-    const paymentMethod = partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method);
-    const paymentAmount = amount(contract.total || contract.app_payload?.total);
-    const damageFranchise = Number(contract.app_payload?.franchise ?? contract.franchise ?? 0);
-
-    const buildForm = (useVehicle: boolean) => {
-      const form = new FormData();
-      form.set("partner_reservation_code", `LR-${String(contract.contract_number).padStart(6, "0")}`);
-      const knownCustomerCode = String(preferredCustomerCode || customer.renthub_customer_id || "");
-      if (knownCustomerCode) form.set("customer_code", knownCustomerCode);
-      else {
-        form.set("name", names.name); form.set("surname", names.surname); form.set("mobile_prefix", phone.prefix); form.set("mobile", phone.mobile); form.set("email", customer.email);
-        if (customer.address) form.set("address", customer.address); if (customer.city) form.set("city", customer.city); if (customer.postal_code) form.set("zip", customer.postal_code);
-        if (/^[A-Za-z]{2}$/.test(customer.country || "")) form.set("country", customer.country.toUpperCase());
-      }
-      const desiredModel = useVehicle && fleetMatch?.model ? String(fleetMatch.model) : String(model);
-      form.set("model", desiredModel);
-      form.set("start_datetime", start); form.set("end_datetime", end);
-      form.set("pickup_location", pickup); form.set("dropoff_location", dropoff);
-      if (locationNotes) form.set("notes", locationNotes);
-      form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
-      if (paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0) {
-        form.set("payment_method", paymentMethod);
-        form.set("payment_amount", paymentAmount.toFixed(2));
-      }
-      form.set("ignore_availability", "true");
-      form.set("pricelist", pricelist);
-      form.set("overwrite_rental_rate", renthubRentalRate.toFixed(4));
-      form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
-      if (damageFranchise > 0) form.set("overwrite_damage_franchise", damageFranchise.toFixed(2));
-      const age = ageAt(customer.birth_date || driver?.birth_date, contract.delivery_date); if (age !== null) form.set("age", String(age));
-      if (useVehicle && fleetMatch?.vehicle) {
-        form.set("vehicle", String(fleetMatch.vehicle));
-        form.set("vehicle_model", String(fleetMatch.model || desiredModel));
-      }
-      return { form, desiredModel };
-    };
-
-    let usedVehicle = !!fleetMatch?.vehicle;
-    let built = buildForm(usedVehicle);
-    let insertedBooking: any;
-    try {
-      insertedBooking = await renthubFetch("/module/rental/api/partner/booking/insert", { method: "POST", body: built.form });
-    } catch (error) {
-      if (!usedVehicle) throw error;
-      console.log(JSON.stringify({
-        event: "renthub_vehicle_assignment_fallback",
-        contract_number: contract.contract_number,
-        plate: contractPlate || null,
-        vehicle_id: fleetMatch?.vehicle || null,
-        reason: error instanceof Error ? error.message : String(error),
-      }));
-      usedVehicle = false;
-      built = buildForm(false);
-      insertedBooking = await renthubFetch("/module/rental/api/partner/booking/insert", { method: "POST", body: built.form });
-    }
-    const newCode = String(insertedBooking?.result?.booking?.code || "");
-    if (!newCode) throw new Error("Renthub did not return a booking code");
-    return { code: newCode, inserted: insertedBooking, expectedModel: built.desiredModel, vehicleAssigned: usedVehicle };
   }
 
   if (action === "send") {
@@ -479,21 +407,45 @@ async function handler(req: Request) {
     let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null;
     try {
       if (!code) {
-        const created = await createPartnerBooking();
-        inserted = created.inserted;
-        code = created.code;
-        await requireWrite(actor.from("contracts").update({
-          renthub_contract_id: code,
-          renthub_sync_status: "sent_pending_verification",
-          renthub_sync_error: null,
-          app_payload: {
-            ...(contract.app_payload || {}),
-            renthub_resource: "freesale",
-            renthub_pickup_location_id: pickup,
-            renthub_dropoff_location_id: dropoff,
-            renthub_vehicle_assignment: created.vehicleAssigned ? "assigned" : "unassigned",
-          },
-        }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
+        if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
+        if (expectedServices > 0.009) throw new Error(`Este contrato incluye ${expectedServices.toFixed(2)} € en seguro, conductor joven o extras. Se ha detenido el envío para no crear una reserva incompleta en Renthub hasta activar el mapeo de Servicios.`);
+        if (Number(contract.discount_percent || 0) > 0) throw new Error("Este contrato tiene descuento. Se ha detenido el envío hasta confirmar el campo de descuento de la API de Renthub.");
+        const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
+        if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
+        const names = splitName(customer.full_name), phone = splitPhone(customer.phone), form = new FormData();
+        form.set("partner_reservation_code", `LR-${String(contract.contract_number).padStart(6, "0")}`);
+        if (customer.renthub_customer_id) form.set("customer_code", customer.renthub_customer_id);
+        else {
+          form.set("name", names.name); form.set("surname", names.surname); form.set("mobile_prefix", phone.prefix); form.set("mobile", phone.mobile); form.set("email", customer.email);
+          if (customer.address) form.set("address", customer.address); if (customer.city) form.set("city", customer.city); if (customer.postal_code) form.set("zip", customer.postal_code);
+          if (/^[A-Za-z]{2}$/.test(customer.country || "")) form.set("country", customer.country.toUpperCase());
+        }
+        form.set("model", model); form.set("start_datetime", start); form.set("end_datetime", end);
+        form.set("pickup_location", pickup); form.set("dropoff_location", dropoff);
+        const locationNotes = [
+          pickupAddress ? `RECOGIDA DEL VEHICULO EN: ${pickupAddress}` : "",
+          dropoffAddress ? `DEVOLUCION DEL VEHICULO EN: ${dropoffAddress}` : "",
+        ].filter(Boolean).join("\n");
+        if (locationNotes) form.set("notes", locationNotes);
+        form.set("booking_type", "booking"); form.set("send_confirmation_email", "0");
+        const paymentMethod = partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method);
+        const paymentAmount = amount(contract.total || contract.app_payload?.total);
+        if(paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0){
+          form.set("payment_method", paymentMethod);
+          form.set("payment_amount", paymentAmount.toFixed(2));
+        }
+        // Campo oficial Partner API para crear la reserva aunque no haya unidad concreta disponible.
+        form.set("ignore_availability", "true");
+        form.set("pricelist", pricelist);
+        form.set("overwrite_rental_rate", renthubRentalRate.toFixed(4));
+        form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
+        if (Number(contract.franchise || 0) > 0) form.set("overwrite_damage_franchise", Number(contract.franchise).toFixed(2));
+        const age = ageAt(customer.birth_date || driver?.birth_date, contract.delivery_date); if (age !== null) form.set("age", String(age));
+        console.log(JSON.stringify({ event: "renthub_transfer_create", contract_number: contract.contract_number, category: contract.category, model, partner_api: true, ignore_availability: true, pickup_location: pickup, dropoff_location: dropoff, address_in_notes: !!locationNotes, rental_rate_net: renthubRentalRate.toFixed(4) }));
+        inserted = await renthubFetch("/module/rental/api/partner/booking/insert", { method: "POST", body: form });
+        code = String(inserted?.result?.booking?.code || "");
+        if (!code) throw new Error("Renthub did not return a booking code");
+        await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "sent_pending_verification", renthub_sync_error: null, app_payload: { ...(contract.app_payload || {}), renthub_resource: "freesale", renthub_pickup_location_id: pickup, renthub_dropoff_location_id: dropoff } }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
       }
       let checked = await verify(code);
       const customerCode = String(checked.detail?.result?.customer?.code || "");
@@ -507,73 +459,23 @@ async function handler(req: Request) {
       if (!checked.verified) {
         const mismatchKeys = Object.entries(checked.checks).filter(([, ok]) => !ok).map(([key]) => key);
         const existingBooking = !!contract.renthub_contract_id;
-        if (existingBooking) {
-          const originalCode = code;
-          const currentCustomerCode = String(checked.detail?.result?.customer?.code || customer?.renthub_customer_id || "");
-          let replacement: any = null;
-          try {
-            replacement = await createPartnerBooking(currentCustomerCode);
-            let replacementChecked = await verify(replacement.code, replacement.expectedModel);
-            if (!replacementChecked.verified) {
-              await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(replacement.code)}`, { method: "DELETE" }).catch(() => null);
-              const replacementMismatch = Object.entries(replacementChecked.checks).filter(([, ok]) => !ok).map(([key]) => key);
-              throw new Error(`La reserva de sustitución no pasó la verificación: ${replacementMismatch.join(", ")}`);
-            }
-            try {
-              await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(originalCode)}`, { method: "DELETE" });
-            } catch (cancelError) {
-              await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(replacement.code)}`, { method: "DELETE" }).catch(() => null);
-              throw new Error(`No se pudo cancelar la reserva anterior; la sustitución se ha cancelado para evitar duplicados. ${cancelError instanceof Error ? cancelError.message : String(cancelError)}`);
-            }
-            code = replacement.code;
-            checked = replacementChecked;
-            await requireWrite(actor.from("contracts").update({
-              renthub_contract_id: code,
-              renthub_sync_status: "verified",
-              renthub_last_sync_at: new Date().toISOString(),
-              renthub_sync_error: null,
-              app_payload: {
-                ...(contract.app_payload || {}),
-                renthub_replaced_booking_code: originalCode,
-                renthub_replaced_at: new Date().toISOString(),
-                renthub_vehicle_assignment: replacement.vehicleAssigned ? "assigned" : "unassigned",
-                renthub_pickup_location_id: pickup,
-                renthub_dropoff_location_id: dropoff,
-              },
-            }).eq("id", contract.id), "No se pudo guardar la reserva de sustitución");
-            return json({
-              verified: true,
-              replaced_existing_booking: true,
-              previous_external_reference: originalCode,
-              external_reference: code,
-              checks: checked.checks,
-              vehicle_assignment: replacement.vehicleAssigned ? "assigned" : "unassigned",
-              partner_customer_synced: !!updated,
-            });
-          } catch (replacementError) {
-            const message = replacementError instanceof Error ? replacementError.message : String(replacementError);
-            await requireWrite(actor.from("contracts").update({
-              renthub_contract_id: originalCode,
-              renthub_sync_status: "partner_existing_booking_not_replaced",
-              renthub_sync_error: message,
-            }).eq("id", contract.id), "No se pudo guardar el estado de sustitución");
-            return json({
-              error: message,
-              verified: false,
-              external_reference: originalCode,
-              checks: checked.checks,
-              existing_booking_unchanged: true,
-              partner_customer_synced: !!updated,
-            }, 409);
-          }
-        }
-        const message = `Renthub verification mismatch: ${mismatchKeys.join(", ")}`;
+        const message = existingBooking
+          ? `Cliente sincronizado por Partner API. La fecha/hora de inicio existente se conserva y no se modifica. Campos distintos pendientes: ${mismatchKeys.join(", ")}`
+          : `Renthub verification mismatch: ${mismatchKeys.join(", ")}`;
         await requireWrite(actor.from("contracts").update({
           renthub_contract_id: code,
-          renthub_sync_status: "verification_failed",
+          renthub_sync_status: existingBooking ? "partner_existing_booking_not_mutable" : "verification_failed",
           renthub_sync_error: message,
         }).eq("id", contract.id), "No se pudo guardar el estado de verificación");
-        return json({ error: message, verified: false, external_reference: code, checks: checked.checks }, 409);
+        return json({
+          error: message,
+          verified: false,
+          external_reference: code,
+          checks: checked.checks,
+          partner_customer_synced: !!updated,
+          partner_insert_is_update: false,
+          existing_booking_unchanged: existingBooking,
+        }, 409);
       }
       await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "verified", renthub_last_sync_at: new Date().toISOString(), renthub_sync_error: null }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
       if (customer?.id && inserted?.result?.customer?.code) await requireWrite(actor.from("customers").update({ renthub_customer_id: String(inserted.result.customer.code) }).eq("id", customer.id), "No se pudo guardar el cliente de Renthub");
