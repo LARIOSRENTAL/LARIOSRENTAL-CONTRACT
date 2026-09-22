@@ -348,16 +348,18 @@ async function handler(req: Request) {
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  let { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart } = await automaticMappings(contract);
+  const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart } = await automaticMappings(contract);
   const contractPlate = String(contract.app_payload?.vehicle_plate || contract.app_payload?.registration || contract.vehicle_plate || "").trim();
   const fleetMatch = contractPlate ? renthubFleetByPlate[plateKey(contractPlate)] : null;
-  if (fleetMatch?.model) model = String(fleetMatch.model);
+  const verificationModel = contract.renthub_contract_id && fleetMatch?.model ? String(fleetMatch.model) : String(model);
   console.log(JSON.stringify({
     event: "renthub_desired_booking_state",
     contract_number: contract.contract_number,
+    reserved_model_id: String(model),
     plate: contractPlate || null,
     vehicle_id: fleetMatch?.vehicle || null,
     vehicle_model_id: fleetMatch?.model || null,
+    verification_model_id: verificationModel,
     pickup_location: pickup,
     dropoff_location: dropoff,
   }));
@@ -368,7 +370,7 @@ async function handler(req: Request) {
   const renthubRentalRate = netFromGross(expectedRental, contract.vat_percent);
   const expectedServices = contractServiceTotal(contract);
   const pricelist = renthubPricelist(contract);
-  const verificationHash = await digest({ contract_id: contract.id, start, end, model, pickup, dropoff, pricelist, rental_gross: expectedRental, rental_net: renthubRentalRate, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0), resource: "freesale" });
+  const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, rental_gross: expectedRental, rental_net: renthubRentalRate, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
   async function verify(code: string) {
     const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
@@ -383,7 +385,7 @@ async function handler(req: Request) {
       booking?.model_id,
       booking?.pm_current_model_id,
     ].filter((value) => value !== undefined && value !== null && String(value) !== "").map(String);
-    const modelMatches = modelCandidates.length === 0 || modelCandidates.includes(String(model));
+    const modelMatches = modelCandidates.length === 0 || modelCandidates.includes(String(verificationModel));
     const checks = {
       code: String(booking.code || "") === code,
       start: minute(booking.start_datetime) === minute(start), end: minute(booking.end_datetime) === minute(end),
@@ -394,7 +396,7 @@ async function handler(req: Request) {
       dropoff_location: locationMatches(booking.dropoff_location, dropoff),
       deposit: Math.abs(Number(booking?.franchises?.deposit || 0) - Number(contract.deposit || 0)) <= 0.02,
     };
-    console.log(JSON.stringify({ event: "renthub_booking_verify", contract_number: contract.contract_number, code, model_expected: String(model), model_candidates: modelCandidates, checks }));
+    console.log(JSON.stringify({ event: "renthub_booking_verify", contract_number: contract.contract_number, code, model_expected: String(verificationModel), model_candidates: modelCandidates, checks }));
     return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
   }
 
