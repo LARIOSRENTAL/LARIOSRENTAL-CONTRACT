@@ -146,21 +146,7 @@ Deno.serve(async(req:Request)=>{
     form.set("overwrite_deposit",Math.max(0,amount(c.deposit)).toFixed(2));if(amount(c.franchise)>0)form.set("overwrite_damage_franchise",Math.max(0,amount(c.franchise)).toFixed(2));
     console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:rentalGross>0}));
     let inserted:any;
-    let currentPickup=String(map.pickup),currentDropoff=String(map.dropoff);
-    const originalNotes=locationNotes;
-    const retryOtherLocation=()=>{
-      currentPickup=env("RENTHUB_OTHER_LOCATION_ID")||"132";
-      currentDropoff=env("RENTHUB_OTHER_LOCATION_ID")||"132";
-      form.set("pickup_location",currentPickup);
-      form.set("dropoff_location",currentDropoff);
-      form.delete("pricelist");
-      const fallbackNotes=[
-        pickupText?`RECOGIDA DEL VEHICULO EN: ${pickupText}`:"",
-        dropoffText?`DEVOLUCION DEL VEHICULO EN: ${dropoffText}`:"",
-      ].filter(Boolean).join("\n");
-      if(fallbackNotes)form.set("notes",fallbackNotes);
-      else if(originalNotes)form.set("notes",originalNotes);
-    };
+    const currentPickup=String(map.pickup),currentDropoff=String(map.dropoff);
     const doInsert=()=>rh("/module/rental/api/partner/booking/insert",{method:"POST",body:form});
     try{
       inserted=await doInsert();
@@ -183,41 +169,18 @@ Deno.serve(async(req:Request)=>{
           const secondMessage=secondError instanceof Error?secondError.message:String(secondError);
           const secondKey=norm(secondMessage);
           if(secondKey.includes("no hay modelos disponibles")||secondKey.includes("no models available")){
-            retryOtherLocation();
-            console.log(JSON.stringify({
-              event:"renthub_booking_location_fallback",
-              contract_number:c.contract_number,
-              original_pickup:map.pickup,
-              original_dropoff:map.dropoff,
-              fallback_pickup:currentPickup,
-              fallback_dropoff:currentDropoff,
-              requested_pickup_text:pickupText,
-              requested_dropoff_text:dropoffText,
-              reason:secondMessage
-            }));
-            inserted=await doInsert();
-          }else throw secondError;
+            throw Error(`Renthub no tiene habilitado el modelo ${map.model} del grupo ${String(map.group).toUpperCase()} en la ubicación ${map.pickupMatched||pickupText} (ID ${map.pickup}). Se mantiene la ubicación real; no se sustituye por Otra Ubicación. La reserva queda guardada en Larios Rental.`);
+          }
+          throw secondError;
         }
       }else if(firstKey.includes("no hay modelos disponibles")||firstKey.includes("no models available")){
-        retryOtherLocation();
-        console.log(JSON.stringify({
-          event:"renthub_booking_location_fallback",
-          contract_number:c.contract_number,
-          original_pickup:map.pickup,
-          original_dropoff:map.dropoff,
-          fallback_pickup:currentPickup,
-          fallback_dropoff:currentDropoff,
-          requested_pickup_text:pickupText,
-          requested_dropoff_text:dropoffText,
-          reason:firstMessage
-        }));
-        inserted=await doInsert();
+        throw Error(`Renthub no tiene habilitado el modelo ${map.model} del grupo ${String(map.group).toUpperCase()} en la ubicación ${map.pickupMatched||pickupText} (ID ${map.pickup}). Se mantiene la ubicación real; no se sustituye por Otra Ubicación. La reserva queda guardada en Larios Rental.`);
       }else throw firstError;
     }
     const code=String(inserted?.result?.booking?.code||inserted?.booking?.code||inserted?.code||"");
     if(!code)throw Error("Renthub no devolvió código de reserva");
-    await requireWrite(actor.from("contracts").update({renthub_contract_id:code,renthub_sync_status:"reservation_created",renthub_last_sync_at:new Date().toISOString(),renthub_sync_error:null,app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:currentPickup,renthub_dropoff_location_id:currentDropoff}}).eq("id",id),"No se pudo guardar el código de Renthub");
-    return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:currentPickup,dropoff_location:currentDropoff,location_fallback:currentPickup!==String(map.pickup)||currentDropoff!==String(map.dropoff)});
+    await requireWrite(actor.from("contracts").update({renthub_contract_id:code,renthub_sync_status:"reservation_created",renthub_last_sync_at:new Date().toISOString(),renthub_sync_error:null,app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff}}).eq("id",id),"No se pudo guardar el código de Renthub");
+    return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:map.pickup,dropoff_location:map.dropoff,location_fallback:false});
   }catch(e){
     const message=e instanceof Error?e.message:String(e);console.error(JSON.stringify({event:"renthub_booking_error",contract_id:id,error:message}));
     const write=await actor.from("contracts").update({renthub_sync_status:"failed",renthub_sync_error:message}).eq("id",id);
