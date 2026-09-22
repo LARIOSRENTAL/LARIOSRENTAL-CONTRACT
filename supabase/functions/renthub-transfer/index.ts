@@ -683,10 +683,13 @@ async function handler(req: Request) {
       if (expectedServices > 0.009) throw new Error(`Este contrato incluye ${expectedServices.toFixed(2)} € en seguro, conductor joven o extras. Se ha detenido la sustitución para no crear una reserva incompleta en Renthub.`);
       if (Number(contract.discount_percent || 0) > 0) throw new Error("Este contrato tiene descuento. Se ha detenido la sustitución hasta confirmar el campo de descuento de la API de Renthub.");
 
+      const replacement = await insertPartnerBooking(replacementStart, customerCode);
+
       console.log(JSON.stringify({
         event: "renthub_partner_replacement_start",
         contract_number: contract.contract_number,
         old_code: code,
+        requested_replacement_start: replacementStart,
         replacement_start: replacement.actualStart,
         end,
         plate: contractPlate || null,
@@ -694,8 +697,6 @@ async function handler(req: Request) {
         payment_method: paymentMethod || null,
         payment_amount: paymentAmount,
       }));
-
-      const replacement = await insertPartnerBooking(replacementStart, customerCode);
       let replacementChecked = await verify(replacement.code, {
         expectedStart: replacement.actualStart,
         checkStart: true,
@@ -752,7 +753,7 @@ async function handler(req: Request) {
         replaced_existing_booking: true,
         previous_external_reference: oldCode,
         external_reference: code,
-        replacement_start: replacementStart,
+        replacement_start: replacement.actualStart,
         end_datetime: end,
         checks: replacementChecked.checks,
         vehicle_requested: replacement.vehicleRequested,
