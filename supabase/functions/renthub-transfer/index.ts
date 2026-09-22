@@ -613,6 +613,12 @@ async function handler(req: Request) {
   }
 
   if (action === "send") {
+    if (!contract.renthub_contract_id) {
+      return json({
+        error: "Esta reserva no está enlazada con una reserva de Renthub. Marca «Registrar reserva en Renthub» al crearla si quieres vincularla.",
+        linked_renthub_booking_required: true,
+      }, 409);
+    }
     let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null;
     try {
       if (!code) {
