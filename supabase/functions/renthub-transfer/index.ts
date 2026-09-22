@@ -475,7 +475,15 @@ async function handler(req: Request) {
     form.set("end_datetime", end);
     form.set("pickup_location", pickup);
     form.set("dropoff_location", dropoff);
+    const realStartDate = String(contract.delivery_date || "").slice(0, 10);
+    const realStartTime = String(contract.delivery_time || contract.app_payload?.pickup_time || "").slice(0, 5);
+    const [realY, realM, realD] = realStartDate.split("-");
+    const realStartLabel = realY && realM && realD && realStartTime
+      ? `${realD}/${realM}/${realY} ${realStartTime}`
+      : `${realStartDate} ${realStartTime}`.trim();
+    const isReplacementBooking = minute(startValue) !== minute(start);
     const locationNotes = [
+      isReplacementBooking && realStartLabel ? `HORA REAL DE INICIO DE LA RESERVA: ${realStartLabel}` : "",
       pickupAddress ? `RECOGIDA DEL VEHICULO EN: ${pickupAddress}` : "",
       dropoffAddress ? `DEVOLUCION DEL VEHICULO EN: ${dropoffAddress}` : "",
     ].filter(Boolean).join("\n");
