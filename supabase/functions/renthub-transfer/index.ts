@@ -306,6 +306,25 @@ async function automaticMappings(contract: any) {
   const dropoffRaw = contract.return_location || payload.return_location || pickupRaw;
   const pickupResolved = resolveRenthubLocation(pickupRaw, locations);
   const dropoffResolved = resolveRenthubLocation(dropoffRaw, locations, pickupResolved.address);
+  const deliveryDate = String(contract.delivery_date || "").slice(0, 10);
+  const dateObj = /^\d{4}-\d{2}-\d{2}$/.test(deliveryDate) ? new Date(`${deliveryDate}T12:00:00Z`) : null;
+  const isoDay = dateObj && !Number.isNaN(dateObj.getTime()) ? (dateObj.getUTCDay() === 0 ? 7 : dateObj.getUTCDay()) : null;
+  const weekly = parameterResponse?.result?.opening?.timetable?.["1"]?.weeklySchedule || {};
+  const dayWindows = isoDay ? (weekly?.[String(isoDay)] || weekly?.[isoDay] || []) : [];
+  const validClosings = (Array.isArray(dayWindows) ? dayWindows : [])
+    .map((w: any) => String(w?.to || "").slice(0, 5))
+    .filter((v: string) => /^\d{2}:\d{2}$/.test(v))
+    .sort();
+  const latestClosing = validClosings.length ? validClosings[validClosings.length - 1] : "";
+  let latestPartnerStart = "";
+  if (latestClosing) {
+    const [hh, mm] = latestClosing.split(":").map(Number);
+    const total = hh * 60 + mm;
+    if (Number.isFinite(total) && total > 0) {
+      const safe = Math.max(0, total - 1);
+      latestPartnerStart = `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
+    }
+  }
   return {
     model: modelMap[group] || modelMap[normalize(contract.category)] || "",
     pickup: pickupResolved.id,
@@ -315,6 +334,7 @@ async function automaticMappings(contract: any) {
     pickupMatched: pickupResolved.matched,
     dropoffMatched: dropoffResolved.matched,
     minimumStart: String(parameterResponse?.result?.opening?.min_date || "").slice(0, 16),
+    latestPartnerStart,
   };
 }
 
@@ -362,7 +382,7 @@ async function handler(req: Request) {
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart } = await automaticMappings(contract);
+  const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart, latestPartnerStart } = await automaticMappings(contract);
   const contractPlate = String(contract.app_payload?.vehicle_plate || contract.app_payload?.registration || contract.vehicle_plate || "").trim();
   const fleetMatch = contractPlate ? renthubFleetByPlate[plateKey(contractPlate)] : null;
   // El modelo reservado y el vehículo concreto son independientes en Renthub.
@@ -508,31 +528,88 @@ async function handler(req: Request) {
   }
 
   async function insertPartnerBooking(startValue: string, customerCode = "") {
+    const officeClosed = (error: unknown) => {
+      const key = normalize(error instanceof Error ? error.message : String(error));
+      return key.includes("oficina pudiera estar cerrada") || key.includes("oficina puede estar cerrada") || key.includes("office may be closed");
+    };
+    const vehicleUnavailable = (error: unknown) => {
+      const key = normalize(error instanceof Error ? error.message : String(error));
+      return key.includes("no hay vehiculos disponibles") || key.includes("no vehicles available") || key.includes("vehiculo no disponible");
+    };
+    const fallbackStart = (() => {
+      const date = String(startValue || "").slice(0, 10);
+      if (!date || !latestPartnerStart) return "";
+      const candidate = `${date} ${latestPartnerStart}`;
+      return candidate < end ? candidate : "";
+    })();
+
+    let actualStart = startValue;
     let vehicleRequested = !!fleetMatch?.vehicle;
+    const doInsert = async (value: string, withVehicle: boolean) => renthubFetch("/module/rental/api/partner/booking/insert", {
+      method: "POST",
+      body: buildPartnerBookingForm(value, customerCode, withVehicle),
+    });
+
     let insertedBooking: any;
     try {
-      insertedBooking = await renthubFetch("/module/rental/api/partner/booking/insert", {
-        method: "POST",
-        body: buildPartnerBookingForm(startValue, customerCode, vehicleRequested),
-      });
-    } catch (error) {
-      if (!vehicleRequested) throw error;
-      console.log(JSON.stringify({
-        event: "renthub_vehicle_assignment_fallback",
-        contract_number: contract.contract_number,
-        plate: contractPlate || null,
-        vehicle_id: fleetMatch?.vehicle || null,
-        reason: error instanceof Error ? error.message : String(error),
-      }));
-      vehicleRequested = false;
-      insertedBooking = await renthubFetch("/module/rental/api/partner/booking/insert", {
-        method: "POST",
-        body: buildPartnerBookingForm(startValue, customerCode, false),
-      });
+      insertedBooking = await doInsert(actualStart, vehicleRequested);
+    } catch (firstError) {
+      if (officeClosed(firstError) && fallbackStart && fallbackStart !== actualStart) {
+        console.log(JSON.stringify({
+          event: "renthub_office_hours_fallback",
+          contract_number: contract.contract_number,
+          requested_start: actualStart,
+          retry_start: fallbackStart,
+          latest_partner_start: latestPartnerStart,
+          reason: firstError instanceof Error ? firstError.message : String(firstError),
+        }));
+        actualStart = fallbackStart;
+        try {
+          insertedBooking = await doInsert(actualStart, vehicleRequested);
+        } catch (secondError) {
+          if (vehicleRequested && vehicleUnavailable(secondError)) {
+            console.log(JSON.stringify({
+              event: "renthub_vehicle_assignment_fallback",
+              contract_number: contract.contract_number,
+              plate: contractPlate || null,
+              vehicle_id: fleetMatch?.vehicle || null,
+              reason: secondError instanceof Error ? secondError.message : String(secondError),
+            }));
+            vehicleRequested = false;
+            insertedBooking = await doInsert(actualStart, false);
+          } else throw secondError;
+        }
+      } else if (vehicleRequested && vehicleUnavailable(firstError)) {
+        console.log(JSON.stringify({
+          event: "renthub_vehicle_assignment_fallback",
+          contract_number: contract.contract_number,
+          plate: contractPlate || null,
+          vehicle_id: fleetMatch?.vehicle || null,
+          reason: firstError instanceof Error ? firstError.message : String(firstError),
+        }));
+        vehicleRequested = false;
+        try {
+          insertedBooking = await doInsert(actualStart, false);
+        } catch (secondError) {
+          if (officeClosed(secondError) && fallbackStart && fallbackStart !== actualStart) {
+            console.log(JSON.stringify({
+              event: "renthub_office_hours_fallback",
+              contract_number: contract.contract_number,
+              requested_start: actualStart,
+              retry_start: fallbackStart,
+              latest_partner_start: latestPartnerStart,
+              reason: secondError instanceof Error ? secondError.message : String(secondError),
+            }));
+            actualStart = fallbackStart;
+            insertedBooking = await doInsert(actualStart, false);
+          } else throw secondError;
+        }
+      } else throw firstError;
     }
+
     const newCode = String(insertedBooking?.result?.booking?.code || insertedBooking?.booking?.code || insertedBooking?.code || "");
     if (!newCode) throw new Error("Renthub did not return a booking code");
-    return { code: newCode, inserted: insertedBooking, vehicleRequested };
+    return { code: newCode, inserted: insertedBooking, vehicleRequested, actualStart };
   }
 
   if (action === "send") {
@@ -559,11 +636,11 @@ async function handler(req: Request) {
             renthub_vehicle_requested: created.vehicleRequested,
           },
         }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
-        let createdChecked = await verify(code, { expectedStart: start, checkStart: true, checkPayment: true });
+        let createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
         const newCustomerCode = String(createdChecked.detail?.result?.customer?.code || "");
         if (newCustomerCode && customer) {
           updated = await syncPartnerCustomer(newCustomerCode, contract, customer, driver);
-          createdChecked = await verify(code, { expectedStart: start, checkStart: true, checkPayment: true });
+          createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
         }
         if (!createdChecked.verified) {
           const mismatchKeys = Object.entries(createdChecked.checks).filter(([, ok]) => !ok).map(([key]) => key);
@@ -610,7 +687,7 @@ async function handler(req: Request) {
         event: "renthub_partner_replacement_start",
         contract_number: contract.contract_number,
         old_code: code,
-        replacement_start: replacementStart,
+        replacement_start: replacement.actualStart,
         end,
         plate: contractPlate || null,
         vehicle_id: fleetMatch?.vehicle || null,
@@ -620,7 +697,7 @@ async function handler(req: Request) {
 
       const replacement = await insertPartnerBooking(replacementStart, customerCode);
       let replacementChecked = await verify(replacement.code, {
-        expectedStart: replacementStart,
+        expectedStart: replacement.actualStart,
         checkStart: true,
         expectedModel: model,
         checkPayment: true,
@@ -629,7 +706,7 @@ async function handler(req: Request) {
       if (replacementCustomerCode && customer) {
         updated = await syncPartnerCustomer(replacementCustomerCode, contract, customer, driver);
         replacementChecked = await verify(replacement.code, {
-          expectedStart: replacementStart,
+          expectedStart: replacement.actualStart,
           checkStart: true,
           expectedModel: model,
           checkPayment: true,
@@ -660,7 +737,7 @@ async function handler(req: Request) {
         app_payload: {
           ...(contract.app_payload || {}),
           renthub_replacement_hash: replacementHash,
-          renthub_replacement_start: replacementStart,
+          renthub_replacement_start: replacement.actualStart,
           renthub_replaced_booking_code: oldCode,
           renthub_replaced_at: new Date().toISOString(),
           renthub_vehicle_requested: replacement.vehicleRequested,
