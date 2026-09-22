@@ -458,11 +458,11 @@ async function handler(req: Request) {
         const mismatchKeys = Object.entries(checked.checks).filter(([, ok]) => !ok).map(([key]) => key);
         const existingBooking = !!contract.renthub_contract_id;
         const message = existingBooking
-          ? `Cliente sincronizado por Partner API. Campos de reserva pendientes de sincronizar en Renthub: ${mismatchKeys.join(", ")}`
+          ? `Cliente sincronizado por Partner API. Renthub Partner API crea una reserva nueva cuando se usa booking/insert y no modifica la existente. La reserva actual queda sin cambios. Campos distintos: ${mismatchKeys.join(", ")}`
           : `Renthub verification mismatch: ${mismatchKeys.join(", ")}`;
         await requireWrite(actor.from("contracts").update({
           renthub_contract_id: code,
-          renthub_sync_status: existingBooking ? "partner_customer_synced_booking_update_pending" : "verification_failed",
+          renthub_sync_status: existingBooking ? "partner_existing_booking_not_mutable" : "verification_failed",
           renthub_sync_error: message,
         }).eq("id", contract.id), "No se pudo guardar el estado de verificación");
         return json({
@@ -471,6 +471,8 @@ async function handler(req: Request) {
           external_reference: code,
           checks: checked.checks,
           partner_customer_synced: !!updated,
+          partner_insert_is_update: false,
+          existing_booking_unchanged: existingBooking,
         }, 409);
       }
       await requireWrite(actor.from("contracts").update({ renthub_contract_id: code, renthub_sync_status: "verified", renthub_last_sync_at: new Date().toISOString(), renthub_sync_error: null }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
