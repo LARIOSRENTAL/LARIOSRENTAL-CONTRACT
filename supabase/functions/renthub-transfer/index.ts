@@ -351,7 +351,9 @@ async function handler(req: Request) {
   const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart } = await automaticMappings(contract);
   const contractPlate = String(contract.app_payload?.vehicle_plate || contract.app_payload?.registration || contract.vehicle_plate || "").trim();
   const fleetMatch = contractPlate ? renthubFleetByPlate[plateKey(contractPlate)] : null;
-  const verificationModel = contract.renthub_contract_id && fleetMatch?.model ? String(fleetMatch.model) : String(model);
+  // El modelo reservado y el vehículo concreto son independientes en Renthub.
+  // Para una reserva existente nunca usamos el modelo de la matrícula para decidir el grupo/modelo reservado.
+  const verificationModel = String(model);
   console.log(JSON.stringify({
     event: "renthub_desired_booking_state",
     contract_number: contract.contract_number,
@@ -360,6 +362,7 @@ async function handler(req: Request) {
     vehicle_id: fleetMatch?.vehicle || null,
     vehicle_model_id: fleetMatch?.model || null,
     verification_model_id: verificationModel,
+    vehicle_and_reserved_model_independent: true,
     pickup_location: pickup,
     dropoff_location: dropoff,
   }));
