@@ -144,15 +144,20 @@ Deno.serve(async(req:Request)=>{
     if(!map.model)throw Error(`No hay mapeo Renthub para el grupo ${c.category||"sin grupo"}`);
     let customer:any=null;if(c.customer_id){const q=await service.from("customers").select("*").eq("id",c.customer_id).maybeSingle();customer=q.data||null;}
     const payload=c.app_payload||{},names=splitName(customer?.full_name||payload.customer_name||"Cliente pendiente Larios Rental"),phone=splitPhone(customer?.phone||payload.customer_phone),email=String(customer?.email||payload.customer_email||"").trim()||"info@lariosrental.com";
-    const baseTariff=await resolveBaseTariff(actor,c,payload);
-    const rentalGross=baseTariff.gross;
-    const localPriceMissing=!(amount(c.rental_total)>0||amount(c.total)>0);
+    const explicitGross=amount(c.rental_total)>0?amount(c.rental_total):(amount(c.total)>0?amount(c.total):0);
+    const localPriceMissing=!(Number.isFinite(explicitGross)&&explicitGross>0);
+    const baseTariff=localPriceMissing?await resolveBaseTariff(actor,c,payload):null;
+    const rentalGross=localPriceMissing?Number(baseTariff?.gross||0):explicitGross;
+    const priceSource=localPriceMissing?"base_tariff":"explicit";
     if(localPriceMissing){
       payload.rental_price=rentalGross.toFixed(2);
       payload.total=rentalGross.toFixed(2);
       payload.base_tariff_price=rentalGross.toFixed(2);
-      payload.base_tariff_category=baseTariff.category;
-      payload.base_tariff_season_94=baseTariff.season94;
+      payload.base_tariff_category=baseTariff?.category||"";
+      payload.base_tariff_season_94=!!baseTariff?.season94;
+      payload.price_source="base_tariff";
+    }else{
+      payload.price_source="explicit";
     }
     const pickupText=String(c.delivery_location||payload.pickup_location||"").trim(),dropoffText=String(c.return_location||payload.return_location||pickupText).trim();
     const pickupAddress=String(map.pickupAddress||"").trim(),dropoffAddress=String(map.dropoffAddress||"").trim();
@@ -186,10 +191,10 @@ Deno.serve(async(req:Request)=>{
     // No zero-price or nominal/provisional amounts are sent to Renthub.
     form.set("overwrite_rental_rate",netFromGross(rentalGross,c.vat_percent).toFixed(4));
     form.set("overwrite_deposit",Math.max(0,amount(c.deposit)).toFixed(2));
-    const tariffFranchise=Math.max(0,amount(baseTariff.row?.franchise));
+    const tariffFranchise=Math.max(0,amount(baseTariff?.row?.franchise));
     const franchiseToSend=amount(c.franchise)>0?amount(c.franchise):tariffFranchise;
     if(franchiseToSend>0)form.set("overwrite_damage_franchise",franchiseToSend.toFixed(2));
-    console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:true,tariff_gross:rentalGross,tariff_category:baseTariff.category,tariff_season_94:baseTariff.season94}));
+    console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:true,price_source:priceSource,rental_gross:rentalGross,tariff_category:baseTariff?.category||null,tariff_season_94:baseTariff?.season94??null}));
     let inserted:any;
     const currentPickup=String(map.pickup),currentDropoff=String(map.dropoff);
     const doInsert=()=>rh("/module/rental/api/partner/booking/insert",{method:"POST",body:form});
@@ -230,7 +235,7 @@ Deno.serve(async(req:Request)=>{
       renthub_sync_status:"reservation_created",
       renthub_last_sync_at:new Date().toISOString(),
       renthub_sync_error:null,
-      app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff,base_tariff_price:rentalGross.toFixed(2),base_tariff_category:baseTariff.category,base_tariff_season_94:baseTariff.season94}
+      app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff,price_source:priceSource,...(localPriceMissing?{base_tariff_price:rentalGross.toFixed(2),base_tariff_category:baseTariff?.category||"",base_tariff_season_94:!!baseTariff?.season94}:{})}
     }).eq("id",id),"No se pudo guardar el código de Renthub");
     return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:map.pickup,dropoff_location:map.dropoff,location_fallback:false});
   }catch(e){
