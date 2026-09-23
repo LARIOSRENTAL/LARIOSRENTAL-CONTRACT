@@ -403,11 +403,11 @@ async function handler(req: Request) {
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
-  const expectedRental = Number(contract.rental_total || 0);
-  const renthubRentalRate = netFromGross(expectedRental, contract.vat_percent);
-  const expectedServices = contractServiceTotal(contract);
+  // Renthub must receive the final contract total as a single rental amount.
+  // Insurance, young driver, extras and discounts remain internal breakdowns in Larios Rental.
+  const renthubRentalRate = netFromGross(expectedTotal, contract.vat_percent);
   const pricelist = renthubPricelist(contract);
-  const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, rental_gross: expectedRental, rental_net: renthubRentalRate, services: expectedServices, total: expectedTotal, deposit: Number(contract.deposit || 0), resource: "freesale" });
+  const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, total_gross: expectedTotal, total_net: renthubRentalRate, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
   const replacementStart = renthubReplacementStart(contract);
   const paymentMethod = partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method);
@@ -418,7 +418,6 @@ async function handler(req: Request) {
     replacement_start: replacementStart,
     end,
     total: expectedTotal,
-    rental: expectedRental,
     model,
     pickup,
     dropoff,
@@ -624,8 +623,6 @@ async function handler(req: Request) {
     try {
       if (!code) {
         if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
-        if (expectedServices > 0.009) throw new Error(`Este contrato incluye ${expectedServices.toFixed(2)} € en seguro, conductor joven o extras. Se ha detenido el envío para no crear una reserva incompleta en Renthub hasta activar el mapeo de Servicios.`);
-        if (Number(contract.discount_percent || 0) > 0) throw new Error("Este contrato tiene descuento. Se ha detenido el envío hasta confirmar el campo de descuento de la API de Renthub.");
         const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
         if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
         const created = await insertPartnerBooking(start);
@@ -687,9 +684,6 @@ async function handler(req: Request) {
       if (replacementStart >= end) {
         throw new Error(`La hora calculada de inicio ${replacementStart} no es anterior a la devolución ${end}. La reserva actual se mantiene sin cambios.`);
       }
-      if (expectedServices > 0.009) throw new Error(`Este contrato incluye ${expectedServices.toFixed(2)} € en seguro, conductor joven o extras. Se ha detenido la sustitución para no crear una reserva incompleta en Renthub.`);
-      if (Number(contract.discount_percent || 0) > 0) throw new Error("Este contrato tiene descuento. Se ha detenido la sustitución hasta confirmar el campo de descuento de la API de Renthub.");
-
       const replacement = await insertPartnerBooking(replacementStart, customerCode);
 
       console.log(JSON.stringify({
