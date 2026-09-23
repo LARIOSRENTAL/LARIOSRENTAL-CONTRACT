@@ -193,6 +193,35 @@ function netFromGross(value: unknown, vatValue: unknown) {
   const gross = amount(value), vat = Math.max(0, amount(vatValue));
   return vat > 0 ? gross / (1 + vat / 100) : gross;
 }
+function renthubCountryCode(value: unknown) {
+  const key = normalize(String(value || "")).replace(/[^a-z]/g, "");
+  const map: Record<string,string> = {
+    espana:"ES",spain:"ES",argentina:"AR",hungria:"HU",hungary:"HU",francia:"FR",france:"FR",
+    italia:"IT",italy:"IT",alemania:"DE",germany:"DE",deutschland:"DE",portugal:"PT",
+    reino_unido:"GB",reinounido:"GB",unitedkingdom:"GB",uk:"GB",irlanda:"IE",ireland:"IE",
+    belgica:"BE",belgium:"BE",paisesbajos:"NL",netherlands:"NL",holanda:"NL",suiza:"CH",switzerland:"CH",
+    austria:"AT",austriaa:"AT",polonia:"PL",poland:"PL",rumania:"RO",romania:"RO",bulgaria:"BG",
+    croacia:"HR",croatia:"HR",eslovaquia:"SK",slovakia:"SK",eslovenia:"SI",slovenia:"SI",
+    republicacheca:"CZ",czechrepublic:"CZ",chequia:"CZ",dinamarca:"DK",denmark:"DK",suecia:"SE",sweden:"SE",
+    noruega:"NO",norway:"NO",finlandia:"FI",finland:"FI",islandia:"IS",iceland:"IS",
+    estadosunidos:"US",usa:"US",unitedstates:"US",canada:"CA",mexico:"MX",brasil:"BR",brazil:"BR",
+    chile:"CL",uruguay:"UY",paraguay:"PY",peru:"PE",colombia:"CO",venezuela:"VE",ecuador:"EC",
+    marruecos:"MA",morocco:"MA",turquia:"TR",turkey:"TR",grecia:"GR",greece:"GR"
+  };
+  if (/^[a-z]{2}$/i.test(String(value || "").trim())) return String(value).trim().toUpperCase();
+  return map[key] || "";
+}
+function splitCustomerAddress(rawValue: unknown) {
+  const raw = String(rawValue || "").trim().replace(/\s+/g," ").replace(/,+$/,"");
+  let address=raw, city="", zip="";
+  let m=raw.match(/^(\d{4,6})\s+([^,]+),\s*(.+)$/);
+  if(m){ zip=m[1]; city=m[2].trim(); address=m[3].trim(); return {address,city,zip}; }
+  m=raw.match(/^(.+?\b(?:NRO\.?|NO\.?|Nº|NUM\.?|NUMBER)\s*:?\s*\d+[A-Za-z]?)\s+([^,]+)$/i);
+  if(m){ address=m[1].trim(); city=m[2].trim(); return {address,city,zip}; }
+  m=raw.match(/^(.+?),\s*(\d{4,6})\s+([^,]+)$/);
+  if(m){ address=m[1].trim(); zip=m[2]; city=m[3].trim(); return {address,city,zip}; }
+  return {address,city,zip};
+}
 
 async function syncPartnerCustomer(customerCode: string, contract: any, customer: any, driver: any) {
   if (!customerCode || !customer) return null;
@@ -216,11 +245,15 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     contact_lang: "es",
   };
 
-  const address = String(customer.address || payload.customer_address || "").trim();
+  const parsedAddress = splitCustomerAddress(customer.address || payload.customer_address || "");
+  const customerCountry = renthubCountryCode(customer.country || payload.customer_nationality || licenceIssuedBy);
+  const address = String(parsedAddress.address || "").trim();
+  const city = String(customer.city || parsedAddress.city || "").trim();
+  const zip = String(customer.postal_code || parsedAddress.zip || "").trim();
   if (address) body.address = address;
-  if (customer.city) body.city = String(customer.city);
-  if (customer.postal_code) body.zip = String(customer.postal_code);
-  if (/^[A-Za-z]{2}$/.test(String(customer.country || ""))) body.country = String(customer.country).toUpperCase();
+  if (city) body.city = city;
+  if (zip) body.zip = zip;
+  if (customerCountry) body.country = customerCountry;
   if (birthDate) body.birth_date = birthDate;
 
   // Campos oficiales de Customer Management Partner API.
@@ -241,6 +274,11 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     has_license_issue_date: !!licenceIssueDate,
     has_license_expiry: !!licenceExpiry,
     has_address: !!address,
+    has_city: !!city,
+    has_zip: !!zip,
+    country: customerCountry || null,
+    has_birth_date: !!birthDate,
+    has_license_country: !!licenceIssuedBy,
   }));
   return response;
 }
@@ -484,10 +522,12 @@ async function handler(req: Request) {
       form.set("mobile_prefix", phone.prefix);
       form.set("mobile", phone.mobile);
       form.set("email", String(customer?.email || contract.app_payload?.customer_email || "").trim());
-      if (customer?.address) form.set("address", customer.address);
-      if (customer?.city) form.set("city", customer.city);
-      if (customer?.postal_code) form.set("zip", customer.postal_code);
-      if (/^[A-Za-z]{2}$/.test(customer?.country || "")) form.set("country", customer.country.toUpperCase());
+      const parsedAddress = splitCustomerAddress(customer?.address || contract.app_payload?.customer_address || "");
+      const customerCountry = renthubCountryCode(customer?.country || contract.app_payload?.customer_nationality || driver?.licence_country || contract.app_payload?.license_issued_by);
+      if (parsedAddress.address) form.set("address", parsedAddress.address);
+      if (customer?.city || parsedAddress.city) form.set("city", String(customer?.city || parsedAddress.city));
+      if (customer?.postal_code || parsedAddress.zip) form.set("zip", String(customer?.postal_code || parsedAddress.zip));
+      if (customerCountry) form.set("country", customerCountry);
     }
     form.set("model", String(model));
     form.set("start_datetime", startValue);
@@ -501,11 +541,11 @@ async function handler(req: Request) {
       ? `${realD}/${realM}/${realY} ${realStartTime}`
       : `${realStartDate} ${realStartTime}`.trim();
     const isReplacementBooking = minute(startValue) !== minute(start);
+    if (pickupAddress) form.set("pickup_at_location", pickupAddress);
+    if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
     const locationNotes = [
       isReplacementBooking && realStartLabel ? `HORA REAL DE INICIO DE LA RESERVA: ${realStartLabel}` : "",
       contractPlate ? `MATRICULA DEL VEHICULO: ${contractPlate}` : "",
-      pickupAddress ? `RECOGIDA DEL VEHICULO EN: ${pickupAddress}` : "",
-      dropoffAddress ? `DEVOLUCION DEL VEHICULO EN: ${dropoffAddress}` : "",
     ].filter(Boolean).join("\n");
     if (locationNotes) form.set("notes", locationNotes);
     form.set("booking_type", "booking");
