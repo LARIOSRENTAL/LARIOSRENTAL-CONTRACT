@@ -1,5 +1,5 @@
 const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization,x-client-info,apikey,content-type","Access-Control-Allow-Methods":"POST,OPTIONS","Access-Control-Max-Age":"86400"};
-const FROM="info@lariosrental.com";
+const FROM="contract@lariosrental.com";
 function json(body:any,status=200){return new Response(JSON.stringify(body),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8"}})}
 function safe(v:any,f=""){return String(v??f).replace(/[<>\r\n]/g," ").trim().slice(0,800)}
 function b64(bytes:Uint8Array){let s="";for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode(...bytes.subarray(i,Math.min(i+0x8000,bytes.length)));return btoa(s)}
