@@ -232,27 +232,75 @@ function splitCustomerAddress(rawValue: unknown) {
   return {address,city,zip};
 }
 
+function detailHasContactValue(detail: any, kind: "email" | "phone", wanted: string) {
+  const wantedEmail = String(wanted || "").trim().toLowerCase();
+  const wantedPhone = String(wanted || "").replace(/\D/g, "");
+  if (kind === "email" && !wantedEmail) return false;
+  if (kind === "phone" && !wantedPhone) return false;
+
+  const visit = (value: any, path: string[], depth: number): boolean => {
+    if (depth > 8 || value == null) return false;
+    if (Array.isArray(value)) return value.some((item) => visit(item, path, depth + 1));
+    if (typeof value !== "object") return false;
+
+    return Object.entries(value).some(([key, item]) => {
+      const nextPath = [...path, key.toLowerCase()];
+      if (item != null && typeof item !== "object") {
+        const raw = String(item).trim();
+        if (kind === "email") {
+          const isEmailField = nextPath.some((part) => part.includes("email"));
+          if (isEmailField && raw.toLowerCase() === wantedEmail) return true;
+        } else {
+          const isPhoneField = nextPath.some((part) =>
+            part.includes("phone") || part.includes("mobile") || part.includes("telephone") ||
+            part.includes("telefono") || part.includes("cell")
+          );
+          const digits = raw.replace(/\D/g, "");
+          if (isPhoneField && digits &&
+              (digits === wantedPhone || wantedPhone.endsWith(digits) || digits.endsWith(wantedPhone))) return true;
+        }
+      }
+      return visit(item, nextPath, depth + 1);
+    });
+  };
+
+  return visit(detail, [], 0);
+}
+
 async function syncPartnerCustomer(customerCode: string, contract: any, customer: any, driver: any) {
   if (!customerCode || !customer) return null;
   const payload = contract?.app_payload || {};
   const names = splitName(customer.full_name || payload.customer_name);
   const phone = splitPhone(customer.phone || payload.customer_phone);
 
+  const identityDocument = String(customer?.document_number || payload.customer_document || "").trim();
   const licenceNumber = String(driver?.licence_number || payload.driving_license || "").trim();
   const licenceIssuedBy = String(driver?.licence_country || payload.license_issued_by || "").trim();
+  const licenceCountryCode = renthubCountryCode(licenceIssuedBy);
   const licenceIssueDate = String(driver?.issue_date || payload.license_issue || "").trim();
   const licenceExpiry = String(driver?.expiry_date || payload.license_expiry || "").trim();
   const birthDate = String(customer.birth_date || driver?.birth_date || payload.customer_birth_date || "").trim();
+  const email = String(customer.email || payload.customer_email || "").trim();
+
+  // Renthub crea una nueva fila de contacto si reenviamos email/teléfono en cada actualización.
+  // Consultamos primero la ficha y solo enviamos el contacto si todavía no existe.
+  const beforeResponse = await renthubFetch(`/api/partner/customer/details/${encodeURIComponent(customerCode)}`);
+  const before = beforeResponse?.result || {};
+  const fullPhone = `${phone.prefix}${phone.mobile}`;
+  const emailAlreadyPresent = detailHasContactValue(before, "email", email);
+  const phoneAlreadyPresent = detailHasContactValue(before, "phone", fullPhone);
 
   const body: Record<string, unknown> = {
     contact_type: "private",
     name: names.name,
     surname: names.surname,
-    email: String(customer.email || payload.customer_email || ""),
-    mobile_prefix: phone.prefix,
-    mobile: phone.mobile,
     contact_lang: "es",
   };
+  if (email && !emailAlreadyPresent) body.email = email;
+  if (phone.mobile && !phoneAlreadyPresent) {
+    body.mobile_prefix = phone.prefix;
+    body.mobile = phone.mobile;
+  }
 
   const parsedAddress = splitCustomerAddress(customer.address || payload.customer_address || "");
   const customerCountry = renthubCountryCode(customer.country || payload.customer_nationality || licenceIssuedBy);
@@ -265,9 +313,19 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
   if (customerCountry) body.country = customerCountry;
   if (birthDate) body.birth_date = birthDate;
 
-  // Campos oficiales de Customer Management Partner API.
+  // Ficha anagráfica de Renthub:
+  // - tax_code -> DNI/NIE
+  // - id_number -> Número de documento de identidad
+  if (identityDocument) {
+    body.tax_code = identityDocument;
+    body.id_number = identityDocument;
+  }
+
+  // Datos del permiso. "driving_license_issued_by" mantiene el texto visible
+  // y "license_issue_country" alimenta el desplegable Estado de emisión.
   if (licenceNumber) body.driving_license_number = licenceNumber;
   if (licenceIssuedBy) body.driving_license_issued_by = licenceIssuedBy;
+  if (licenceCountryCode) body.license_issue_country = licenceCountryCode;
   if (licenceIssueDate) body.driving_license_issued_at = licenceIssueDate;
   if (licenceExpiry) body.driving_license_exp = licenceExpiry;
 
@@ -276,8 +334,21 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
   const detailResponse = await renthubFetch(`/api/partner/customer/details/${encodeURIComponent(customerCode)}`);
   const detail = detailResponse?.result || {};
+
+  const detailValue = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = detail?.[key];
+      if (value !== undefined && value !== null && String(value).trim() !== "") return String(value);
+    }
+    return "";
+  };
+  const returnedTaxCode = detailValue("tax_code", "fiscal_code");
+  const returnedIdentity = detailValue("id_number", "document_number", "identity_document_number");
+  const returnedLicenceCountry = detailValue("license_issue_country", "driving_license_issue_country", "driving_license_country");
+
   const customerChecks: Record<string, boolean> = {
     birth_date: !birthDate || canonicalDate(detail.birth_date) === canonicalDate(birthDate),
     license_number: !licenceNumber || normalize(detail.license_number) === normalize(licenceNumber),
@@ -286,18 +357,31 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     license_expiration: !licenceExpiry || canonicalDate(detail.license_expiration) === canonicalDate(licenceExpiry),
     address: !address || normalize(detail.address) === normalize(address),
     city: !city || normalize(detail.city) === normalize(city),
+    email_present: !email || detailHasContactValue(detail, "email", email),
+    phone_present: !phone.mobile || detailHasContactValue(detail, "phone", fullPhone),
+    tax_code: !identityDocument || !returnedTaxCode || normalize(returnedTaxCode) === normalize(identityDocument),
+    id_number: !identityDocument || !returnedIdentity || normalize(returnedIdentity) === normalize(identityDocument),
+    license_issue_country: !licenceCountryCode || !returnedLicenceCountry ||
+      normalize(returnedLicenceCountry) === normalize(licenceCountryCode),
   };
+
   if (!Object.values(customerChecks).every(Boolean)) {
-    const failed = Object.entries(customerChecks).filter(([,ok])=>!ok).map(([key])=>key);
+    const failed = Object.entries(customerChecks).filter(([, ok]) => !ok).map(([key]) => key);
     throw new Error(`Renthub no conservó correctamente estos datos del cliente: ${failed.join(", ")}`);
   }
+
   console.log(JSON.stringify({
     event: "renthub_partner_customer_sync",
     customer_code: customerCode,
     customer_checks: customerChecks,
     has_zip: !!zip,
     country_sent: customerCountry || null,
+    identity_document_sent: !!identityDocument,
+    licence_country_code_sent: licenceCountryCode || null,
+    skipped_existing_email: emailAlreadyPresent,
+    skipped_existing_phone: phoneAlreadyPresent,
   }));
+
   return { update: response, detail: detailResponse, checks: customerChecks };
 }
 
