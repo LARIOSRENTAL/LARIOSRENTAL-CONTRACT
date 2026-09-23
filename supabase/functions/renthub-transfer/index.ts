@@ -504,6 +504,7 @@ async function handler(req: Request) {
     const isReplacementBooking = minute(startValue) !== minute(start);
     const locationNotes = [
       isReplacementBooking && realStartLabel ? `HORA REAL DE INICIO DE LA RESERVA: ${realStartLabel}` : "",
+      contractPlate ? `MATRICULA DEL VEHICULO: ${contractPlate}` : "",
       pickupAddress ? `RECOGIDA DEL VEHICULO EN: ${pickupAddress}` : "",
       dropoffAddress ? `DEVOLUCION DEL VEHICULO EN: ${dropoffAddress}` : "",
     ].filter(Boolean).join("\n");
