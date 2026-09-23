@@ -142,9 +142,20 @@ Deno.serve(async(req:Request)=>{
     // Never send bicycle quantity as a vehicle assignment. Renthub receives only
     // the group/model and, when present, the exact price calculated by this app.
     const rentalGross=amount(c.rental_total)>0?amount(c.rental_total):amount(c.total);
-    if(Number.isFinite(rentalGross)&&rentalGross>0)form.set("overwrite_rental_rate",netFromGross(rentalGross,c.vat_percent).toFixed(4));
+    const provisionalRate=!(Number.isFinite(rentalGross)&&rentalGross>0);
+    if(provisionalRate){
+      // Quick reservations are often created before the final rental price is known.
+      // Renthub's Partner availability can hide an otherwise valid model/location
+      // when it cannot calculate a rate. A nominal provisional rate keeps the real
+      // model, dates and location intact; the final contract sync replaces it later.
+      form.set("overwrite_rental_rate","1.0000");
+      const existingNotes=String(form.get("notes")||"").trim();
+      form.set("notes",[existingNotes,"PRECIO PROVISIONAL: PENDIENTE DE CONTRATO LARIOS RENTAL"].filter(Boolean).join("\n"));
+    }else{
+      form.set("overwrite_rental_rate",netFromGross(rentalGross,c.vat_percent).toFixed(4));
+    }
     form.set("overwrite_deposit",Math.max(0,amount(c.deposit)).toFixed(2));if(amount(c.franchise)>0)form.set("overwrite_damage_franchise",Math.max(0,amount(c.franchise)).toFixed(2));
-    console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:rentalGross>0}));
+    console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:true,provisional_price_override:provisionalRate}));
     let inserted:any;
     const currentPickup=String(map.pickup),currentDropoff=String(map.dropoff);
     const doInsert=()=>rh("/module/rental/api/partner/booking/insert",{method:"POST",body:form});
