@@ -35,9 +35,10 @@ function configuration() {
   // La documentacion Partner no publica un endpoint para subir el PDF del contrato.
   // Se desactiva en este flujo para no mezclar Partner API con User API.
   const documentReady = false;
+  const paymentReady = !!env("RENTHUB_USER_API_KEY") || (!!env("RENTHUB_USER_API_EMAIL") && !!env("RENTHUB_USER_API_PASSWORD"));
   const enabled = !!partnerSecret;
   return {
-    enabled, ready: missing.length === 0, missing, documentReady,
+    enabled, ready: missing.length === 0, missing, documentReady, paymentReady,
     purgeReady: enabled && missing.length === 0 && documentReady && env("RENTHUB_PURGE_ENABLED").toLowerCase() === "true",
   };
 }
@@ -66,6 +67,230 @@ async function renthubFetch(path: string, init: RequestInit = {}, retry = true):
     throw new Error(`Renthub ${response.status} en ${endpoint}: ${detail}`);
   }
   return data;
+}
+
+
+let userTokenCache = "";
+async function userToken(force = false) {
+  const configuredApiKey = env("RENTHUB_USER_API_KEY");
+  if (configuredApiKey) return configuredApiKey;
+  if (!force && userTokenCache) return userTokenCache;
+
+  const email = env("RENTHUB_USER_API_EMAIL");
+  const password = env("RENTHUB_USER_API_PASSWORD");
+  if (!email || !password) {
+    throw new Error("Renthub User API no está configurada. Falta RENHUB_USER_API_KEY o las credenciales User API.");
+  }
+
+  const form = new FormData();
+  form.set("email", email);
+  form.set("password", password);
+  const response = await fetch(`${installationUrl()}/api/auth/login`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    body: form,
+  });
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = {}; }
+  const headerToken = response.headers.get("X-UserAuthToken") ||
+    response.headers.get("X-Auth-Token") ||
+    response.headers.get("Authorization") || "";
+  userTokenCache = String(data?.result?.token || data?.token || headerToken).replace(/^Bearer\s+/i, "");
+  if (!response.ok || !userTokenCache) {
+    const detail = String(data?.message || data?.error || raw || "sin detalle")
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 350);
+    throw new Error(`Renthub User API authentication failed (${response.status}): ${detail}`);
+  }
+  return userTokenCache;
+}
+
+async function userApiFetch(path: string, init: RequestInit = {}, retry = true): Promise<any> {
+  const response = await fetch(`${installationUrl()}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      "X-UserAuthToken": await userToken(),
+      ...(init.headers || {}),
+    },
+  });
+  if (response.status === 401 && retry && !env("RENTHUB_USER_API_KEY")) {
+    userTokenCache = "";
+    await userToken(true);
+    return userApiFetch(path, init, false);
+  }
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = raw; }
+  if (!response.ok || data?.status === false) {
+    const detail = String(data?.message || data?.error || raw || "sin detalle")
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 450);
+    throw new Error(`Renthub User API ${response.status} en ${path.split("?")[0]}: ${detail}`);
+  }
+  return data;
+}
+
+function madridDate() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function renthubBookingNumericId(detail: any, contract?: any) {
+  const booking = detail?.result?.booking || detail?.booking || {};
+  const candidates = [
+    booking?.id,
+    booking?.pm_id,
+    booking?.booking_id,
+    detail?.result?.booking_id,
+    contract?.app_payload?.renthub_booking_id,
+  ];
+  for (const value of candidates) {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0) return id;
+  }
+  return 0;
+}
+
+function paymentIdFromResponse(data: any) {
+  const candidates = [
+    data?.id,
+    data?.result?.id,
+    data?.result?.payment?.id,
+    data?.payment?.id,
+    data?.data?.id,
+  ];
+  for (const value of candidates) {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0) return id;
+  }
+  return 0;
+}
+
+function userApiRows(data: any): any[] {
+  const candidates = [data?.result?.data, data?.result?.items, data?.result, data?.data, data];
+  for (const value of candidates) if (Array.isArray(value)) return value;
+  return [];
+}
+
+function paymentInvoiceId(detail: any) {
+  const root = detail?.result ?? detail;
+  const direct = [
+    root?.invoice_id,
+    root?.rp_invoice_id,
+    root?.invoice?.id,
+    root?.payment?.invoice_id,
+    root?.payment?.invoice?.id,
+  ];
+  for (const value of direct) {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0) return id;
+  }
+  return 0;
+}
+
+async function findCreatedPaymentId(bookingId: number, method: string, paymentAmount: number, date: string) {
+  const query = new URLSearchParams({
+    created_from: `${date} 00:00`,
+    created_to: `${date} 23:59`,
+    method,
+    payment_date_from: date,
+    payment_date_to: date,
+    direction: "inflow",
+    type: "final_payment",
+    payment_status: "all",
+  });
+  const data = await userApiFetch(`/module/payment/api/v1/payment?${query.toString()}`);
+  const matches = userApiRows(data).filter((row: any) => {
+    const rowAmount = amount(row?.amount ?? row?.rp_importo);
+    const rowMethod = String(row?.method ?? row?.rp_method ?? "");
+    const refId = Number(row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0);
+    return Math.abs(rowAmount - paymentAmount) <= 0.02 &&
+      (!rowMethod || rowMethod === method) &&
+      (!refId || refId === bookingId);
+  });
+  matches.sort((a: any, b: any) => Number(b?.id ?? b?.rp_id ?? 0) - Number(a?.id ?? a?.rp_id ?? 0));
+  return Number(matches[0]?.id ?? matches[0]?.rp_id ?? 0) || 0;
+}
+
+async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, method: string, paymentAmount: number) {
+  if (!method || !Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    return { skipped: true, reason: "payment_not_configured" };
+  }
+
+  const bookingId = renthubBookingNumericId(bookingDetail, contract);
+  if (!bookingId) throw new Error("Renthub no devolvió el ID numérico interno de la reserva necesario para registrar el pago.");
+
+  const existingPaymentId = Number(contract?.app_payload?.renthub_payment_id || 0);
+  if (Number.isInteger(existingPaymentId) && existingPaymentId > 0) {
+    const detail = await userApiFetch(`/module/payment/api/v1/payment/${existingPaymentId}?payment_expand=all`);
+    return {
+      payment_id: existingPaymentId,
+      booking_id: bookingId,
+      existing: true,
+      method,
+      amount: paymentAmount,
+      invoice_requested: method === "credit_card",
+      invoice_id: paymentInvoiceId(detail) || null,
+      detail,
+    };
+  }
+
+  const date = madridDate();
+  const form = new FormData();
+  form.set("revenue_center", env("RENTHUB_REVENUE_CENTER_ID") || "1");
+  form.set("payment_date", date);
+  form.set("method", method);
+  form.set("type", "final_payment");
+  form.set("amount", paymentAmount.toFixed(2));
+  form.set("direction", "inflow");
+  form.set("inserted_from", "object");
+  form.set("prepaid", "0");
+  form.set("refers_to_model", "rental_reservation");
+  form.set("refers_to_id", String(bookingId));
+  form.set("date", date);
+
+  // Tarjeta: cobrar y generar factura automáticamente.
+  // Efectivo: registrar únicamente el cobro y dejarlo pendiente de factura.
+  if (method === "credit_card") form.set("action", "take_payment_gen_invoice");
+
+  const response = await userApiFetch("/module/payment/api/v1/payment/upsert", {
+    method: "POST",
+    body: form,
+  });
+
+  let paymentId = paymentIdFromResponse(response);
+  if (!paymentId) paymentId = await findCreatedPaymentId(bookingId, method, paymentAmount, date);
+  if (!paymentId) throw new Error("Renthub aceptó el pago pero no devolvió un ID verificable.");
+
+  const detail = await userApiFetch(`/module/payment/api/v1/payment/${paymentId}?payment_expand=all`);
+  console.log(JSON.stringify({
+    event: "renthub_user_api_payment_synced",
+    contract_number: contract?.contract_number,
+    booking_id: bookingId,
+    payment_id: paymentId,
+    method,
+    amount: paymentAmount,
+    prepaid: 0,
+    invoice_requested: method === "credit_card",
+    invoice_id: paymentInvoiceId(detail) || null,
+  }));
+
+  return {
+    payment_id: paymentId,
+    booking_id: bookingId,
+    existing: false,
+    method,
+    amount: paymentAmount,
+    invoice_requested: method === "credit_card",
+    invoice_id: paymentInvoiceId(detail) || null,
+    detail,
+  };
 }
 
 async function cacheStatus(service: any) {
@@ -150,7 +375,7 @@ function partnerPaymentMethod(value: unknown) {
   const key = String(value || "").trim().toLowerCase();
   if (key === "efectivo" || key === "cash") return "cash";
   if (key === "tarjeta" || key === "credit_card" || key === "credit card") return "credit_card";
-  if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer") return "bank_transfer";
+  if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer" || key === "bonifico") return "bonifico";
   return "";
 }
 function renthubReplacementStart(contract: any) {
@@ -504,6 +729,7 @@ async function handler(req: Request) {
     purge_configured: config.purgeReady,
     activation_pending: !(config.enabled && config.ready && apiConnected),
     document_upload_configured: config.documentReady,
+    payment_api_configured: config.paymentReady,
     safe_delete_enabled: env("RENTHUB_PURGE_ENABLED").toLowerCase() === "true",
     missing: config.missing,
     cache: await cacheStatus(service), role, can_manage: role === "admin",
@@ -566,8 +792,6 @@ async function handler(req: Request) {
     plate: contractPlate || "",
     vehicle: fleetMatch?.vehicle || "",
     vehicle_model: fleetMatch?.model || "",
-    payment_method: paymentMethod,
-    payment_amount: paymentAmount,
     franchise: desiredFranchise,
   });
 
@@ -659,10 +883,8 @@ async function handler(req: Request) {
     form.set("overwrite_rental_rate", renthubRentalRate.toFixed(4));
     form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
     if (desiredFranchise > 0) form.set("overwrite_damage_franchise", desiredFranchise.toFixed(2));
-    if (paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0) {
-      form.set("payment_method", paymentMethod);
-      form.set("payment_amount", paymentAmount.toFixed(2));
-    }
+    // El pago ya no se envía con la reserva Partner: Renthub lo trataría como prepaid.
+    // Se registra después mediante la User API de Payment para que sea un cobro contable real.
     const age = ageAt(customer?.birth_date || driver?.birth_date, contract.delivery_date);
     if (age !== null) form.set("age", String(age));
     if (requestVehicle && fleetMatch?.vehicle) {
@@ -763,7 +985,7 @@ async function handler(req: Request) {
         linked_renthub_booking_required: true,
       }, 409);
     }
-    let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null;
+    let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null, payment: any = null;
     try {
       if (!code) {
         if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
@@ -784,22 +1006,33 @@ async function handler(req: Request) {
             renthub_vehicle_requested: created.vehicleRequested,
           },
         }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
-        let createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
+        let createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: false });
         const newCustomerCode = String(createdChecked.detail?.result?.customer?.code || "");
         if (newCustomerCode && customer) {
           updated = await syncPartnerCustomer(newCustomerCode, contract, customer, driver);
-          createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
+          createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: false });
         }
         if (!createdChecked.verified) {
           const mismatchKeys = Object.entries(createdChecked.checks).filter(([, ok]) => !ok).map(([key]) => key);
           throw new Error(`Renthub verification mismatch: ${mismatchKeys.join(", ")}`);
         }
+        payment = await syncRenthubAccountingPayment(contract, createdChecked.detail, paymentMethod, paymentAmount);
+        const createdPaymentPayload = payment?.payment_id ? {
+          ...(contract.app_payload || {}),
+          renthub_booking_id: payment.booking_id,
+          renthub_payment_id: payment.payment_id,
+          renthub_payment_method: payment.method,
+          renthub_payment_amount: payment.amount,
+          renthub_payment_invoice_requested: payment.invoice_requested,
+          renthub_payment_invoice_id: payment.invoice_id,
+        } : (contract.app_payload || {});
         await requireWrite(actor.from("contracts").update({
           renthub_sync_status: "verified",
           renthub_last_sync_at: new Date().toISOString(),
           renthub_sync_error: null,
+          app_payload: createdPaymentPayload,
         }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
-        return json({ verified: true, external_reference: code, checks: createdChecked.checks, vehicle_requested: created.vehicleRequested, updated });
+        return json({ verified: true, external_reference: code, checks: createdChecked.checks, vehicle_requested: created.vehicleRequested, updated, payment });
       }
 
       let checked = await verify(code, { checkStart: false, checkPayment: false });
@@ -814,12 +1047,23 @@ async function handler(req: Request) {
 
       const alreadyReplaced = String(contract.app_payload?.renthub_replacement_hash || "") === replacementHash;
       if (checked.verified && alreadyReplaced) {
+        payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
+        const paymentPayload = payment?.payment_id ? {
+          ...(contract.app_payload || {}),
+          renthub_booking_id: payment.booking_id,
+          renthub_payment_id: payment.payment_id,
+          renthub_payment_method: payment.method,
+          renthub_payment_amount: payment.amount,
+          renthub_payment_invoice_requested: payment.invoice_requested,
+          renthub_payment_invoice_id: payment.invoice_id,
+        } : (contract.app_payload || {});
         await requireWrite(actor.from("contracts").update({
           renthub_sync_status: "verified",
           renthub_last_sync_at: new Date().toISOString(),
           renthub_sync_error: null,
+          app_payload: paymentPayload,
         }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
-        return json({ verified: true, external_reference: code, already_synced: true, checks: checked.checks, updated });
+        return json({ verified: true, external_reference: code, already_synced: true, checks: checked.checks, updated, payment });
       }
 
       if (minimumStart && replacementStart < minimumStart) {
@@ -846,7 +1090,7 @@ async function handler(req: Request) {
         expectedStart: replacement.actualStart,
         checkStart: true,
         expectedModel: model,
-        checkPayment: true,
+        checkPayment: false,
       });
       const replacementCustomerCode = String(replacementChecked.detail?.result?.customer?.code || customerCode || "");
       if (replacementCustomerCode && customer) {
@@ -855,7 +1099,7 @@ async function handler(req: Request) {
           expectedStart: replacement.actualStart,
           checkStart: true,
           expectedModel: model,
-          checkPayment: true,
+          checkPayment: false,
         });
       }
 
@@ -874,6 +1118,7 @@ async function handler(req: Request) {
       }
 
       code = replacement.code;
+      payment = await syncRenthubAccountingPayment(contract, replacementChecked.detail, paymentMethod, paymentAmount);
       const replacementHistory = Array.isArray(contract.app_payload?.renthub_replacement_history) ? contract.app_payload.renthub_replacement_history : [];
       await requireWrite(actor.from("contracts").update({
         renthub_contract_id: code,
@@ -890,6 +1135,14 @@ async function handler(req: Request) {
           renthub_pickup_location_id: pickup,
           renthub_dropoff_location_id: dropoff,
           renthub_replacement_history: [...replacementHistory, { old_code: oldCode, new_code: code, at: new Date().toISOString() }].slice(-10),
+          ...(payment?.payment_id ? {
+            renthub_booking_id: payment.booking_id,
+            renthub_payment_id: payment.payment_id,
+            renthub_payment_method: payment.method,
+            renthub_payment_amount: payment.amount,
+            renthub_payment_invoice_requested: payment.invoice_requested,
+            renthub_payment_invoice_id: payment.invoice_id,
+          } : {}),
         },
       }).eq("id", contract.id), "No se pudo guardar la reserva de sustitución");
 
@@ -904,6 +1157,7 @@ async function handler(req: Request) {
         vehicle_requested: replacement.vehicleRequested,
         payment_method: paymentMethod || null,
         payment_amount: paymentAmount,
+        payment,
         updated,
       });
     } catch (error) {
