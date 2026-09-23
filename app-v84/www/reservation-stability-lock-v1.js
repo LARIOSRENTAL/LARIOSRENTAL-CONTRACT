@@ -5,6 +5,7 @@ function install(){
   if(installed)return true;
   const api=window.LariosReservations;
   if(!api||typeof api.edit!=='function'||typeof api.save!=='function')return false;
+  if(!window.LariosPdfAuthorityV3?.finalize||api.save.__lrPdfAuthority!==true)return false;
   const canonicalEdit=api.__coreEdit||api.edit;
   const canonicalSave=api.save;
   try{
@@ -16,7 +17,7 @@ function install(){
   }
   installed=true;
   window.LariosReservationStabilityLock={
-    version:'20260918-v1',
+    version:'20260923-pdf-authority1',
     edit:canonicalEdit,
     save:canonicalSave,
     installed:true
