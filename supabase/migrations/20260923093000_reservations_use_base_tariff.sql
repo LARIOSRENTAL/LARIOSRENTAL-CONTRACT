@@ -89,19 +89,13 @@ declare
   v_quantity integer := greatest(1,coalesce(nullif(v_payload->>'vehicle_quantity','')::integer,1));
   v_season_94 boolean := coalesce(nullif(v_payload->>'tariff94','')::boolean,false);
 begin
-  if coalesce(nullif(v_payload->>'rental_price','')::numeric,0) > 0 then
-    return v_payload;
-  end if;
-
   if nullif(trim(v_payload->>'vehicle_group'),'') is null then
     return v_payload;
   end if;
 
   v_price := public.app_base_rental_price(v_payload->>'vehicle_group',v_days,v_quantity,v_season_94);
   v_payload := jsonb_set(v_payload,'{rental_price}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
-  if coalesce(nullif(v_payload->>'total','')::numeric,0) <= 0 then
-    v_payload := jsonb_set(v_payload,'{total}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
-  end if;
+  v_payload := jsonb_set(v_payload,'{total}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
   v_payload := jsonb_set(v_payload,'{base_tariff_price}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
   return v_payload;
 end;
