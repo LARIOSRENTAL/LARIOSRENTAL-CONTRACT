@@ -85,10 +85,24 @@ as $$
 declare
   v_payload jsonb := coalesce(p_payload,'{}'::jsonb);
   v_price numeric;
+  v_explicit numeric := 0;
   v_days integer := greatest(1,coalesce(nullif(v_payload->>'rental_days','')::integer,1));
   v_quantity integer := greatest(1,coalesce(nullif(v_payload->>'vehicle_quantity','')::integer,1));
   v_season_94 boolean := coalesce(nullif(v_payload->>'tariff94','')::boolean,false);
 begin
+  v_explicit := coalesce(nullif(v_payload->>'rental_price','')::numeric,0);
+  if v_explicit <= 0 then
+    v_explicit := coalesce(nullif(v_payload->>'total','')::numeric,0);
+  end if;
+
+  if v_explicit > 0 then
+    v_payload := jsonb_set(v_payload,'{rental_price}',to_jsonb(to_char(v_explicit,'FM999999990.00')),true);
+    v_payload := jsonb_set(v_payload,'{total}',to_jsonb(to_char(v_explicit,'FM999999990.00')),true);
+    v_payload := jsonb_set(v_payload,'{base_tariff_price}',to_jsonb(to_char(v_explicit,'FM999999990.00')),true);
+    v_payload := jsonb_set(v_payload,'{price_source}',to_jsonb('explicit'::text),true);
+    return v_payload;
+  end if;
+
   if nullif(trim(v_payload->>'vehicle_group'),'') is null then
     return v_payload;
   end if;
@@ -97,6 +111,7 @@ begin
   v_payload := jsonb_set(v_payload,'{rental_price}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
   v_payload := jsonb_set(v_payload,'{total}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
   v_payload := jsonb_set(v_payload,'{base_tariff_price}',to_jsonb(to_char(v_price,'FM999999990.00')),true);
+  v_payload := jsonb_set(v_payload,'{price_source}',to_jsonb('base_tariff'::text),true);
   return v_payload;
 end;
 $$;
