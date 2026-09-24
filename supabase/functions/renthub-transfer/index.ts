@@ -463,30 +463,30 @@ function detailHasContactValue(detail: any, kind: "email" | "phone", wanted: str
   if (kind === "email" && !wantedEmail) return false;
   if (kind === "phone" && !wantedPhone) return false;
 
+  const matchesPrimitive = (value: any, path: string[]) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return false;
+    if (kind === "email") {
+      const isEmailField = path.some((part) => part.includes("email"));
+      return isEmailField && raw.toLowerCase() === wantedEmail;
+    }
+    const isPhoneField = path.some((part) =>
+      part.includes("phone") || part.includes("mobile") || part.includes("telephone") ||
+      part.includes("telefono") || part.includes("cell")
+    );
+    const digits = raw.replace(/\D/g, "");
+    return isPhoneField && !!digits &&
+      (digits === wantedPhone || wantedPhone.endsWith(digits) || digits.endsWith(wantedPhone));
+  };
+
   const visit = (value: any, path: string[], depth: number): boolean => {
     if (depth > 8 || value == null) return false;
+    if (typeof value !== "object") return matchesPrimitive(value, path);
     if (Array.isArray(value)) return value.some((item) => visit(item, path, depth + 1));
-    if (typeof value !== "object") return false;
 
-    return Object.entries(value).some(([key, item]) => {
-      const nextPath = [...path, key.toLowerCase()];
-      if (item != null && typeof item !== "object") {
-        const raw = String(item).trim();
-        if (kind === "email") {
-          const isEmailField = nextPath.some((part) => part.includes("email"));
-          if (isEmailField && raw.toLowerCase() === wantedEmail) return true;
-        } else {
-          const isPhoneField = nextPath.some((part) =>
-            part.includes("phone") || part.includes("mobile") || part.includes("telephone") ||
-            part.includes("telefono") || part.includes("cell")
-          );
-          const digits = raw.replace(/\D/g, "");
-          if (isPhoneField && digits &&
-              (digits === wantedPhone || wantedPhone.endsWith(digits) || digits.endsWith(wantedPhone))) return true;
-        }
-      }
-      return visit(item, nextPath, depth + 1);
-    });
+    return Object.entries(value).some(([key, item]) =>
+      visit(item, [...path, key.toLowerCase()], depth + 1)
+    );
   };
 
   return visit(detail, [], 0);
@@ -581,7 +581,7 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     license_issue_date: !licenceIssueDate || canonicalDate(detail.license_issue_date) === canonicalDate(licenceIssueDate),
     license_expiration: !licenceExpiry || canonicalDate(detail.license_expiration) === canonicalDate(licenceExpiry),
     address: !address || normalize(detail.address) === normalize(address),
-    city: !city || normalize(detail.city) === normalize(city),
+    city: !city || normalize(detail?.city?.name ?? detail.city) === normalize(city),
     email_present: !email || detailHasContactValue(detail, "email", email),
     phone_present: !phone.mobile || detailHasContactValue(detail, "phone", fullPhone),
     tax_code: !identityDocument || !returnedTaxCode || normalize(returnedTaxCode) === normalize(identityDocument),
