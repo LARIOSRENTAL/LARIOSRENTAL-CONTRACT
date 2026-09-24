@@ -691,7 +691,9 @@ async function automaticMappings(contract: any) {
     }
   }
   return {
-    model: modelMap[group] || modelMap[normalize(contract.category)] || "",
+    // Los grupos visibles de la app deben traducirse a las claves internas de Renthub:
+    // 50cc -> M1, 125cc -> M2, BICICLETA -> B1, E-BIKE -> B2.
+    model: modelMap[target] || modelMap[group] || modelMap[normalize(contract.category)] || "",
     pickup: pickupResolved.id,
     dropoff: dropoffResolved.id,
     pickupAddress: pickupResolved.address,
