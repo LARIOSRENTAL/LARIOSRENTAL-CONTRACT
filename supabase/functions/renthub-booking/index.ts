@@ -117,7 +117,40 @@ async function mappings(c:any){
   const pickupRaw=String(c.delivery_location||payload.pickup_location||"").trim();
   const dropoffRaw=String(c.return_location||payload.return_location||pickupRaw).trim();
   const pickup=bestLocation(pickupRaw,locations),dropoff=bestLocation(dropoffRaw,locations);
-  return{model:String(models[target]||""),categoryId:String(cat?.id||""),group:target,pickup:pickup.id,dropoff:dropoff.id,pickupAddress:pickup.address,dropoffAddress:dropoff.address,pickupMatched:pickup.matched,dropoffMatched:dropoff.matched,minimum:String(params?.result?.opening?.min_date||"").slice(0,16)};
+  return{model:String(models[target]||""),categoryId:String(cat?.id||""),group:target,pickup:pickup.id,dropoff:dropoff.id,pickupAddress:pickup.address,dropoffAddress:dropoff.address,pickupMatched:pickup.matched,dropoffMatched:dropoff.matched,minimum:String(params?.result?.opening?.min_date||"").slice(0,16),opening:params?.result?.opening||{}};
+}
+function addIsoDays(isoDate:string,days:number){
+  const d=new Date(isoDate+"T12:00:00Z");
+  d.setUTCDate(d.getUTCDate()+days);
+  return d.toISOString().slice(0,10);
+}
+function weekdayKey(isoDate:string){
+  const d=new Date(isoDate+"T12:00:00Z");
+  const n=d.getUTCDay();
+  return String(n===0?7:n);
+}
+function firstOpeningAtOrAfter(opening:any,fromDateTime:string,endDateTime:string){
+  const timetable=opening?.timetable&&typeof opening.timetable==="object"?opening.timetable:{};
+  const closed=new Set((Array.isArray(opening?.closed_at)?opening.closed_at:[]).map((x:any)=>String(x).slice(0,10)));
+  const fromDate=String(fromDateTime).slice(0,10);
+  for(let offset=0;offset<14;offset++){
+    const date=addIsoDays(fromDate,offset);
+    if(closed.has(date)) continue;
+    const day=weekdayKey(date);
+    const candidates:string[]=[];
+    for(const item of Object.values(timetable) as any[]){
+      const slots=Array.isArray(item?.weeklySchedule?.[day])?item.weeklySchedule[day]:[];
+      for(const slot of slots){
+        const from=String(slot?.from||"").slice(0,5);
+        if(/^\d{2}:\d{2}$/.test(from)) candidates.push(date+" "+from);
+      }
+    }
+    candidates.sort();
+    for(const candidate of candidates){
+      if(candidate>=fromDateTime && candidate<endDateTime) return candidate;
+    }
+  }
+  return "";
 }
 Deno.serve(async(req:Request)=>{
   if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
@@ -139,8 +172,10 @@ Deno.serve(async(req:Request)=>{
   if(action!=="create")return json({error:"Unknown action"},400);
   if(c.renthub_contract_id)return json({created:true,already_created:true,external_reference:c.renthub_contract_id});
   try{
-    const map=await mappings(c),start=`${c.delivery_date} ${String(c.delivery_time||"").slice(0,5)}`,end=`${c.return_date} ${String(c.return_time||"").slice(0,5)}`;
-    if(map.minimum&&start<map.minimum)throw Error(`Renthub no admite crear reservas con entrega anterior a ${map.minimum}`);
+    const map=await mappings(c),realStart=`${c.delivery_date} ${String(c.delivery_time||"").slice(0,5)}`,end=`${c.return_date} ${String(c.return_time||"").slice(0,5)}`;
+    let start=realStart;
+    if(map.minimum&&start<map.minimum)start=map.minimum;
+    if(start>=end)throw Error(`Renthub no encuentra una hora de inicio válida anterior a la devolución ${end}`);
     if(!map.model)throw Error(`No hay mapeo Renthub para el grupo ${c.category||"sin grupo"}`);
     let customer:any=null;if(c.customer_id){const q=await service.from("customers").select("*").eq("id",c.customer_id).maybeSingle();customer=q.data||null;}
     const payload=c.app_payload||{},names=splitName(customer?.full_name||payload.customer_name||"Cliente pendiente Larios Rental"),phone=splitPhone(customer?.phone||payload.customer_phone),email=String(customer?.email||payload.customer_email||"").trim()||"info@lariosrental.com";
@@ -166,7 +201,11 @@ Deno.serve(async(req:Request)=>{
     form.set("name",names.name);form.set("surname",names.surname);form.set("mobile_prefix",`+${phone.prefix}`);form.set("mobile",phone.mobile);form.set("email",email);
     form.set("model",map.model);form.set("start_datetime",start);form.set("end_datetime",end);
     form.set("pickup_location",map.pickup);form.set("dropoff_location",map.dropoff);
+    const realStartParts=realStart.split(" ");
+    const realDateParts=String(realStartParts[0]||"").split("-");
+    const realStartLabel=realDateParts.length===3?`${realDateParts[2]}/${realDateParts[1]}/${realDateParts[0]} ${realStartParts[1]||""}`:realStart;
     const locationNotes=[
+      start!==realStart?`HORA REAL DE ENTREGA A CAMBIAR: ${realStartLabel}`:"",
       pickupAddress?`RECOGIDA DEL VEHICULO EN: ${pickupText}`:"",
       dropoffAddress?`DEVOLUCION DEL VEHICULO EN: ${dropoffText}`:"",
     ].filter(Boolean).join("\n");
@@ -222,6 +261,15 @@ Deno.serve(async(req:Request)=>{
         }
       }else if(firstKey.includes("no hay modelos disponibles")||firstKey.includes("no models available")){
         throw Error(`Renthub no tiene habilitado el modelo ${map.model} del grupo ${String(map.group).toUpperCase()} en la ubicación ${map.pickupMatched||pickupText} (ID ${map.pickup}). Se mantiene la ubicación real; no se sustituye por Otra Ubicación. La reserva queda guardada en Larios Rental.`);
+      }else if(firstKey.includes("oficina pudiera estar cerrada")||firstKey.includes("oficina puede estar cerrada")||firstKey.includes("office may be closed")){
+        const fallbackStart=firstOpeningAtOrAfter(map.opening,start,end);
+        if(!fallbackStart||fallbackStart===start)throw firstError;
+        start=fallbackStart;
+        form.set("start_datetime",start);
+        const notes=[start!==realStart?`HORA REAL DE ENTREGA A CAMBIAR: ${realStartLabel}`:"",pickupAddress?`RECOGIDA DEL VEHICULO EN: ${pickupText}`:"",dropoffAddress?`DEVOLUCION DEL VEHICULO EN: ${dropoffText}`:""].filter(Boolean).join("\n");
+        if(notes)form.set("notes",notes);
+        console.log(JSON.stringify({event:"renthub_booking_time_fallback",contract_number:c.contract_number,real_start:realStart,minimum_start:map.minimum||null,retry_start:start,reason:firstMessage}));
+        inserted=await doInsert();
       }else throw firstError;
     }
     const code=String(inserted?.result?.booking?.code||inserted?.booking?.code||inserted?.code||"");
@@ -232,9 +280,9 @@ Deno.serve(async(req:Request)=>{
       renthub_sync_status:"reservation_created",
       renthub_last_sync_at:new Date().toISOString(),
       renthub_sync_error:null,
-      app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff,price_source:priceSource,...(localPriceMissing?{base_tariff_price:rentalGross.toFixed(2),base_tariff_category:baseTariff?.category||"",base_tariff_season_94:!!baseTariff?.season94}:{})}
+      app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff,renthub_created_start:start,renthub_real_start:realStart,price_source:priceSource,...(localPriceMissing?{base_tariff_price:rentalGross.toFixed(2),base_tariff_category:baseTariff?.category||"",base_tariff_season_94:!!baseTariff?.season94}:{})}
     }).eq("id",id),"No se pudo guardar el código de Renthub");
-    return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:map.pickup,dropoff_location:map.dropoff,location_fallback:false});
+    return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:map.pickup,dropoff_location:map.dropoff,location_fallback:false,start_datetime:start,real_start_datetime:realStart,time_adjusted:start!==realStart});
   }catch(e){
     const message=e instanceof Error?e.message:String(e);console.error(JSON.stringify({event:"renthub_booking_error",contract_id:id,error:message}));
     const write=await actor.from("contracts").update({renthub_sync_status:"failed",renthub_sync_error:message}).eq("id",id);
