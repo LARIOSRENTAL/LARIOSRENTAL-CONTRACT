@@ -257,9 +257,10 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   form.set("refers_to_id", String(bookingId));
   form.set("date", date);
 
-  // Tarjeta: cobrar y generar factura automáticamente.
+  // El cobro ya se ha realizado en Larios Rental / TPV.
+  // Tarjeta: registrar el pago y generar la factura, SIN intentar volver a cobrar la tarjeta.
   // Efectivo: registrar únicamente el cobro y dejarlo pendiente de factura.
-  if (method === "credit_card") form.set("action", "take_payment_gen_invoice");
+  if (method === "credit_card") form.set("action", "gen_invoice");
 
   const response = await userApiFetch("/module/payment/api/v1/payment/upsert", {
     method: "POST",
