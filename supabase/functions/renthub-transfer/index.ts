@@ -373,7 +373,7 @@ function partnerPaymentMethod(value: unknown) {
   const key = String(value || "").trim().toLowerCase();
   if (key === "efectivo" || key === "cash") return "cash";
   if (key === "tarjeta" || key === "credit_card" || key === "credit card") return "credit_card";
-  if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer" || key === "bonifico") return "bonifico";
+  if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer" || key === "bonifico") return "bank_transfer";
   return "";
 }
 function renthubReplacementStart(contract: any, latestPartnerStart = "19:59") {
@@ -1317,56 +1317,60 @@ async function handler(req: Request) {
         });
       }
 
-      // Una reserva confirmada/en curso no debe sustituirse intentando cancelarla.
-      // Primero actualizamos la misma reserva mediante el endpoint interno ya capturado.
+      // Flujo definitivo:
+      // - la reserva inicial permanece sin matrícula ni pago;
+      // - al pulsar "Mandar datos Renthub" se crea una reserva nueva por Partner API,
+      //   incluyendo matrícula (si está disponible) y pago;
+      // - solo si la reserva ya está bloqueada/confirmada se intenta actualizar la misma
+      //   para evitar cancelaciones no permitidas.
       if (!checked.verified) {
         const currentStatus = normalize(checked.booking?.status || checked.booking?.state || checked.booking?.booking_status || checked.booking?.pm_stato_prenotazione || "");
         const lockedExisting = ["in_progress","confirmed","in corso","in_corso"].includes(currentStatus);
-        try {
-          updated = await updateExistingRenthubBooking(checked.detail);
-          checked = await verify(code, { checkStart: false, checkPayment: false });
-          const refreshedCustomerCode = String(checked.detail?.result?.customer?.code || customerCode || "");
-          if (refreshedCustomerCode && customer) {
-            await syncPartnerCustomer(refreshedCustomerCode, contract, customer, driver);
+        if (lockedExisting) {
+          try {
+            updated = await updateExistingRenthubBooking(checked.detail);
             checked = await verify(code, { checkStart: false, checkPayment: false });
-          }
-          if (checked.verified) {
-            payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
-            const updatedPayload = paymentSyncPayload({
-              ...(contract.app_payload || {}),
-              renthub_updated_existing_booking_at: new Date().toISOString(),
-            }, payment);
-            await requireWrite(actor.from("contracts").update({
-              renthub_sync_status: paymentSyncStatus(payment),
-              renthub_last_sync_at: new Date().toISOString(),
-              renthub_sync_error: paymentSyncError(payment),
-              app_payload: updatedPayload,
-            }).eq("id", contract.id), "No se pudo guardar la actualización de Renthub");
-            return json({
-              verified: true,
-              payment_pending: !!payment?.pending,
-              external_reference: code,
-              updated_existing_booking: true,
-              checks: checked.checks,
-              updated,
-              payment,
-            });
-          }
-          if (lockedExisting) {
+            const refreshedCustomerCode = String(checked.detail?.result?.customer?.code || customerCode || "");
+            if (refreshedCustomerCode && customer) {
+              await syncPartnerCustomer(refreshedCustomerCode, contract, customer, driver);
+              checked = await verify(code, { checkStart: false, checkPayment: false });
+            }
+            if (checked.verified) {
+              payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
+              const updatedPayload = paymentSyncPayload({
+                ...(contract.app_payload || {}),
+                renthub_updated_existing_booking_at: new Date().toISOString(),
+              }, payment);
+              await requireWrite(actor.from("contracts").update({
+                renthub_sync_status: paymentSyncStatus(payment),
+                renthub_last_sync_at: new Date().toISOString(),
+                renthub_sync_error: paymentSyncError(payment),
+                app_payload: updatedPayload,
+              }).eq("id", contract.id), "No se pudo guardar la actualización de Renthub");
+              return json({
+                verified: true,
+                payment_pending: !!payment?.pending,
+                external_reference: code,
+                updated_existing_booking: true,
+                checks: checked.checks,
+                updated,
+                payment,
+              });
+            }
             const mismatchKeys = Object.entries(checked.checks).filter(([,ok]) => !ok).map(([key]) => key);
             throw new Error(`Renthub actualizó la reserva existente, pero la verificación todavía difiere en: ${mismatchKeys.join(", ")}. No se ha creado ninguna reserva duplicada.`);
-          }
-        } catch (updateError) {
-          if (lockedExisting) {
+          } catch (updateError) {
             throw new Error(`Renthub no permite cancelar esta reserva confirmada/en curso y la actualización directa no pudo completarse. La reserva original se conserva sin duplicados. ${updateError instanceof Error ? updateError.message : String(updateError)}`);
           }
-          console.warn(JSON.stringify({
-            event: "renthub_existing_booking_update_fallback",
-            contract_number: contract.contract_number,
-            booking_code: code,
-            reason: updateError instanceof Error ? updateError.message : String(updateError),
-          }));
         }
+        console.log(JSON.stringify({
+          event: "renthub_initial_booking_will_be_replaced",
+          contract_number: contract.contract_number,
+          booking_code: code,
+          payment_method: paymentMethod || null,
+          payment_amount: paymentAmount,
+          plate: contractPlate || null,
+        }));
       }
 
       if (minimumStart && replacementStart < minimumStart) {
