@@ -376,12 +376,15 @@ function partnerPaymentMethod(value: unknown) {
   if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer" || key === "bonifico") return "bonifico";
   return "";
 }
-function renthubReplacementStart(contract: any) {
+function renthubReplacementStart(contract: any, latestPartnerStart = "19:59") {
   const startDate = String(contract?.delivery_date || "").slice(0, 10);
   const endDate = String(contract?.return_date || "").slice(0, 10);
   const endTime = String(contract?.return_time || "").slice(0, 5);
   if (!startDate || !endDate || !/^\d{2}:\d{2}$/.test(endTime)) throw new Error("No se puede calcular la hora de inicio de la reserva de sustitución.");
-  if (startDate !== endDate) return `${startDate} 23:59`;
+  // Renthub no permite crear una nueva reserva con la hora real si ya quedó en el pasado.
+  // Para alquileres de más de un día usamos la última hora permitida por Renthub.
+  if (startDate !== endDate) return `${startDate} ${latestPartnerStart || "19:59"}`;
+  // Si entrega y devolución son el mismo día, el inicio técnico queda una hora antes de la devolución.
   const [hh, mm] = endTime.split(":").map(Number);
   const endMinutes = hh * 60 + mm;
   if (!Number.isFinite(endMinutes) || endMinutes < 60) throw new Error("La devolución de una reserva del mismo día debe ser posterior a las 01:00 para poder fijar el inicio una hora antes.");
@@ -784,7 +787,7 @@ async function handler(req: Request) {
   const pricelist = renthubPricelist(contract);
   const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, total_gross: expectedTotal, total_net: renthubRentalRate, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
-  const replacementStart = renthubReplacementStart(contract);
+  const replacementStart = renthubReplacementStart(contract, latestPartnerStart);
   const paymentMethod = partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method);
   const paymentAmount = amount(contract.total || contract.app_payload?.total);
   const desiredFranchise = Math.max(0, amount(contract.app_payload?.franchise ?? contract.franchise ?? 0));
@@ -804,7 +807,7 @@ async function handler(req: Request) {
     franchise: desiredFranchise,
   });
 
-  async function verify(code: string, options: { expectedStart?: string; checkStart?: boolean; expectedModel?: string; checkPayment?: boolean } = {}) {
+  async function verify(code: string, options: { expectedStart?: string; checkStart?: boolean; expectedModel?: string; checkPayment?: boolean; checkVehicle?: boolean } = {}) {
     const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
     const booking = detail?.result?.booking || {};
     const locationMatches = (actual: any, expected: string) => [actual?.id, actual?.code, actual?.name].map(String).includes(String(expected));
@@ -820,7 +823,6 @@ async function handler(req: Request) {
     const expectedModel = String(options.expectedModel || verificationModel);
     const modelMatches = modelCandidates.length === 0 || modelCandidates.includes(expectedModel);
     const actualVehicleIds = [
-      detail?.result?.vehicle?.id,
       detail?.result?.vehicle_id,
       booking?.vehicle?.id,
       booking?.vehicle_id,
@@ -837,8 +839,12 @@ async function handler(req: Request) {
       pickup_location: locationMatches(booking.pickup_location, pickup),
       dropoff_location: locationMatches(booking.dropoff_location, dropoff),
       deposit: Math.abs(Number(booking?.franchises?.deposit || 0) - Number(contract.deposit || 0)) <= 0.02,
-      vehicle: !fleetMatch?.vehicle || actualVehicleIds.includes(String(fleetMatch.vehicle)),
     };
+    if (options.checkVehicle !== false && fleetMatch?.vehicle) {
+      // Si Partner details no expone un ID de vehículo físico, lo tratamos como no asignado
+      // para que la reserva inicial pase al flujo de sustitución definitivo.
+      checks.vehicle = actualVehicleIds.length > 0 && actualVehicleIds.includes(String(fleetMatch.vehicle));
+    }
     if (options.checkStart) checks.start = minute(booking.start_datetime) === minute(options.expectedStart || start);
     if (options.checkPayment && paymentMethod && paymentAmount > 0 && booking?.to_be_paid !== undefined && booking?.to_be_paid !== null) {
       checks.payment = Math.abs(amount(booking.to_be_paid)) <= 0.03;
@@ -852,6 +858,7 @@ async function handler(req: Request) {
       model_candidates: modelCandidates,
       vehicle_expected: fleetMatch?.vehicle || null,
       vehicle_candidates: actualVehicleIds,
+      vehicle_check_enabled: options.checkVehicle !== false,
       checks,
     }));
     return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
@@ -893,8 +900,12 @@ async function handler(req: Request) {
     if (pickupAddress) form.set("pickup_at_location", pickupAddress);
     if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
     const locationNotes = [
-      isReplacementBooking && realStartLabel ? `HORA REAL DE INICIO DE LA RESERVA: ${realStartLabel}` : "",
-      contractPlate ? `MATRICULA DEL VEHICULO: ${contractPlate}` : "",
+      isReplacementBooking && realStartLabel ? `HORA REAL DE ENTREGA A CAMBIAR: ${realStartLabel}` : "",
+      contractPlate
+        ? (requestVehicle
+            ? `MATRICULA REAL DEL VEHICULO: ${contractPlate}`
+            : `VEHICULO POR ASIGNAR - MATRICULA REAL A CAMBIAR: ${contractPlate}`)
+        : "",
     ].filter(Boolean).join("\n");
     if (locationNotes) form.set("notes", locationNotes);
     form.set("booking_type", "booking");
@@ -1382,7 +1393,8 @@ async function handler(req: Request) {
         expectedStart: replacement.actualStart,
         checkStart: true,
         expectedModel: model,
-        checkPayment: false,
+        checkPayment: true,
+        checkVehicle: false,
       });
       const replacementCustomerCode = String(replacementChecked.detail?.result?.customer?.code || customerCode || "");
       if (replacementCustomerCode && customer) {
@@ -1391,7 +1403,8 @@ async function handler(req: Request) {
           expectedStart: replacement.actualStart,
           checkStart: true,
           expectedModel: model,
-          checkPayment: false,
+          checkPayment: true,
+          checkVehicle: false,
         });
       }
 
