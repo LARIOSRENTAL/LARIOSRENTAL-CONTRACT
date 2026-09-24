@@ -177,12 +177,9 @@ Deno.serve(async(req:Request)=>{
     // them here makes Renthub validate a concrete vehicle instead of leaving
     // the reservation unassigned.
     form.set("booking_type","booking");form.set("send_confirmation_email","0");form.set("pricelist",pricelist(c));
-    const paymentMethod = partnerPaymentMethod(c.payment_method || payload.payment_method);
-    const paymentAmount = amount(c.total || payload.total);
-    if(paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0){
-      form.set("payment_method", paymentMethod);
-      form.set("payment_amount", paymentAmount.toFixed(2));
-    }
+    // Reserva inicial: solo grupo/modelo, fechas y lugares.
+    // NO se envían matrícula/vehículo ni pago. Esos datos se envían después,
+    // únicamente al pulsar "Mandar datos Renthub" desde el contrato.
     // Official Partner API field: keep the booking on the chosen model even
     // when no concrete vehicle is currently available. Renthub leaves the
     // vehicle unassigned and its Free Sale rule controls the virtual stock.
