@@ -184,8 +184,11 @@ function paymentInvoiceId(detail: any) {
   const direct = [
     root?.invoice_id,
     root?.rp_invoice_id,
+    // Renthub documenta "invoice" directamente como el ID numérico de la factura.
+    root?.invoice,
     root?.invoice?.id,
     root?.payment?.invoice_id,
+    root?.payment?.invoice,
     root?.payment?.invoice?.id,
   ];
   for (const value of direct) {
@@ -231,6 +234,11 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   const existingPaymentId = Number(contract?.app_payload?.renthub_payment_id || 0);
   if (Number.isInteger(existingPaymentId) && existingPaymentId > 0) {
     const detail = await userApiFetch(`/module/payment/api/v1/payment/${existingPaymentId}?payment_expand=all`);
+    const invoiceId = paymentInvoiceId(detail);
+    let invoiceDetail: any = null;
+    if (method === "credit_card" && invoiceId) {
+      invoiceDetail = await userApiFetch(`/module/invoice/api/v1/invoice/${invoiceId}?invoice_expand=all`);
+    }
     return {
       payment_id: existingPaymentId,
       booking_id: bookingId,
@@ -238,8 +246,10 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
       method,
       amount: paymentAmount,
       invoice_requested: method === "credit_card",
-      invoice_id: paymentInvoiceId(detail) || null,
+      invoice_id: invoiceId || null,
+      invoice_verified: method !== "credit_card" || !!invoiceDetail,
       detail,
+      invoice_detail: invoiceDetail,
     };
   }
 
@@ -272,6 +282,19 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   if (!paymentId) throw new Error("Renthub aceptó el pago pero no devolvió un ID verificable.");
 
   const detail = await userApiFetch(`/module/payment/api/v1/payment/${paymentId}?payment_expand=all`);
+  const invoiceId = paymentInvoiceId(detail);
+
+  // Si es tarjeta, el flujo correcto es registrar el pago y generar factura
+  // (action=gen_invoice), sin volver a cobrar la tarjeta.
+  // Verificamos además la factura con el endpoint oficial de Invoice.
+  let invoiceDetail: any = null;
+  if (method === "credit_card") {
+    if (!invoiceId) {
+      throw new Error("Renthub registró el pago pero no devolvió la factura generada.");
+    }
+    invoiceDetail = await userApiFetch(`/module/invoice/api/v1/invoice/${invoiceId}?invoice_expand=all`);
+  }
+
   console.log(JSON.stringify({
     event: "renthub_user_api_payment_synced",
     contract_number: contract?.contract_number,
@@ -281,7 +304,8 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
     amount: paymentAmount,
     prepaid: 0,
     invoice_requested: method === "credit_card",
-    invoice_id: paymentInvoiceId(detail) || null,
+    invoice_id: invoiceId || null,
+    invoice_verified: method !== "credit_card" || !!invoiceDetail,
   }));
 
   return {
@@ -291,8 +315,10 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
     method,
     amount: paymentAmount,
     invoice_requested: method === "credit_card",
-    invoice_id: paymentInvoiceId(detail) || null,
+    invoice_id: invoiceId || null,
+    invoice_verified: method !== "credit_card" || !!invoiceDetail,
     detail,
+    invoice_detail: invoiceDetail,
   };
 
   } catch (error) {
