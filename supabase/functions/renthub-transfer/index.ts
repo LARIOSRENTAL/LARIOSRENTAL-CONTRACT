@@ -1199,6 +1199,49 @@ async function handler(req: Request) {
       }
 
       let checked = await verify(code, { checkStart: false, checkPayment: false });
+
+      // Si Renthub ya tiene la reserva en curso, se considera gestionada manualmente allí.
+      // No enviamos más cambios por API, no creamos pagos y no intentamos cancelar/sustituir la reserva.
+      const currentRenthubStatus = normalize(
+        checked.booking?.status ||
+        checked.booking?.state ||
+        checked.booking?.booking_status ||
+        checked.booking?.pm_stato_prenotazione ||
+        ""
+      );
+      if (["in_progress", "in corso", "in_corso"].includes(currentRenthubStatus)) {
+        const managedPayload = {
+          ...(contract.app_payload || {}),
+          renthub_managed_in_renthub: true,
+          renthub_detected_status: currentRenthubStatus,
+          renthub_booking_id: renthubBookingNumericId(checked.detail, contract) || null,
+          renthub_managed_in_renthub_at: new Date().toISOString(),
+        };
+        await requireWrite(actor.from("contracts").update({
+          renthub_sync_status: "managed_in_renthub",
+          renthub_last_sync_at: new Date().toISOString(),
+          renthub_sync_error: null,
+          app_payload: managedPayload,
+        }).eq("id", contract.id), "No se pudo guardar el estado de reserva gestionada en Renthub");
+        console.log(JSON.stringify({
+          event: "renthub_booking_already_in_progress",
+          contract_number: contract.contract_number,
+          booking_code: code,
+          booking_id: renthubBookingNumericId(checked.detail, contract) || null,
+          status: currentRenthubStatus,
+          api_write_skipped: true,
+        }));
+        return json({
+          verified: true,
+          managed_in_renthub: true,
+          skipped: true,
+          reason: "booking_in_progress",
+          external_reference: code,
+          renthub_status: currentRenthubStatus,
+          message: "La reserva ya está en curso en Renthub y se gestiona allí. No se ha enviado ni modificado nada por API.",
+        });
+      }
+
       const customerCode = String(checked.detail?.result?.customer?.code || "");
       if (customerCode && customer) {
         updated = await syncPartnerCustomer(customerCode, contract, customer, driver);
