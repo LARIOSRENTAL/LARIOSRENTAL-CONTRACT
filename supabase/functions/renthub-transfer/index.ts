@@ -73,11 +73,12 @@ async function renthubFetch(path: string, init: RequestInit = {}, retry = true):
 let userTokenCache = "";
 async function userToken(force = false) {
   const configuredApiKey = env("RENTHUB_USER_API_KEY");
-  if (configuredApiKey) return configuredApiKey;
-  if (!force && userTokenCache) return userTokenCache;
-
   const email = env("RENTHUB_USER_API_EMAIL");
   const password = env("RENTHUB_USER_API_PASSWORD");
+  if (!force && configuredApiKey) return configuredApiKey;
+  if (!force && userTokenCache) return userTokenCache;
+  if (force && (!email || !password) && configuredApiKey) return configuredApiKey;
+
   if (!email || !password) {
     throw new Error("Renthub User API no está configurada. Falta RENHUB_USER_API_KEY o las credenciales User API.");
   }
@@ -114,7 +115,7 @@ async function userApiFetch(path: string, init: RequestInit = {}, retry = true):
       ...(init.headers || {}),
     },
   });
-  if (response.status === 401 && retry && !env("RENTHUB_USER_API_KEY")) {
+  if (response.status === 401 && retry) {
     userTokenCache = "";
     await userToken(true);
     return userApiFetch(path, init, false);
@@ -219,6 +220,7 @@ async function findCreatedPaymentId(bookingId: number, method: string, paymentAm
 }
 
 async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, method: string, paymentAmount: number) {
+  try {
   if (!method || !Number.isFinite(paymentAmount) || paymentAmount <= 0) {
     return { skipped: true, reason: "payment_not_configured" };
   }
@@ -291,6 +293,30 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
     invoice_id: paymentInvoiceId(detail) || null,
     detail,
   };
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const authFailure = /Renthub User API 401|token_not_valid|authentication failed|Datos de acceso no válido/i.test(message);
+    if (!authFailure) throw error;
+    const bookingId = renthubBookingNumericId(bookingDetail, contract) || null;
+    console.error(JSON.stringify({
+      event: "renthub_user_api_payment_pending_auth",
+      contract_number: contract?.contract_number,
+      booking_id: bookingId,
+      method,
+      amount: paymentAmount,
+      detail: message,
+    }));
+    return {
+      skipped: true,
+      pending: true,
+      reason: "user_api_auth_invalid",
+      booking_id: bookingId,
+      method,
+      amount: paymentAmount,
+      error: message,
+    };
+  }
 }
 
 async function cacheStatus(service: any) {
