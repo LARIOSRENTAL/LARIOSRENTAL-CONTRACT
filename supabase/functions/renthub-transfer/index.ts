@@ -319,6 +319,43 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   }
 }
 
+function paymentSyncStatus(payment: any) {
+  return payment?.pending ? "payment_pending" : "verified";
+}
+
+function paymentSyncError(payment: any) {
+  return payment?.pending
+    ? "Reserva verificada en Renthub. Pago pendiente: la autenticación User API de pagos no es válida."
+    : null;
+}
+
+function paymentSyncPayload(base: any, payment: any) {
+  if (payment?.payment_id) {
+    return {
+      ...(base || {}),
+      renthub_booking_id: payment.booking_id,
+      renthub_payment_id: payment.payment_id,
+      renthub_payment_method: payment.method,
+      renthub_payment_amount: payment.amount,
+      renthub_payment_invoice_requested: payment.invoice_requested,
+      renthub_payment_invoice_id: payment.invoice_id,
+      renthub_payment_pending: false,
+      renthub_payment_error: null,
+    };
+  }
+  if (payment?.pending) {
+    return {
+      ...(base || {}),
+      renthub_booking_id: payment.booking_id || base?.renthub_booking_id || null,
+      renthub_payment_method: payment.method || base?.renthub_payment_method || null,
+      renthub_payment_amount: payment.amount ?? base?.renthub_payment_amount ?? null,
+      renthub_payment_pending: true,
+      renthub_payment_error: payment.error || "user_api_auth_invalid",
+    };
+  }
+  return base || {};
+}
+
 async function cacheStatus(service: any) {
   const { data, error } = await service.from("renthub_cache").select("resource_type,cached_at,expires_at").order("resource_type");
   if (error) throw new Error(`Renthub cache status failed: ${error.message}`);
@@ -1206,22 +1243,22 @@ async function handler(req: Request) {
           throw new Error(`Renthub verification mismatch: ${mismatchKeys.join(", ")}`);
         }
         payment = await syncRenthubAccountingPayment(contract, createdChecked.detail, paymentMethod, paymentAmount);
-        const createdPaymentPayload = payment?.payment_id ? {
-          ...(contract.app_payload || {}),
-          renthub_booking_id: payment.booking_id,
-          renthub_payment_id: payment.payment_id,
-          renthub_payment_method: payment.method,
-          renthub_payment_amount: payment.amount,
-          renthub_payment_invoice_requested: payment.invoice_requested,
-          renthub_payment_invoice_id: payment.invoice_id,
-        } : (contract.app_payload || {});
+        const createdPaymentPayload = paymentSyncPayload(contract.app_payload || {}, payment);
         await requireWrite(actor.from("contracts").update({
-          renthub_sync_status: "verified",
+          renthub_sync_status: paymentSyncStatus(payment),
           renthub_last_sync_at: new Date().toISOString(),
-          renthub_sync_error: null,
+          renthub_sync_error: paymentSyncError(payment),
           app_payload: createdPaymentPayload,
         }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
-        return json({ verified: true, external_reference: code, checks: createdChecked.checks, vehicle_requested: created.vehicleRequested, updated, payment });
+        return json({
+          verified: true,
+          payment_pending: !!payment?.pending,
+          external_reference: code,
+          checks: createdChecked.checks,
+          vehicle_requested: created.vehicleRequested,
+          updated,
+          payment,
+        });
       }
 
       let checked = await verify(code, { checkStart: false, checkPayment: false });
@@ -1277,25 +1314,45 @@ async function handler(req: Request) {
         checked = await verify(code, { checkStart: false, checkPayment: false });
       }
 
+      if (checked.verified && contract.renthub_sync_status === "payment_pending") {
+        payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
+        const retryPayload = paymentSyncPayload(contract.app_payload || {}, payment);
+        await requireWrite(actor.from("contracts").update({
+          renthub_sync_status: paymentSyncStatus(payment),
+          renthub_last_sync_at: new Date().toISOString(),
+          renthub_sync_error: paymentSyncError(payment),
+          app_payload: retryPayload,
+        }).eq("id", contract.id), "No se pudo guardar el reintento del pago de Renthub");
+        return json({
+          verified: true,
+          payment_pending: !!payment?.pending,
+          payment_retry_only: true,
+          external_reference: code,
+          checks: checked.checks,
+          updated,
+          payment,
+        });
+      }
+
       const alreadyReplaced = String(contract.app_payload?.renthub_replacement_hash || "") === replacementHash;
       if (checked.verified && alreadyReplaced) {
         payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
-        const paymentPayload = payment?.payment_id ? {
-          ...(contract.app_payload || {}),
-          renthub_booking_id: payment.booking_id,
-          renthub_payment_id: payment.payment_id,
-          renthub_payment_method: payment.method,
-          renthub_payment_amount: payment.amount,
-          renthub_payment_invoice_requested: payment.invoice_requested,
-          renthub_payment_invoice_id: payment.invoice_id,
-        } : (contract.app_payload || {});
+        const paymentPayload = paymentSyncPayload(contract.app_payload || {}, payment);
         await requireWrite(actor.from("contracts").update({
-          renthub_sync_status: "verified",
+          renthub_sync_status: paymentSyncStatus(payment),
           renthub_last_sync_at: new Date().toISOString(),
-          renthub_sync_error: null,
+          renthub_sync_error: paymentSyncError(payment),
           app_payload: paymentPayload,
         }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
-        return json({ verified: true, external_reference: code, already_synced: true, checks: checked.checks, updated, payment });
+        return json({
+          verified: true,
+          payment_pending: !!payment?.pending,
+          external_reference: code,
+          already_synced: true,
+          checks: checked.checks,
+          updated,
+          payment,
+        });
       }
 
       // Una reserva confirmada/en curso no debe sustituirse intentando cancelarla.
@@ -1313,27 +1370,19 @@ async function handler(req: Request) {
           }
           if (checked.verified) {
             payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
-            const updatedPayload = payment?.payment_id ? {
-              ...(contract.app_payload || {}),
-              renthub_booking_id: payment.booking_id,
-              renthub_payment_id: payment.payment_id,
-              renthub_payment_method: payment.method,
-              renthub_payment_amount: payment.amount,
-              renthub_payment_invoice_requested: payment.invoice_requested,
-              renthub_payment_invoice_id: payment.invoice_id,
-              renthub_updated_existing_booking_at: new Date().toISOString(),
-            } : {
+            const updatedPayload = paymentSyncPayload({
               ...(contract.app_payload || {}),
               renthub_updated_existing_booking_at: new Date().toISOString(),
-            };
+            }, payment);
             await requireWrite(actor.from("contracts").update({
-              renthub_sync_status: "verified",
+              renthub_sync_status: paymentSyncStatus(payment),
               renthub_last_sync_at: new Date().toISOString(),
-              renthub_sync_error: null,
+              renthub_sync_error: paymentSyncError(payment),
               app_payload: updatedPayload,
             }).eq("id", contract.id), "No se pudo guardar la actualización de Renthub");
             return json({
               verified: true,
+              payment_pending: !!payment?.pending,
               external_reference: code,
               updated_existing_booking: true,
               checks: checked.checks,
@@ -1412,34 +1461,28 @@ async function handler(req: Request) {
       code = replacement.code;
       payment = await syncRenthubAccountingPayment(contract, replacementChecked.detail, paymentMethod, paymentAmount);
       const replacementHistory = Array.isArray(contract.app_payload?.renthub_replacement_history) ? contract.app_payload.renthub_replacement_history : [];
+      const replacementPayload = paymentSyncPayload({
+        ...(contract.app_payload || {}),
+        renthub_replacement_hash: replacementHash,
+        renthub_replacement_start: replacement.actualStart,
+        renthub_replaced_booking_code: oldCode,
+        renthub_replaced_at: new Date().toISOString(),
+        renthub_vehicle_requested: replacement.vehicleRequested,
+        renthub_pickup_location_id: pickup,
+        renthub_dropoff_location_id: dropoff,
+        renthub_replacement_history: [...replacementHistory, { old_code: oldCode, new_code: code, at: new Date().toISOString() }].slice(-10),
+      }, payment);
       await requireWrite(actor.from("contracts").update({
         renthub_contract_id: code,
-        renthub_sync_status: "verified",
+        renthub_sync_status: paymentSyncStatus(payment),
         renthub_last_sync_at: new Date().toISOString(),
-        renthub_sync_error: null,
-        app_payload: {
-          ...(contract.app_payload || {}),
-          renthub_replacement_hash: replacementHash,
-          renthub_replacement_start: replacement.actualStart,
-          renthub_replaced_booking_code: oldCode,
-          renthub_replaced_at: new Date().toISOString(),
-          renthub_vehicle_requested: replacement.vehicleRequested,
-          renthub_pickup_location_id: pickup,
-          renthub_dropoff_location_id: dropoff,
-          renthub_replacement_history: [...replacementHistory, { old_code: oldCode, new_code: code, at: new Date().toISOString() }].slice(-10),
-          ...(payment?.payment_id ? {
-            renthub_booking_id: payment.booking_id,
-            renthub_payment_id: payment.payment_id,
-            renthub_payment_method: payment.method,
-            renthub_payment_amount: payment.amount,
-            renthub_payment_invoice_requested: payment.invoice_requested,
-            renthub_payment_invoice_id: payment.invoice_id,
-          } : {}),
-        },
+        renthub_sync_error: paymentSyncError(payment),
+        app_payload: replacementPayload,
       }).eq("id", contract.id), "No se pudo guardar la reserva de sustitución");
 
       return json({
         verified: true,
+        payment_pending: !!payment?.pending,
         replaced_existing_booking: true,
         previous_external_reference: oldCode,
         external_reference: code,
