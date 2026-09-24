@@ -13,7 +13,7 @@ const date=v=>{if(!v)return'—';const d=new Date(v);return Number.isNaN(d.getTi
 function newestFirst(rows){return[...(Array.isArray(rows)?rows:[])].sort((a,b)=>{const bt=Date.parse(b.created_at||'')||0,at=Date.parse(a.created_at||'')||0;if(bt!==at)return bt-at;return String(b.contract_number||'').localeCompare(String(a.contract_number||''),'es',{numeric:true})})}
 function historical(c){const pickup=Date.parse(c?.pickup_at||'');return Number.isFinite(pickup)&&pickup<Date.now()}
 function historicalUnsent(c){return historical(c)&&!c?.renthub_id}
-function state(c){const s=c.renthub_sync_status||'pending';if(s==='managed_in_renthub')return['En curso en Renthub','ok'];if(s==='verified')return['Verificado','ok'];if(s==='sent_pending_verification')return['Pendiente de verificación','wait'];if(s==='failed'||s==='verification_failed')return['Error','bad'];if(c.status==='draft')return['Contrato sin generar','muted'];if(historicalUnsent(c))return['Histórico · no enviable','muted'];return[serverStatus.configured?'Pendiente de enviar':'Pendiente de activar','wait']}
+function state(c){const s=c.renthub_sync_status||'pending';if(s==='managed_in_renthub')return['En curso en Renthub','ok'];if(s==='payment_pending')return['Reserva verificada · pago pendiente','wait'];if(s==='verified')return['Verificado','ok'];if(s==='sent_pending_verification')return['Pendiente de verificación','wait'];if(s==='failed'||s==='verification_failed')return['Error','bad'];if(c.status==='draft')return['Contrato sin generar','muted'];if(historicalUnsent(c))return['Histórico · no enviable','muted'];return[serverStatus.configured?'Pendiente de enviar':'Pendiente de activar','wait']}
 function latest(c){return logs.find(x=>x.contract_id===c.id)||null}
 function admin(){return !!window.LariosAccess?.isAdmin?.()}
 function requireAdmin(action){return window.LariosAccess?.requireAdmin?.(action)??false}
@@ -32,7 +32,7 @@ function row(c){
   const canPurge=admin()&&serverStatus.purge_configured&&linked&&c.renthub_sync_status==='verified';
   const canCancelDelete=admin()&&!linked&&!['sent_pending_verification','verified'].includes(c.renthub_sync_status||'');
   const payment=c.payment_status==='paid'?'Pagado con Stripe':c.payment_status==='pending'?'Stripe pendiente':c.payment_method||'Sin indicar';
-  const sendLabel=admin()?(serverStatus.configured?'Mandar datos Renthub':'Pendiente de activar'):'🔒 Mandar datos Renthub · Solo administrador';
+  const sendLabel=admin()?(c.renthub_sync_status==='payment_pending'?'Reintentar pago Renthub':(serverStatus.configured?'Mandar datos Renthub':'Pendiente de activar')):'🔒 Mandar datos Renthub · Solo administrador';
   const purgeLabel=!admin()?'🔒 Eliminar datos locales · Solo administrador':canPurge?'Eliminar datos locales':'Eliminar datos locales · no disponible todavía';
   const localState=managed
     ? `<div class="lrCpLocalState"><b>Reserva en curso en Renthub.</b><span>Se gestiona directamente allí y Larios Rental no enviará más cambios por API.</span></div>`
