@@ -445,6 +445,15 @@ function canonicalDate(value: unknown) {
   if(m)return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
   return raw;
 }
+function canonicalRenthubCountry(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const mapped = renthubCountryCode(raw);
+  if (mapped && mapped !== raw.toUpperCase()) return mapped;
+  const prefixed = raw.match(/^([A-Za-z]{2})\s*-/);
+  if (prefixed) return prefixed[1].toUpperCase();
+  return mapped || raw.toUpperCase();
+}
 function splitCustomerAddress(rawValue: unknown) {
   const raw = String(rawValue || "").trim().replace(/\s+/g," ").replace(/,+$/,"");
   let address=raw, city="", zip="";
@@ -587,7 +596,7 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     tax_code: !identityDocument || !returnedTaxCode || normalize(returnedTaxCode) === normalize(identityDocument),
     id_number: !identityDocument || !returnedIdentity || normalize(returnedIdentity) === normalize(identityDocument),
     license_issue_country: !licenceCountryCode || !returnedLicenceCountry ||
-      normalize(returnedLicenceCountry) === normalize(licenceCountryCode),
+      canonicalRenthubCountry(returnedLicenceCountry) === canonicalRenthubCountry(licenceCountryCode),
   };
 
   if (!Object.values(customerChecks).every(Boolean)) {
