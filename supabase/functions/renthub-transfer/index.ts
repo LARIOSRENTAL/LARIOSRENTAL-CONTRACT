@@ -1037,7 +1037,7 @@ async function handler(req: Request) {
     console.log(JSON.stringify({
       event: "renthub_existing_booking_updated",
       contract_number: contract.contract_number,
-      booking_code: code,
+      booking_code: String(booking?.code || contract.renthub_contract_id || ""),
       booking_id: bookingId,
       status: response.status,
       model_id: String(model),
