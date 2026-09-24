@@ -32,7 +32,7 @@ function row(c){
   const canPurge=admin()&&serverStatus.purge_configured&&linked&&c.renthub_sync_status==='verified';
   const canCancelDelete=admin()&&!linked&&!['sent_pending_verification','verified'].includes(c.renthub_sync_status||'');
   const payment=c.payment_status==='paid'?'Pagado con Stripe':c.payment_status==='pending'?'Stripe pendiente':c.payment_method||'Sin indicar';
-  const sendLabel=admin()?(c.renthub_sync_status==='payment_pending'?'Reintentar pago Renthub':(serverStatus.configured?'Mandar datos Renthub':'Pendiente de activar')):'🔒 Mandar datos Renthub · Solo administrador';
+  const sendLabel=admin()?(c.renthub_sync_status==='payment_pending'?'Reintentar sincronización Renthub':(serverStatus.configured?'Mandar datos Renthub':'Pendiente de activar')):'🔒 Mandar datos Renthub · Solo administrador';
   const purgeLabel=!admin()?'🔒 Eliminar datos locales · Solo administrador':canPurge?'Eliminar datos locales':'Eliminar datos locales · no disponible todavía';
   const localState=managed
     ? `<div class="lrCpLocalState"><b>Reserva en curso en Renthub.</b><span>Se gestiona directamente allí y Larios Rental no enviará más cambios por API.</span></div>`
