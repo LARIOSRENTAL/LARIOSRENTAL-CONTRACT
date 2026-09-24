@@ -904,6 +904,158 @@ async function handler(req: Request) {
     return form;
   }
 
+
+  const renthubPanelDate = (value: unknown) => {
+    const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(value || "");
+  };
+
+  async function updateExistingRenthubBooking(detail: any) {
+    const booking = detail?.result?.booking || {};
+    const bookingId = String(booking?.id || "");
+    const registryId = String(detail?.result?.customer?.id || "");
+    if (!bookingId) throw new Error("Renthub no devolvió el ID interno de la reserva existente.");
+    if (!registryId) throw new Error("Renthub no devolvió el ID interno del cliente de la reserva existente.");
+    if (!fleetMatch?.vehicle) throw new Error("No se encontró el vehículo asignado en la flota de Renthub.");
+
+    const form = new URLSearchParams();
+    const values: Record<string,string> = {
+      dr_group: crypto.randomUUID(),
+      dr_to_delete: "",
+      booking_id: bookingId,
+      pm_internal_move: "0",
+      pm_cancel_reason_id: "",
+      calc_auto_tar: "non_attivo",
+      pm_imr_id: "",
+      pm_stato_prenotazione: "in_corso",
+      pm_list_id: String(booking?.pricelist?.id || pricelist || "1"),
+      pm_tariffa_manuale: "0",
+      pm_monthly_fee: "0",
+      pm_monthly_duration: "0",
+      tariffa_tot: renthubRentalRate.toFixed(4),
+      pm_advance: "0",
+      costo_servizi_with_vat: "0",
+      costo_servizi: "0",
+      pm_costo_km_extra: "0",
+      pm_pickup_delivery_price: "0",
+      pm_discount: "0",
+      pm_addebito_fuori_orario: "0",
+      pm_addebito_benzina: "0",
+      pm_addebito_franchigia: "0",
+      pm_addebito_consegna_altro_luogo: "0",
+      pm_vat_key: String(contract.vat_percent || 21),
+      pm_cauzione: Number(contract.deposit || 0).toFixed(2),
+      pm_franchigia: "0",
+      pm_franchigia_danni: desiredFranchise.toFixed(2),
+      pm_franchigia_rca: "0",
+      pm_prev_mezzo_id: String(model),
+      pm_ms_id: String(fleetMatch.vehicle),
+      pm_operatore_apertura: env("RENTHUB_OPERATOR_ID") || "4",
+      pm_operatore_chiusura: "",
+      pm_payment_method: "",
+      pm_deposit_payment_method: "",
+      pm_ritiro_l_id: String(pickup),
+      pm_consegna_l_id: String(dropoff),
+      pickup_at_location: String(pickupAddress || ""),
+      dropoff_at_location: String(dropoffAddress || ""),
+      pm_consegna_effettiva_l_id: "",
+      pm_data_inizio: renthubPanelDate(String(contract.delivery_date || "").slice(0,10)),
+      pm_ora_inizio: String(contract.delivery_time || "").slice(0,5),
+      pm_actual_end_date: "",
+      pm_actual_end_time: "",
+      pm_data_fine: renthubPanelDate(String(contract.return_date || "").slice(0,10)),
+      pm_ora_fine: String(contract.return_time || "").slice(0,5),
+      pm_benzina_ritiro: "4",
+      pm_benzina_consegna: "",
+      pm_km_included: String(booking?.kms?.included || 0),
+      pm_extra_km_price: String(booking?.kms?.extra_km_price?.without_tax || 0),
+      pm_km_iniziali: String(contract.current_km || 0),
+      pm_km_finali: "0",
+      pm_flight_number: "",
+      pm_flight_time: "",
+      pm_pre_auth_code: "",
+      pm_lang_key: "es_ES",
+      pm_fattura_necessaria: "1",
+      pm_sectional_id: "",
+      pm_auto_charge_dispute: "1",
+      pm_automatic_send_cargos: "1",
+      pm_note: String(booking?.note || booking?.notes || ""),
+      pm_dettagli_contr_prev: "",
+      anag_id: registryId,
+      anag_disabled: "1",
+      com_id: "",
+      "type_anag_telefono[0]": "cell",
+      "card-cardgroup": crypto.randomUUID(),
+      pm_out_notes: "",
+      pm_in_notes: "",
+      sharedDamageDatatable_length: "10",
+      payment_reference_group: "",
+      payment_reference_id: bookingId,
+      payment_reference_type: "pm",
+      substitutionDatatable_length: "10",
+      checklist_out_active: "0",
+      checklist_in_active: "0",
+      pm_contract_model: "",
+      pm_preventivo: "rental_prev_std",
+      refresh_reference_coverage_on_save: "0",
+      pm_id: bookingId,
+      booking_opened_at: String(booking?.created_at || ""),
+      print_contract: "0",
+      test_contract: "0",
+      out_img: "",
+      in_img: "",
+      print_preventivo: "0",
+      pm_voucher_model: "rental_voucher",
+      operator_code: "false",
+    };
+    Object.entries(values).forEach(([key,value]) => form.append(key,value));
+    for (const serviceItem of Array.isArray(booking?.services) ? booking.services : []) {
+      const serviceId = String(serviceItem?.id || "");
+      if (!serviceId) continue;
+      form.append(`sa[${serviceId}]`, String(serviceItem?.quantity || 1));
+      form.append(`sa_price[${serviceId}]`, String(serviceItem?.rate?.without_tax || 0));
+      form.append(`sa_tariffazione[${serviceId}]`, ["fix","fixed"].includes(String(serviceItem?.rate_type || "").toLowerCase()) ? "fissa" : "giornaliera");
+      form.append(`sa_max_days[${serviceId}]`, String(serviceItem?.max_days || 0));
+    }
+
+    const response = await fetch(`${installationUrl()}/rental/booking/add`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-PartnerToken": await partnerToken(),
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      body: form,
+    });
+    const raw = await response.text();
+    let data: any = null;
+    try { data = raw ? JSON.parse(raw) : null; }
+    catch { data = raw.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,500); }
+
+    console.log(JSON.stringify({
+      event: "renthub_existing_booking_updated",
+      contract_number: contract.contract_number,
+      booking_code: code,
+      booking_id: bookingId,
+      status: response.status,
+      model_id: String(model),
+      vehicle_id: String(fleetMatch.vehicle),
+      pickup_location: String(pickup),
+      dropoff_location: String(dropoff),
+      start,
+      end,
+      deposit: Number(contract.deposit || 0),
+      damage_franchise: desiredFranchise,
+    }));
+
+    if (!response.ok || String(data?.id || "") !== bookingId) {
+      throw new Error(`Renthub rechazó la actualización de la reserva existente (${response.status}): ${typeof data === "string" ? data : JSON.stringify(data)}`);
+    }
+    return { booking_id: bookingId, vehicle_id: String(fleetMatch.vehicle), response: data };
+  }
+
   async function insertPartnerBooking(startValue: string, customerCode = "") {
     const officeClosed = (error: unknown) => {
       const key = normalize(error instanceof Error ? error.message : String(error));
@@ -1075,6 +1227,66 @@ async function handler(req: Request) {
           app_payload: paymentPayload,
         }).eq("id", contract.id), "No se pudo guardar la verificación de Renthub");
         return json({ verified: true, external_reference: code, already_synced: true, checks: checked.checks, updated, payment });
+      }
+
+      // Una reserva confirmada/en curso no debe sustituirse intentando cancelarla.
+      // Primero actualizamos la misma reserva mediante el endpoint interno ya capturado.
+      if (!checked.verified) {
+        const currentStatus = normalize(checked.booking?.status || checked.booking?.state || checked.booking?.booking_status || checked.booking?.pm_stato_prenotazione || "");
+        const lockedExisting = ["in_progress","confirmed","in corso","in_corso"].includes(currentStatus);
+        try {
+          updated = await updateExistingRenthubBooking(checked.detail);
+          checked = await verify(code, { checkStart: false, checkPayment: false });
+          const refreshedCustomerCode = String(checked.detail?.result?.customer?.code || customerCode || "");
+          if (refreshedCustomerCode && customer) {
+            await syncPartnerCustomer(refreshedCustomerCode, contract, customer, driver);
+            checked = await verify(code, { checkStart: false, checkPayment: false });
+          }
+          if (checked.verified) {
+            payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
+            const updatedPayload = payment?.payment_id ? {
+              ...(contract.app_payload || {}),
+              renthub_booking_id: payment.booking_id,
+              renthub_payment_id: payment.payment_id,
+              renthub_payment_method: payment.method,
+              renthub_payment_amount: payment.amount,
+              renthub_payment_invoice_requested: payment.invoice_requested,
+              renthub_payment_invoice_id: payment.invoice_id,
+              renthub_updated_existing_booking_at: new Date().toISOString(),
+            } : {
+              ...(contract.app_payload || {}),
+              renthub_updated_existing_booking_at: new Date().toISOString(),
+            };
+            await requireWrite(actor.from("contracts").update({
+              renthub_sync_status: "verified",
+              renthub_last_sync_at: new Date().toISOString(),
+              renthub_sync_error: null,
+              app_payload: updatedPayload,
+            }).eq("id", contract.id), "No se pudo guardar la actualización de Renthub");
+            return json({
+              verified: true,
+              external_reference: code,
+              updated_existing_booking: true,
+              checks: checked.checks,
+              updated,
+              payment,
+            });
+          }
+          if (lockedExisting) {
+            const mismatchKeys = Object.entries(checked.checks).filter(([,ok]) => !ok).map(([key]) => key);
+            throw new Error(`Renthub actualizó la reserva existente, pero la verificación todavía difiere en: ${mismatchKeys.join(", ")}. No se ha creado ninguna reserva duplicada.`);
+          }
+        } catch (updateError) {
+          if (lockedExisting) {
+            throw new Error(`Renthub no permite cancelar esta reserva confirmada/en curso y la actualización directa no pudo completarse. La reserva original se conserva sin duplicados. ${updateError instanceof Error ? updateError.message : String(updateError)}`);
+          }
+          console.warn(JSON.stringify({
+            event: "renthub_existing_booking_update_fallback",
+            contract_number: contract.contract_number,
+            booking_code: code,
+            reason: updateError instanceof Error ? updateError.message : String(updateError),
+          }));
+        }
       }
 
       if (minimumStart && replacementStart < minimumStart) {
