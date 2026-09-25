@@ -261,7 +261,20 @@ Deno.serve(async(req:Request)=>{
           const secondMessage=secondError instanceof Error?secondError.message:String(secondError);
           const secondKey=norm(secondMessage);
           if(secondKey.includes("lista de precios no disponible en esta localidad")){
-            throw Error(`Renthub reconoce la ubicación ${map.pickupMatched||pickupText} (ID ${map.pickup}), pero no tiene una lista de precios disponible para la integración en esa ubicación. No se cambia por Otra Ubicación.`);
+            if(Number(c.contract_number)===62931){
+              form.set("pickup_location","132");
+              form.set("dropoff_location","132");
+              const forcedNotes=[
+                `RECOGIDA DEL VEHICULO EN: ${pickupText}`,
+                `DEVOLUCION DEL VEHICULO EN: ${dropoffText}`,
+                "UBICACION TECNICA RENTHUB: OTRA UBICACION (ID 132) SOLO PARA LR-062931"
+              ].join("\n");
+              form.set("notes",forcedNotes);
+              console.log(JSON.stringify({event:"renthub_booking_62931_other_location_retry",contract_number:c.contract_number,pickup:"132",dropoff:"132",real_pickup:pickupText,real_dropoff:dropoffText}));
+              inserted=await doInsert();
+            }else{
+              throw Error(`Renthub reconoce la ubicación ${map.pickupMatched||pickupText} (ID ${map.pickup}), pero no tiene una lista de precios disponible para la integración en esa ubicación. No se cambia por Otra Ubicación.`);
+            }
           }
           if(secondKey.includes("no hay modelos disponibles")||secondKey.includes("no models available")){
             throw Error(`Renthub no tiene habilitado el modelo ${map.model} del grupo ${String(map.group).toUpperCase()} en la ubicación ${map.pickupMatched||pickupText} (ID ${map.pickup}). Se mantiene la ubicación real; no se sustituye por Otra Ubicación. La reserva queda guardada en Larios Rental.`);
