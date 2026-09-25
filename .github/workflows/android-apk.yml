@@ -65,7 +65,60 @@ jobs:
               raise SystemExit('Missing Android versionName')
           path.write_text(text)
           PY
-      - name: Build debug APK
+      - name: Configure release signing when credentials are available
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LR_ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.LR_ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LR_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LR_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64$STORE_PASSWORD$KEY_ALIAS$KEY_PASSWORD" ]]; then
+            echo "SIGNED_BUILD=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [[ -z "$KEYSTORE_BASE64" || -z "$STORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "Incomplete Android signing credentials" >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/larios-release.jks
+          keytool -list -keystore android/app/larios-release.jks -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          path = Path('android/app/build.gradle')
+          text = path.read_text()
+          marker = '    buildTypes {'
+          if text.count(marker) != 1:
+              raise SystemExit('Cannot locate Android buildTypes block')
+          signing = '''    signingConfigs {
+                  release {
+                      storeFile file('larios-release.jks')
+                      storePassword System.getenv('LR_ANDROID_STORE_PASSWORD')
+                      keyAlias System.getenv('LR_ANDROID_KEY_ALIAS')
+                      keyPassword System.getenv('LR_ANDROID_KEY_PASSWORD')
+                  }
+              }
+              '''
+          text = text.replace(marker, signing + marker, 1)
+          text, count = re.subn(r'(buildTypes\s*\{\s*release\s*\{)',
+                                r'\1\n            signingConfig signingConfigs.release', text, count=1)
+          if count != 1:
+              raise SystemExit('Cannot locate Android release block')
+          path.write_text(text)
+          PY
+          echo "SIGNED_BUILD=true" >> "$GITHUB_ENV"
+      - name: Build signed release APK
+        if: env.SIGNED_BUILD == 'true'
+        env:
+          LR_ANDROID_STORE_PASSWORD: ${{ secrets.LR_ANDROID_STORE_PASSWORD }}
+          LR_ANDROID_KEY_ALIAS: ${{ secrets.LR_ANDROID_KEY_ALIAS }}
+          LR_ANDROID_KEY_PASSWORD: ${{ secrets.LR_ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --stacktrace
+      - name: Build test APK
+        if: env.SIGNED_BUILD != 'true'
         run: |
           cd android
           chmod +x gradlew
@@ -75,12 +128,19 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/Larios-Rental-Android-8.4.${RUN_NUMBER}.apk"
+          if [[ "$SIGNED_BUILD" == 'true' ]]; then
+            cp android/app/build/outputs/apk/release/app-release.apk "dist/Larios-Rental-Android-8.4.${RUN_NUMBER}.apk"
+          else
+            cp android/app/build/outputs/apk/debug/app-debug.apk "dist/Larios-Rental-Android-PRUEBA-8.4.${RUN_NUMBER}.apk"
+          fi
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
           test -s dist/*.apk
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose dist/*.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: larios-rental-android-installable
+          name: larios-rental-android-${{ env.SIGNED_BUILD == 'true' && 'firmado' || 'prueba' }}
           path: app-v84/dist/
           if-no-files-found: error
           retention-days: 90
