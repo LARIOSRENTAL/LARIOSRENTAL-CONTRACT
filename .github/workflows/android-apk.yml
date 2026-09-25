@@ -6,6 +6,8 @@ on:
     branches: [agent/mobile-v84]
     paths:
       - "app-v84/**"
+      - "static/assets/**"
+      - "static/vendor/**"
       - ".github/workflows/android-apk.yml"
 
 jobs:
@@ -25,25 +27,60 @@ jobs:
           java-version: "21"
       - name: Install dependencies
         run: npm install
+      - name: Bundle contract assets for offline Android WebView
+        run: |
+          mkdir -p www/assets www/vendor
+          cp ../static/assets/contrato-larios-normalizado.pdf www/assets/
+          cp ../static/assets/damage-map.png www/assets/
+          cp ../static/vendor/pdf-lib.min.js www/vendor/
       - name: Verify production web bundle
         run: |
           test -f capacitor.config.json
           test -f www/index.html
           test -f www/config.js
+          test -f www/assets/contrato-larios-normalizado.pdf
+          test -f www/assets/damage-map.png
+          test -f www/vendor/pdf-lib.min.js
           grep -q "Larios Rental Pro" www/index.html
           npx cap --version
       - name: Create Android project
         run: npx cap add android
       - name: Sync web app
         run: npx cap sync android
+      - name: Set a newer Android version for each build
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          path = Path('android/app/build.gradle')
+          text = path.read_text()
+          code = int(os.environ['RUN_NUMBER'])
+          text, count = re.subn(r'versionCode\s+\d+', f'versionCode {code}', text, count=1)
+          if count != 1:
+              raise SystemExit('Missing Android versionCode')
+          text, count = re.subn(r'versionName\s+"[^"]+"', f'versionName "8.4.{code}"', text, count=1)
+          if count != 1:
+              raise SystemExit('Missing Android versionName')
+          path.write_text(text)
+          PY
       - name: Build debug APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
+      - name: Name and verify installable APK
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/Larios-Rental-Android-8.4.${RUN_NUMBER}.apk"
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+          test -s dist/*.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: larios-rental-v84-android
-          path: app-v84/android/app/build/outputs/apk/debug/app-debug.apk
+          name: larios-rental-android-installable
+          path: app-v84/dist/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
