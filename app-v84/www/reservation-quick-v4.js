@@ -17,13 +17,13 @@ function scooterInfo(raw){
 }
 function cycleInfo(raw){
  const t=withoutClock(raw).toLowerCase();
- let m=t.match(/(?:^|\s)(\d+)\s*(?:x\s*)?(e-?bikes?|ebikes?|bicicletas?|bicis?|bici)\b/);
- if(m)return{quantity:Math.max(1,Number(m[1])||1),group:/e-?bike|ebike/.test(m[2])?'E-BIKE':'BICICLETA'};
- m=t.match(/\b(e-?bikes?|ebikes?|bicicletas?|bicis?|bici)\s*x\s*(\d+)\b/);
- if(m)return{quantity:Math.max(1,Number(m[2])||1),group:/e-?bike|ebike/.test(m[1])?'E-BIKE':'BICICLETA'};
- m=t.match(/\b(e-?bikes?|ebikes?|bicicletas?|bicis?|bici)\b/);
+ let m=t.match(/(?:^|\s)(\d+)\s*(?:x\s*)?(e[\\s-]?bikes?|ebikes?|bicicletas?|bicis?|bici)\b/);
+ if(m)return{quantity:Math.max(1,Number(m[1])||1),group:/e[\\s-]?bike|ebike/.test(m[2])?'E-BIKE':'BICICLETA'};
+ m=t.match(/\b(e[\\s-]?bikes?|ebikes?|bicicletas?|bicis?|bici)\s*x\s*(\d+)\b/);
+ if(m)return{quantity:Math.max(1,Number(m[2])||1),group:/e[\\s-]?bike|ebike/.test(m[1])?'E-BIKE':'BICICLETA'};
+ m=t.match(/\b(e[\\s-]?bikes?|ebikes?|bicicletas?|bicis?|bici)\b/);
  if(!m)return null;
- return{quantity:1,group:/e-?bike|ebike/.test(m[1])?'E-BIKE':'BICICLETA'}
+ return{quantity:1,group:/e[\\s-]?bike|ebike/.test(m[1])?'E-BIKE':'BICICLETA'}
 }
 function normalizeScooter(raw){
  const info=scooterInfo(raw);if(!info)return raw;
