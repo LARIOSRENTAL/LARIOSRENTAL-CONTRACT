@@ -12,12 +12,12 @@ function dateFrom(s){const t=norm(s);let m=t.match(/\b(\d{1,2})[\/.-](\d{1,2})(?
 function timeFrom(s){const t=norm(s);let m=t.match(/\b(\d{1,2})(?::|\.)(\d{2})\s*(am|pm)?\b/);if(!m)return /manana temprano/.test(t)?'09:00':'';let h=Number(m[1]);if(m[3]==='pm'&&h<12)h+=12;if(m[3]==='am'&&h===12)h=0;return pad(h)+':'+pad(Number(m[2]))}
 function groupInfo(s){
  const t=norm(s);let q=1,g='',m=t.match(/\bx\s*(\d+)\b/);if(m)q=Math.max(1,Number(m[1]));
- m=t.match(/\b(\d+)\s*x\s*(?:yamaha\s+neos\s*)?(50\s*cc|125\s*cc|e[\\s-]?bikes?|bicicletas?|bicis?)\b/);if(m){q=Math.max(1,Number(m[1]));g=m[2]}
+ m=t.match(/\b(\d+)\s*x\s*(?:yamaha\s+neos\s*)?(50\s*cc|125\s*cc|e[\s-]?bikes?|bicicletas?|bicis?)\b/);if(m){q=Math.max(1,Number(m[1]));g=m[2]}
  if(!g){m=t.match(/\b(\d+)\s*(?:motos?\s*)?(50\s*cc|125\s*cc)\b/);if(m){q=Math.max(1,Number(m[1]));g=m[2]}}
- if(!g){m=t.match(/\b(\d+)\s*(e[\\s-]?bikes?|bicicletas?|bicis?)\b/);if(m){q=Math.max(1,Number(m[1]));g=m[2]}}
- if(!g){m=t.match(/\b(?:yamaha\s+neos\s*)?(50\s*cc|125\s*cc|e[\\s-]?bikes?|bicicletas?|bicis?)\b/);if(m)g=m[1]}
+ if(!g){m=t.match(/\b(\d+)\s*(e[\s-]?bikes?|bicicletas?|bicis?)\b/);if(m){q=Math.max(1,Number(m[1]));g=m[2]}}
+ if(!g){m=t.match(/\b(?:yamaha\s+neos\s*)?(50\s*cc|125\s*cc|e[\s-]?bikes?|bicicletas?|bicis?)\b/);if(m)g=m[1]}
  if(!g){m=t.match(/\b(?:coche|grupo|g)\s*:?\s*([a-z0-9-]+)\b/);if(m)g=m[1]}
- g=String(g||'').replace(/\s+/g,'');if(/^50cc$/i.test(g))g='50cc';else if(/^125cc$/i.test(g))g='125cc';else if(/e[\\s-]?bikes?/i.test(g))g='E-BIKE';else if(/bici/i.test(g))g='BICICLETA';else g=g.toUpperCase();return{group:g,quantity:q}
+ g=String(g||'').replace(/\s+/g,'');if(/^50cc$/i.test(g))g='50cc';else if(/^125cc$/i.test(g))g='125cc';else if(/e[\s-]?bikes?/i.test(g))g='E-BIKE';else if(/bici/i.test(g))g='BICICLETA';else g=g.toUpperCase();return{group:g,quantity:q}
 }
 function phoneFrom(s){const m=String(s||'').match(/\+\d[\d\s\u00a0-]{7,}\d/);return m?m[0].replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim():''}
 function collaborator(s){const t=' '+norm(s)+' ';const defs=[['ELE APARTAMENT',/\b(?:ele\s*apart(?:ament|amentos)?|l\s*apart(?:ament|amentos)?)\b/],['SOL MAESTRANZA',/\bsol\s+maestranza\b/],['CITY EXPERT',/\bcity\s+expert\b/],['DULCE HOGAR',/\bdulce\s+hogar\b/],['INMOSWISS',/\binmoswiss\b/],['PARQUE FLAT',/\bparque\s+flat\b/]];return defs.find(([,r])=>r.test(t))?.[0]||''}
