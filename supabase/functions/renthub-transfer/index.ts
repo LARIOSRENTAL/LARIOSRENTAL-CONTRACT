@@ -331,7 +331,8 @@ function splitName(fullName: string) {
   return { name: parts.shift() || "Cliente", surname: parts.join(" ") || "Larios Rental" };
 }
 function splitPhone(value: string) {
-  const original = String(value || "").trim();
+  let original = String(value || "").trim();
+  if (/^00\d+/.test(original)) original = "+" + original.slice(2);
   const digits = original.replace(/\D/g, "");
   if (!original.startsWith("+")) {
     if (digits.length !== 9) throw new Error("El teléfono del cliente debe tener 9 cifras españolas o incluir el prefijo internacional con + (por ejemplo, +34).");
