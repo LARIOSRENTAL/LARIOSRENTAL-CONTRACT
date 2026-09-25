@@ -33,13 +33,15 @@ function callBase(text){
   return fn(text);
 }
 function safeParse(raw){
-  const clean=normalize(raw),hh=clock(clean);
+  const extracted=window.LariosBookingParser?.extras(raw);
+  const clean=normalize(extracted?.text??raw),hh=clock(clean);
+  const apply=p=>Object.assign(p,extracted?.payload||{});
   if(!clean)throw new Error('Pega primero el mensaje de WhatsApp.');
   try{
     const p=callBase(clean);
     if(hh){p.pickup_time=hh;p.return_time=hh;}
     p.whatsapp_message=String(raw||'');
-    return p;
+    return apply(p);
   }catch(first){
     if(!hh||!/hora/i.test(String(first?.message||first)))throw first;
     const retry='09:00 '+stripClock(clean);
@@ -47,7 +49,7 @@ function safeParse(raw){
     p.pickup_time=hh;
     p.return_time=hh;
     p.whatsapp_message=String(raw||'');
-    return p;
+    return apply(p);
   }
 }
 safeParse.__lrAuthority=true;

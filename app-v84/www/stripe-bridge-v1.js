@@ -20,7 +20,7 @@ async function saveDraft(){
   if(!window.LariosCurrentContractId)throw new Error('Abre primero una reserva desde la agenda.');
   if(!val('customer_name'))throw new Error('Falta el nombre del cliente.');
   if(num('contract_total')<=0)throw new Error('El importe total debe ser mayor que cero.');
-  const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_save_contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_payload:payload()})});
+  const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_save_contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_payload:window.LariosWebBooking?.preservePayload(payload())||payload()})});
   const data=await r.json().catch(async()=>({error:await r.text().catch(()=>'' )}));
   if(!r.ok)throw new Error(data?.message||data?.error||'No se pudo guardar la reserva antes del pago.');
   if(data?.id)window.LariosCurrentContractId=data.id;

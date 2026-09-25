@@ -101,7 +101,7 @@ function extrasTotal(){
   return total;
 }
 function parking(){const g=val('vehicle_group').toUpperCase();if(['50CC','125CC','BICICLETA','E-BIKE'].includes(g))return 0;return /aeropuerto|airport|easy\s*parking/i.test(val('return_location'))?15:0}
-function recalc(){
+function recalc(){if(window.LariosWebBooking?.preservePrice())return;
   const rent=num('rental_price'),insurance=num('insurance_total'),young=checked('young_driver')?num('young_driver_amount'):0,ext=extrasTotal(),park=parking(),disc=rent*Math.max(0,num('discount_percent'))/100;
   if(checked('full_insurance')&&$('franchise'))$('franchise').value='0.00';
   const total=Math.max(0,rent-disc+insurance+young+ext+park);
