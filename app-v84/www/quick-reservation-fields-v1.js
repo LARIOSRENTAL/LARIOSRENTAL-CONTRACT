@@ -41,7 +41,7 @@ function compactLocation(raw,p){
    .replace(/\b(?:un|una)\s+d[ií]a\b/ig,' ')
    .replace(/\b(?:g|grupo|coche)\s*[:\-]?\s*(?:[a-z]|50cc|125cc)\b/ig,' ')
    .replace(/\b\d+\s*[-x]\s*(?:125|50)\b/ig,' ')
-   .replace(/\b\d+\s*(?:x|\-)?\s*(?:125\s*cc|50\s*cc|bicis?|bicicletas?|e-?bikes?)\b/ig,' ')
+   .replace(/\b\d+\s*(?:x|\-)?\s*(?:125\s*cc|50\s*cc|bicis?|bicicletas?|e[\\s-]?bikes?)\b/ig,' ')
    .replace(/\b(?:125|50)\s*cc\b/ig,' ')
    .replace(/\b\d+(?:[.,]\d+)?\s*€/g,' ');
  const detail=String(p?.reservation_detail||'').trim();if(detail&&/^\d{2,4}$/.test(detail))s=s.replace(new RegExp('(?:^|\\s)'+detail+'(?=\\s|$)'),' ');
