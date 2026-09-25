@@ -32,6 +32,8 @@ jobs:
           mkdir -p www/assets www/vendor
           cp ../static/assets/contrato-larios-normalizado.pdf www/assets/
           cp ../static/assets/damage-map.png www/assets/
+          cp ../static/assets/icon-192.png www/assets/
+          cp ../static/assets/icon-512.png www/assets/
           cp ../static/vendor/pdf-lib.min.js www/vendor/
       - name: Verify production web bundle
         run: |
