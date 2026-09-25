@@ -19,7 +19,7 @@ function purgeSuggestions(){
   if(plate){
     plate.removeAttribute('list');
     plate.removeAttribute('data-list');
-    plate.removeAttribute('aria-autocomplete');
+    if(!plate.closest('.lrPlateTypeaheadWrap'))plate.removeAttribute('aria-autocomplete');
   }
 }
 

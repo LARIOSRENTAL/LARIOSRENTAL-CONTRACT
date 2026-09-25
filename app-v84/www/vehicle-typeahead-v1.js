@@ -11,6 +11,7 @@ const search=(rows,query,limit=12)=>{
     .slice(0,limit);
 };
 let fleetPromise=null,fleet=[],observer=null;
+const bound=new WeakSet();
 function styles(){
   if(document.getElementById('lrPlateTypeaheadStyle'))return;
   const style=document.createElement('style');style.id='lrPlateTypeaheadStyle';
@@ -20,7 +21,8 @@ async function loadFleet(){
   if(fleetPromise)return fleetPromise;
   fleetPromise=(async()=>{
     const core=window.LariosVehicleCore;
-    const rows=core&&typeof core.load==='function'?await core.load():[];
+    let rows=core&&typeof core.load==='function'?await core.load():[];
+    if(!rows?.length&&typeof core?.refresh==='function')rows=await core.refresh();
     fleet=Array.isArray(rows)?rows:[];
     return fleet;
   })().catch(error=>{console.warn('No se pudo cargar la flota para el desplegable',error);fleet=[];return fleet;});
@@ -60,12 +62,14 @@ function moveActive(wrap,delta){
   wrap.__lrActive=next;items.forEach((item,index)=>item.setAttribute('aria-selected',index===next?'true':'false'));items[next].scrollIntoView({block:'nearest'});return true;
 }
 function bind(input){
-  if(!input||input.dataset.lrPlateTypeahead==='1')return;
-  const wrap=document.createElement('div');wrap.className='lrPlateTypeaheadWrap';
-  input.parentNode.insertBefore(wrap,input);wrap.appendChild(input);
-  const box=document.createElement('div');box.className='lrPlateSuggestions';box.id='lrPlateSuggestions';box.setAttribute('role','listbox');box.hidden=true;wrap.appendChild(box);
+  if(!input||bound.has(input))return;
+  let wrap=input.closest('.lrPlateTypeaheadWrap');
+  if(!wrap){wrap=document.createElement('div');wrap.className='lrPlateTypeaheadWrap';input.parentNode.insertBefore(wrap,input);wrap.appendChild(input)}
+  let box=wrap.querySelector('.lrPlateSuggestions');
+  if(!box){box=document.createElement('div');box.className='lrPlateSuggestions';box.id='lrPlateSuggestions';box.setAttribute('role','listbox');box.hidden=true;wrap.appendChild(box)}
+  bound.add(input);
   input.dataset.lrPlateTypeahead='1';input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',box.id);input.setAttribute('aria-expanded','false');input.autocomplete='off';
-  input.addEventListener('focus',()=>{if(input.value.trim())draw(wrap,input.value)});
+  input.addEventListener('focus',()=>{void loadFleet().then(()=>{if(input.isConnected&&input.value.trim())draw(wrap,input.value)})});
   input.addEventListener('input',()=>{if(wrap.__lrChoosing)return;delete input.dataset.lrSelectedRegistration;void loadFleet().then(()=>draw(wrap,input.value))});
   input.addEventListener('keydown',event=>{
     if(event.key==='ArrowDown'&&moveActive(wrap,1)){event.preventDefault();return}

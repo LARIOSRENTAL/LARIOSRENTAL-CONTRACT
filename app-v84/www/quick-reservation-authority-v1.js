@@ -35,7 +35,7 @@ function callBase(text){
 function safeParse(raw){
   const extracted=window.LariosBookingParser?.extras(raw);
   const clean=normalize(extracted?.text??raw),hh=clock(clean);
-  const apply=p=>Object.assign(p,extracted?.payload||{});
+  const apply=p=>window.LariosQuickFields?.clean(raw,Object.assign(p,extracted?.payload||{}))||Object.assign(p,extracted?.payload||{});
   if(!clean)throw new Error('Pega primero el mensaje de WhatsApp.');
   try{
     const p=callBase(clean);
