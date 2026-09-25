@@ -394,6 +394,39 @@ function renthubReplacementStart(contract: any, latestPartnerStart = "19:59") {
   const sm = String(startMinutes % 60).padStart(2, "0");
   return `${startDate} ${sh}:${sm}`;
 }
+function addIsoDays(isoDate: string, days: number) {
+  const d = new Date(isoDate + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function weekdayKey(isoDate: string) {
+  const d = new Date(isoDate + "T12:00:00Z");
+  const n = d.getUTCDay();
+  return String(n === 0 ? 7 : n);
+}
+function firstOpeningAtOrAfter(opening: any, fromDateTime: string, endDateTime: string) {
+  const timetable = opening?.timetable && typeof opening.timetable === "object" ? opening.timetable : {};
+  const closed = new Set((Array.isArray(opening?.closed_at) ? opening.closed_at : []).map((x: any) => String(x).slice(0, 10)));
+  const fromDate = String(fromDateTime).slice(0, 10);
+  for (let offset = 0; offset < 14; offset++) {
+    const date = addIsoDays(fromDate, offset);
+    if (closed.has(date)) continue;
+    const day = weekdayKey(date);
+    const candidates: string[] = [];
+    for (const item of Object.values(timetable) as any[]) {
+      const slots = Array.isArray(item?.weeklySchedule?.[day]) ? item.weeklySchedule[day] : [];
+      for (const slot of slots) {
+        const from = String(slot?.from || "").slice(0, 5);
+        if (/^\d{2}:\d{2}$/.test(from)) candidates.push(date + " " + from);
+      }
+    }
+    candidates.sort();
+    for (const candidate of candidates) {
+      if (candidate >= fromDateTime && candidate < endDateTime) return candidate;
+    }
+  }
+  return "";
+}
 async function requireWrite(resultPromise: PromiseLike<any>, label: string) {
   const result = await resultPromise;
   if (result?.error) throw new Error(`${label}: ${result.error.message}`);
@@ -713,6 +746,7 @@ async function automaticMappings(contract: any) {
     dropoffMatched: dropoffResolved.matched,
     minimumStart: String(parameterResponse?.result?.opening?.min_date || "").slice(0, 16),
     latestPartnerStart,
+    opening: parameterResponse?.result?.opening || {},
   };
 }
 
@@ -761,7 +795,7 @@ async function handler(req: Request) {
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart, latestPartnerStart } = await automaticMappings(contract);
+  const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart, latestPartnerStart, opening } = await automaticMappings(contract);
   const contractPlate = String(contract.app_payload?.vehicle_plate || contract.app_payload?.registration || contract.vehicle_plate || "").trim();
   const fleetMatch = contractPlate ? renthubFleetByPlate[plateKey(contractPlate)] : null;
   // El modelo reservado y el vehículo concreto son independientes en Renthub.
@@ -1097,6 +1131,18 @@ async function handler(req: Request) {
       const candidate = `${date} ${latestPartnerStart}`;
       return candidate < end ? candidate : "";
     })();
+    const nextAvailableStart = (() => {
+      const floor = minimumStart && minimumStart > startValue ? minimumStart : startValue;
+      return firstOpeningAtOrAfter(opening, floor, end);
+    })();
+    const timeRejected = (error: unknown) => {
+      const key = normalize(error instanceof Error ? error.message : String(error));
+      return officeClosed(error)
+        || key.includes("fecha") && (key.includes("pasad") || key.includes("min") || key.includes("permit"))
+        || key.includes("hora") && (key.includes("pasad") || key.includes("min") || key.includes("permit"))
+        || key.includes("date") && (key.includes("past") || key.includes("minimum") || key.includes("allowed"))
+        || key.includes("time") && (key.includes("past") || key.includes("minimum") || key.includes("allowed"));
+    };
 
     let actualStart = startValue;
     let vehicleRequested = !!fleetMatch?.vehicle;
@@ -1109,7 +1155,26 @@ async function handler(req: Request) {
     try {
       insertedBooking = await doInsert(actualStart, vehicleRequested);
     } catch (firstError) {
-      if (officeClosed(firstError) && fallbackStart && fallbackStart !== actualStart) {
+      if (timeRejected(firstError) && nextAvailableStart && nextAvailableStart !== actualStart) {
+        console.log(JSON.stringify({
+          event: "renthub_next_available_time_fallback",
+          contract_number: contract.contract_number,
+          requested_start: actualStart,
+          retry_start: nextAvailableStart,
+          minimum_start: minimumStart || null,
+          real_start: start,
+          reason: firstError instanceof Error ? firstError.message : String(firstError),
+        }));
+        actualStart = nextAvailableStart;
+        try {
+          insertedBooking = await doInsert(actualStart, vehicleRequested);
+        } catch (secondError) {
+          if (vehicleRequested && vehicleUnavailable(secondError)) {
+            vehicleRequested = false;
+            insertedBooking = await doInsert(actualStart, false);
+          } else throw secondError;
+        }
+      } else if (officeClosed(firstError) && fallbackStart && fallbackStart !== actualStart) {
         console.log(JSON.stringify({
           event: "renthub_office_hours_fallback",
           contract_number: contract.contract_number,
@@ -1374,9 +1439,6 @@ async function handler(req: Request) {
         }));
       }
 
-      if (minimumStart && replacementStart < minimumStart) {
-        throw new Error(`Renthub no admite crear la reserva de sustitución con inicio ${replacementStart}. La reserva actual ${code} se mantiene sin cambios.`);
-      }
       if (replacementStart >= end) {
         throw new Error(`La hora calculada de inicio ${replacementStart} no es anterior a la devolución ${end}. La reserva actual se mantiene sin cambios.`);
       }
