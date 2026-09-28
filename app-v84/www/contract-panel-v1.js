@@ -53,7 +53,9 @@ function row(c){
     : canCancelDelete
     ? `<button class="danger" data-admin-only="true" onclick="LariosAdminReservations.remove('${c.id}','${esc(c.contract_number||'esta reserva')}')">Eliminar reserva cancelada</button>`
     : '';
-  const actions=isWeb(c)?'<small>Reserva web existente en Renthub · precio y pagos conservados</small>':managed
+  const actions=isWeb(c)
+    ? `<small>Reserva web existente en Renthub · precio y pagos conservados</small>${cancelAction}`
+    : managed
     ? ''
     : linked&&c.renthub_sync_status==='verified'
     ? `<button class="danger" data-admin-only="true" ${canPurge?'':'disabled'} onclick="LariosContractPanel.purge('${c.id}')">${esc(purgeLabel)}</button>`
