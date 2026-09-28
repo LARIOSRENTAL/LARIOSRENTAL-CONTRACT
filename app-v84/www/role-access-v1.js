@@ -30,7 +30,7 @@ async function userRequest(retry=true){
   return response.json();
 }
 function permissionsMarkup(){
-  return `<div class="lrPermissionsShell"><div class="lrPermissionsHead"><div><b>Permisos de la cuenta</b><span>${esc(state.email||'Usuario identificado')} · ${esc(label())}</span></div><button type="button" onclick="LariosAccess.closePermissions()">×</button></div><div class="lrPermissionIntro ${isAdmin()?'admin':'employee'}"><b>${isAdmin()?'Acceso administrativo completo':'Acceso operativo de empleado'}</b><span>${isAdmin()?'Puedes realizar también las acciones sensibles indicadas en morado.':'Puedes trabajar con reservas, contratos y vehículos. Los contratos generados quedan bloqueados.'}</span></div><div class="lrPermissionGrid"><section><h3>Empleado</h3><ul><li>Crear y editar reservas mientras sean borradores.</li><li>Generar el contrato y enviarlo al cliente.</li><li>Consultar los paneles de Contratos y Vehículos.</li><li>Completar la devolución y las operaciones permitidas desde su fecha.</li></ul></section><section class="admin"><h3>Solo administrador</h3><ul><li>Editar contratos después de generarlos.</li><li>Acceder a Clientes y a la gestión de Renthub.</li><li>Enviar o actualizar reservas en Renthub.</li><li>Modificar tarifas, permisos o registros bloqueados.</li></ul></section></div><p class="lrPermissionsFoot">Los empleados no pueden editar ni regenerar un contrato una vez generado.</p></div>`;
+  return `<div class="lrPermissionsShell"><div class="lrPermissionsHead"><div><b>Permisos de la cuenta</b><span>${esc(state.email||'Usuario identificado')} · ${esc(label())}</span></div><button type="button" onclick="LariosAccess.closePermissions()">×</button></div><div class="lrPermissionIntro ${isAdmin()?'admin':'employee'}"><b>${isAdmin()?'Acceso administrativo completo':'Acceso operativo de empleado'}</b><span>${isAdmin()?'Puedes realizar también las acciones sensibles indicadas en morado.':'Puedes gestionar las reservas automáticas, contratos y vehículos. La creación y cancelación manual son administrativas y los contratos generados quedan bloqueados.'}</span></div><div class="lrPermissionGrid"><section><h3>Empleado</h3><ul><li>Editar las reservas automáticas mientras sean borradores.</li><li>Generar el contrato y enviarlo al cliente.</li><li>Consultar los paneles de Contratos y Vehículos.</li><li>Completar la devolución y las operaciones permitidas desde su fecha.</li></ul></section><section class="admin"><h3>Solo administrador</h3><ul><li>Crear y cancelar reservas.</li><li>Editar contratos después de generarlos.</li><li>Acceder a Clientes y a la gestión de Renthub.</li><li>Enviar o actualizar reservas en Renthub.</li><li>Modificar tarifas, permisos o registros bloqueados.</li></ul></section></div><p class="lrPermissionsFoot">Los empleados no pueden editar ni regenerar un contrato una vez generado.</p></div>`;
 }
 function openPermissions(){let panel=$('lrPermissionsPanel');if(!panel){panel=document.createElement('section');panel.id='lrPermissionsPanel';panel.className='lrPermissionsPanel';document.body.appendChild(panel)}panel.innerHTML=permissionsMarkup();panel.classList.add('open');document.body.style.overflow='hidden'}
 function closePermissions(){$('lrPermissionsPanel')?.classList.remove('open');document.body.style.overflow=''}
@@ -68,6 +68,12 @@ function guardPanelOpen(){
     panel.__employeeAccessGuard=true;
   }
 }
+function limitEmployeeReservationCreation(){
+  const createButton=[...document.querySelectorAll('#home .actions button')].find(b=>/nueva reserva/i.test(b.textContent||''));
+  if(createButton)createButton.classList.toggle('hidden',isEmployee());
+  const modal=$('quickReservationModal');
+  if(isEmployee())modal?.classList.add('hidden');
+}
 function limitEmployeePanels(){
   for(const id of ['n-customers','n-documents','n-drivers','n-damages','n-renthub_sync_log'])$(id)?.closest('button.card')?.classList.toggle('hidden',isEmployee());
   const contracts=$('n-contracts')?.closest('button.card');
@@ -94,7 +100,7 @@ function decorate(){
     document.body.classList.toggle('lrRoleAdmin',isAdmin());
     document.body.classList.toggle('lrRoleEmployee',isEmployee());
     document.body.classList.toggle('lrRoleMissing',state.ready&&!isStaff());
-    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();guardPanelOpen();limitEmployeePanels();lockGeneratedContract();
+    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();guardPanelOpen();limitEmployeeReservationCreation();limitEmployeePanels();lockGeneratedContract();
     document.querySelectorAll('[data-admin-only="true"]').forEach(button=>{
       if(!isAdmin())button.disabled=true;
       button.setAttribute('aria-disabled',String(button.disabled));
