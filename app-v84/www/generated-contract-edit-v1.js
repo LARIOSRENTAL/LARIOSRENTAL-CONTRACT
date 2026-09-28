@@ -25,6 +25,7 @@ function preservePrices(x){
   setCheck('full_insurance',x.full_insurance);setCheck('young_driver',x.young_driver);if(x.payment_method!=null)setValue('payment_method',x.payment_method);
 }
 function restoreExtras(x){
+  document.querySelectorAll('[id^="v2_"][type="checkbox"],[id^="fx_"][type="checkbox"]').forEach(el=>{el.checked=false});
   const rows=Array.isArray(x.extras_detail)?x.extras_detail:[];if(!rows.length)return;
   rows.forEach(item=>{
     const key=String(item.key||'');
