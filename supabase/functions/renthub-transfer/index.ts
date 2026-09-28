@@ -790,31 +790,59 @@ async function handler(req: Request) {
   const { data: contract, error: contractError } = await service.from("contracts").select("*").eq("id", contractId).single();
   if (contractError || !contract) return json({ error: "Contract not found" }, 404);
   if (action === "cancel") {
+    if (contract.status === "cancelled") return json({ cancelled: true, already_cancelled: true, renthub_cancelled: false });
+
     const code = String(contract.renthub_contract_id || "").trim();
-    if (!code) return json({ error: "La reserva no tiene código Renthub enlazado." }, 409);
-    try {
-      await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(code)}`, { method: "DELETE" });
-    } catch (error) {
-      throw new Error(`Renthub no permitió cancelar la reserva ${code}. No se ha eliminado ni modificado la reserva local. ${error instanceof Error ? error.message : String(error)}`);
+    const pickupDate = String(contract.delivery_date || "").slice(0, 10);
+    const pickupTime = String(contract.delivery_time || "00:00").slice(0, 5);
+    const pickupAt = pickupDate ? new Date(`${pickupDate}T${pickupTime || "00:00"}:00+02:00`) : null;
+    const future = !!pickupAt && Number.isFinite(pickupAt.getTime()) && pickupAt.getTime() > Date.now();
+    const noContract = contract.status === "draft" && !String(contract.pdf_path || "").trim();
+    const cancelRenthub = !!code && future && noContract;
+
+    if (cancelRenthub) {
+      try {
+        await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(code)}`, { method: "DELETE" });
+      } catch (error) {
+        throw new Error(`Renthub no permitió cancelar la reserva ${code}. Para evitar diferencias entre sistemas, la reserva local se mantiene sin cancelar. ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    const payload = { ...(contract.app_payload || {}), renthub_cancelled_code: code, renthub_cancelled_at: new Date().toISOString() };
+
+    const now = new Date().toISOString();
+    const payload = {
+      ...(contract.app_payload || {}),
+      cancelled_at: now,
+      cancelled_by_app: true,
+      renthub_cancel_attempted: cancelRenthub,
+      renthub_cancelled_code: cancelRenthub ? code : (contract.app_payload?.renthub_cancelled_code || null),
+      renthub_cancelled_at: cancelRenthub ? now : (contract.app_payload?.renthub_cancelled_at || null),
+      renthub_cancel_skipped_reason: !code ? "not_linked" : !future ? "not_future" : !noContract ? "contract_already_generated" : null,
+    };
     await requireWrite(service.from("contracts").update({
-      renthub_contract_id: null,
-      renthub_sync_status: "cancelled",
+      status: "cancelled",
+      renthub_contract_id: cancelRenthub ? null : contract.renthub_contract_id,
+      renthub_sync_status: cancelRenthub ? "cancelled" : contract.renthub_sync_status,
       renthub_sync_error: null,
       app_payload: payload,
+      updated_at: now,
     }).eq("id", contract.id), "No se pudo guardar la cancelación local");
+
     await service.from("renthub_sync_log").insert({
       contract_id: contract.id,
-      operation: "cancel_booking",
-      direction: "outbound",
-      external_reference: code,
-      request_data: { code },
-      response_data: { cancelled: true },
+      operation: cancelRenthub ? "cancel_booking_and_local" : "cancel_local_only",
+      direction: cancelRenthub ? "outbound" : "local",
+      external_reference: code || null,
+      request_data: { code: code || null, future, no_contract: noContract },
+      response_data: { cancelled: true, renthub_cancelled: cancelRenthub },
       success: true,
-      verified_at: new Date().toISOString(),
+      verified_at: now,
     });
-    return json({ cancelled: true, external_reference: code });
+    return {
+      cancelled: true,
+      renthub_cancelled: cancelRenthub,
+      external_reference: code || null,
+      renthub_skipped_reason: !cancelRenthub ? payload.renthub_cancel_skipped_reason : null,
+    };
   }
 
   if (contract.status === "draft") return json({ error: "Generate the contract before sending it to Renthub" }, 409);
