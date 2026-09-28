@@ -789,6 +789,34 @@ async function handler(req: Request) {
   if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
   const { data: contract, error: contractError } = await service.from("contracts").select("*").eq("id", contractId).single();
   if (contractError || !contract) return json({ error: "Contract not found" }, 404);
+  if (action === "cancel") {
+    const code = String(contract.renthub_contract_id || "").trim();
+    if (!code) return json({ error: "La reserva no tiene código Renthub enlazado." }, 409);
+    try {
+      await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(code)}`, { method: "DELETE" });
+    } catch (error) {
+      throw new Error(`Renthub no permitió cancelar la reserva ${code}. No se ha eliminado ni modificado la reserva local. ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const payload = { ...(contract.app_payload || {}), renthub_cancelled_code: code, renthub_cancelled_at: new Date().toISOString() };
+    await requireWrite(service.from("contracts").update({
+      renthub_contract_id: null,
+      renthub_sync_status: "cancelled",
+      renthub_sync_error: null,
+      app_payload: payload,
+    }).eq("id", contract.id), "No se pudo guardar la cancelación local");
+    await service.from("renthub_sync_log").insert({
+      contract_id: contract.id,
+      operation: "cancel_booking",
+      direction: "outbound",
+      external_reference: code,
+      request_data: { code },
+      response_data: { cancelled: true },
+      success: true,
+      verified_at: new Date().toISOString(),
+    });
+    return json({ cancelled: true, external_reference: code });
+  }
+
   if (contract.status === "draft") return json({ error: "Generate the contract before sending it to Renthub" }, 409);
 
   const [{ data: customer }, { data: driver }] = await Promise.all([
