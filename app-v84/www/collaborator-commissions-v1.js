@@ -35,21 +35,13 @@ function updatePrintHeader(rows){
  const title=reportPartner==='COLABORADORES'?'Informe de comisiones colaboradores':'Informe de comisiones - '+reportPartner;
  const grouped={};for(const x of rows.filter(r=>r.included)){const n=x.collaborators?.name||'Sin colaborador';grouped[n]=(grouped[n]||0)+Number(x.commission_amount||0)}
  const totals=Object.entries(grouped).sort((a,b)=>a[0].localeCompare(b[0])).map(([n,v])=>'<div><b>'+esc(n)+'</b>: '+money(v)+'</div>').join('');
- $('commissionPrintHeader').innerHTML='<div class="commissionPrintCorporate"><svg class="commissionVectorLogo" viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Larios Rental">
- <g fill="#20A6BE">
-  <text x="0" y="150" font-family="Helvetica Neue,Arial,sans-serif" font-size="150" font-weight="300" letter-spacing="2">LARI</text>
-  <circle cx="590" cy="98" r="82" fill="none" stroke="#20A6BE" stroke-width="24"/>
-  <circle cx="590" cy="98" r="28"/>
-  <path d="M548 177 L590 222 L632 177 L612 182 L590 205 L568 182 Z"/>
-  <text x="685" y="150" font-family="Helvetica Neue,Arial,sans-serif" font-size="150" font-weight="300">S</text>
- </g>
- <text x="0" y="272" fill="#383636" font-family="Helvetica Neue,Arial,sans-serif" font-size="82" font-weight="300" letter-spacing="18">RENTAL</text>
-</svg><div class="commissionPrintCompany"><b>LARIOS RENTAL, S.L.</b><br>CIF B92069368<br>C/ Malpica 12 · 29002 Málaga<br>Oficina: Pasaje Noblejas 8 · 29002 Málaga<br>+34 951 09 20 69<br>info@lariosrental.com<br>www.lariosrental.com</div></div><h2 class="commissionPrintTitle">'+esc(title)+'</h2><p class="commissionPrintMeta">Periodo: '+esc(displayDate(from))+' a '+esc(displayDate(to))+' · Estado: '+esc(status)+'</p><div class="commissionAgencyTotal">'+totals+'</div>';
+ const logoSvg='<svg class="commissionVectorLogo" viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Larios Rental"><g fill="#20A6BE"><text x="0" y="150" font-family="Arial,sans-serif" font-size="150" font-weight="300" letter-spacing="2">LARI</text><circle cx="590" cy="98" r="82" fill="none" stroke="#20A6BE" stroke-width="24"/><circle cx="590" cy="98" r="28"/><path d="M548 177 L590 222 L632 177 L612 182 L590 205 L568 182 Z"/><text x="685" y="150" font-family="Arial,sans-serif" font-size="150" font-weight="300">S</text></g><text x="0" y="272" fill="#383636" font-family="Arial,sans-serif" font-size="82" font-weight="300" letter-spacing="18">RENTAL</text></svg>';
+ $('commissionPrintHeader').innerHTML='<div class="commissionPrintCorporate">'+logoSvg+'<div class="commissionPrintCompany"><b>LARIOS RENTAL, S.L.</b><br>CIF B92069368<br>C/ Malpica 12 · 29002 Málaga<br>Oficina: Pasaje Noblejas 8 · 29002 Málaga<br>+34 951 09 20 69<br>info@lariosrental.com<br>www.lariosrental.com</div></div><h2 class="commissionPrintTitle">'+esc(title)+'</h2><p class="commissionPrintMeta">Periodo: '+esc(displayDate(from))+' a '+esc(displayDate(to))+' · Estado: '+esc(status)+'</p><div class="commissionAgencyTotal">'+totals+'</div>';
 }
 async function saveRow(id){const tr=document.querySelector('tr[data-id="'+CSS.escape(id)+'"]');if(!tr)return;const base=Number(tr.querySelector('[data-f=base]').value||0),pct=Number(tr.querySelector('[data-f=pct]').value||0),included=tr.querySelector('[data-f=included]').value==='1',reason=tr.querySelector('[data-f=reason]').value;await rpc('app_update_collaborator_commission',{p_id:id,p_rental_base:base,p_commission_percent:pct,p_included:included,p_exclusion_reason:reason});await loadCommissions()}
 async function markSelected(paid){const ids=[...document.querySelectorAll('.commissionCheck:checked')].map(x=>x.value);if(!ids.length)return alert('Selecciona al menos una comisión.');await rpc('app_mark_commissions_paid',{p_ids:ids,p_paid:paid,p_note:''});await loadCommissions()}async function printReport(){requestAnimationFrame(()=>setTimeout(()=>window.print(),80))}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}function escAttr(s){return esc(s)}
 function boot(){ensureScreen();ensureHomeButton()}
-window.LariosCommissions={open:openCommissions,load:loadCommissions,saveRow,markSelected,version:'20260928-v9-vector-logo-live-search'};
+window.LariosCommissions={open:openCommissions,load:loadCommissions,saveRow,markSelected,version:'20260928-v10-syntax-fix'};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
