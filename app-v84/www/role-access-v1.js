@@ -68,6 +68,7 @@ function guardPanelOpen(){
     panel.__employeeAccessGuard=true;
   }
 }
+function limitEmployeeAgendaReservationButtons(){document.querySelectorAll('.agendaReservationEdit').forEach(b=>{b.style.display=isAdmin()?'':'none'})}
 function limitEmployeeReservationCreation(){
   const createButton=[...document.querySelectorAll('#home .actions button')].find(b=>/nueva reserva/i.test(b.textContent||''));
   if(createButton)createButton.classList.toggle('hidden',isEmployee());
@@ -100,7 +101,7 @@ function decorate(){
     document.body.classList.toggle('lrRoleAdmin',isAdmin());
     document.body.classList.toggle('lrRoleEmployee',isEmployee());
     document.body.classList.toggle('lrRoleMissing',state.ready&&!isStaff());
-    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();guardPanelOpen();limitEmployeeReservationCreation();limitEmployeePanels();lockGeneratedContract();
+    identityBar();reservationGuide();lifecycleGuide();pricingGuide();markVersion();guardPanelOpen();limitEmployeeReservationCreation();limitEmployeeAgendaReservationButtons();limitEmployeePanels();lockGeneratedContract();
     document.querySelectorAll('[data-admin-only="true"]').forEach(button=>{
       if(!isAdmin())button.disabled=true;
       button.setAttribute('aria-disabled',String(button.disabled));
