@@ -34,9 +34,32 @@ async function resumeContract(id){
 async function markDone(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden marcar un contrato como ya realizado.');if(!confirm('¿Marcar este contrato como ya realizado manualmente o en Renthub?\n\nNo se generará un PDF nuevo.'))return;try{const r=await loadRecord(id),p={...r,id,status:'confirmed',contract_already_done:true,contract_done_source:'manual_or_renthub'};await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});record=null;recordId='';await window.LariosReservations?.loadAgenda?.($('agendaDate')?.value);decorateAgenda()}catch(e){alert('No se pudo marcar el contrato como realizado: '+e.message)}}
 function decorateAgenda(){const snap=window.LariosReservations?.getAgendaSnapshot?.();if(!snap)return;const admin=window.LariosAccess?.isAdmin?.()===true,cols=document.querySelectorAll('#agenda .agendaCol'),cards=cols[0]?.querySelectorAll('.agendaItem.rich')||[];(snap.deliveries||[]).forEach((x,i)=>{const c=cards[i];if(!c)return;const done=x.status!=='draft'||x.contract_already_done===true;c.classList.toggle('lrContractDone',done);c.querySelector('.lrAlreadyDone')?.remove();const edit=[...c.querySelectorAll('button')].find(b=>/Editar reserva/i.test(b.textContent||''));if(edit)edit.style.display=''})}
 let agendaTimer=0;function scheduleAgenda(){if(!agendaTimer)agendaTimer=setTimeout(()=>{agendaTimer=0;decorateAgenda()},0)}
-function ensureAlreadyDoneEditorButton(){const actions=document.querySelector('#reservation .finalActions');if(!actions)return;let b=$('lrAlreadyDoneEditor');const admin=window.LariosAccess?.isAdmin?.()===true;const current=window.LariosCurrentContractId||'';if(!admin||!current){b?.remove();return}const snap=window.LariosReservations?.getAgendaSnapshot?.(),x=[...(snap?.deliveries||[]),...(snap?.returns||[])].find(v=>v.id===current);if(x&&x.status!=='draft'){b?.remove();return}if(!b){b=document.createElement('button');b.id='lrAlreadyDoneEditor';b.type='button';b.className='lrAlreadyDoneEditor';b.textContent='Contrato ya realizado';b.dataset.adminOnly='true';b.onclick=()=>markDone(window.LariosCurrentContractId);actions.prepend(b)}}
+function reconcileEditorActions(){
+  const actions=document.querySelector('#reservation .finalActions');if(!actions)return;
+  const gens=[...actions.querySelectorAll('button')].filter(b=>/^(Re)?Generar contrato/i.test(String(b.textContent||'').trim()));
+  if(gens.length>1){
+    const keep=gens.find(b=>b.classList.contains('primary'))||gens[gens.length-1];
+    gens.forEach(b=>{if(b!==keep)b.remove()});
+  }
+  const current=window.LariosCurrentContractId||'';
+  const admin=window.LariosAccess?.isAdmin?.()===true;
+  let b=$('lrAlreadyDoneEditor');
+  if(!admin||!current){b?.remove();return}
+  const snap=window.LariosReservations?.getAgendaSnapshot?.();
+  const x=[...(snap?.deliveries||[]),...(snap?.returns||[])].find(v=>v.id===current);
+  const form=$('reservationForm'),status=form?.dataset.contractStatus||x?.status||'draft';
+  if(status!=='draft'){b?.remove();return}
+  if(!b){
+    b=document.createElement('button');
+    b.id='lrAlreadyDoneEditor';b.type='button';b.className='lrAlreadyDoneEditor';
+    b.textContent='Contrato ya realizado';b.dataset.adminOnly='true';
+    b.onclick=()=>markDone(window.LariosCurrentContractId);
+    actions.prepend(b);
+  }
+}
+function ensureAlreadyDoneEditorButton(){reconcileEditorActions()}
 function validateContractReady(){if(!String($('customer_name')?.value||'').trim())return'Falta el nombre del cliente.';if(!$('cash_without_card')?.checked&&(!String($('card_number')?.value||'').trim()||!String($('card_expiry')?.value||'').trim()))return'Indica los datos de tarjeta o marca Efectivo sin tarjeta.';const g=String($('vehicle_group')?.value||'').toUpperCase().replace(/^GRUPO\s+/,'');if(['50CC','125CC'].includes(g)&&!$('deposit_cash_selected')?.checked&&!$('preauth_selected')?.checked)return'Para generar el contrato de una moto debes seleccionar Depósito efectivo o Preautorización.';return''}
-function boot(){ensureCashBox();const section=$('reservation');if(section)new MutationObserver(()=>{if(!section.classList.contains('hidden'))setTimeout(()=>{hydrate();ensureAlreadyDoneEditorButton()},80);else $('lrAlreadyDoneEditor')?.remove()}).observe(section,{attributes:true,attributeFilter:['class']});const agenda=$('agenda');if(agenda)new MutationObserver(scheduleAgenda).observe(agenda,{childList:true,subtree:true});scheduleAgenda();ensureAlreadyDoneEditorButton();const q=new URLSearchParams(location.search),target=q.get('contract_id')||sessionStorage.getItem('lr_resume_contract');if(target)setTimeout(()=>resumeContract(target),700)}
+function boot(){ensureCashBox();const section=$('reservation');let editorTimer=0;const scheduleEditor=()=>{if(editorTimer)return;editorTimer=setTimeout(()=>{editorTimer=0;if(section&&!section.classList.contains('hidden')){hydrate();reconcileEditorActions()}else $('lrAlreadyDoneEditor')?.remove()},50)};if(section)new MutationObserver(scheduleEditor).observe(section,{attributes:true,attributeFilter:['class'],childList:true,subtree:true});document.addEventListener('larios:reservation-opened',scheduleEditor);window.addEventListener('larios:access-ready',scheduleEditor);const agenda=$('agenda');if(agenda)new MutationObserver(scheduleAgenda).observe(agenda,{childList:true,subtree:true});scheduleAgenda();scheduleEditor();const q=new URLSearchParams(location.search),target=q.get('contract_id')||sessionStorage.getItem('lr_resume_contract');if(target)setTimeout(()=>resumeContract(target),700)}
 const style=document.createElement('style');style.textContent='.lrCashNoCard{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#f9fafb}.lrCashNoCard input{width:auto;margin-top:3px}.lrCashNoCard span{display:grid;gap:2px}.lrCashNoCard small{color:#6b7280}.lrContractDone{background:#fee2e2!important;border-color:#ef4444!important}.lrContractDone:before{background:#dc2626!important;box-shadow:0 0 0 4px #fee2e2!important}.lrAlreadyDone{display:none!important}.lrAlreadyDoneEditor{color:#991b1b!important;border:1px solid #fecaca!important;background:#fff1f2!important}';document.head.appendChild(style);
 window.LariosWorkflow={saveOpenReservation,resumeContract,currentStatus,hydrate,markDone,validateContractReady,version:'workflow-v1'};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
