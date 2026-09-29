@@ -1187,7 +1187,12 @@ async function handler(req: Request) {
     };
     const vehicleUnavailable = (error: unknown) => {
       const key = normalize(error instanceof Error ? error.message : String(error));
-      return key.includes("no hay vehiculos disponibles") || key.includes("no vehicles available") || key.includes("vehiculo no disponible");
+      return key.includes("no hay vehiculos disponibles")
+        || key.includes("no vehicles available")
+        || key.includes("vehiculo no disponible")
+        || key.includes("no hay modelos disponibles")
+        || key.includes("no models available")
+        || key.includes("modelo no disponible");
     };
     const fallbackStart = (() => {
       const date = String(startValue || "").slice(0, 10);
