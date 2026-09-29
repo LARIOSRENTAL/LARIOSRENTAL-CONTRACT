@@ -880,8 +880,16 @@ async function handler(req: Request) {
   const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, total_gross: expectedTotal, total_net: renthubRentalRate, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
   const replacementStart = renthubReplacementStart(contract, latestPartnerStart);
-  const paymentMethod = partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method);
-  const paymentAmount = amount(contract.total || contract.app_payload?.total);
+  // TEMPORARILY DISABLED:
+  // Renthub Partner API payment sync is not reliable yet. Keep all booking/data sync active,
+  // but never send payment_method/payment_amount and never create/verify an accounting payment.
+  const RENTHUB_PAYMENT_SYNC_ENABLED = false;
+  const paymentMethod = RENTHUB_PAYMENT_SYNC_ENABLED
+    ? partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method)
+    : "";
+  const paymentAmount = RENTHUB_PAYMENT_SYNC_ENABLED
+    ? amount(contract.total || contract.app_payload?.total)
+    : 0;
   const desiredFranchise = Math.max(0, amount(contract.app_payload?.franchise ?? contract.franchise ?? 0));
   const replacementHash = await digest({
     contract_id: contract.id,
@@ -1007,9 +1015,8 @@ async function handler(req: Request) {
     form.set("overwrite_rental_rate", renthubRentalRate.toFixed(4));
     form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
     if (desiredFranchise > 0) form.set("overwrite_damage_franchise", desiredFranchise.toFixed(2));
-    // Renthub confirmó que el pago de la reserva se envía por la API general/Partner.
-    // No usamos User API para pagos.
-    if (paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0) {
+    // Pago desactivado temporalmente hasta que Renthub confirme un flujo contable fiable.
+    if (RENTHUB_PAYMENT_SYNC_ENABLED && paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0) {
       form.set("payment_method", paymentMethod);
       form.set("payment_amount", paymentAmount.toFixed(2));
     }
@@ -1442,8 +1449,8 @@ async function handler(req: Request) {
 
       // Flujo definitivo:
       // - la reserva inicial permanece sin matrícula ni pago;
-      // - al pulsar "Mandar datos Renthub" se crea una reserva nueva por Partner API,
-      //   incluyendo matrícula (si está disponible) y pago;
+      // - al pulsar "Mandar datos Renthub" se crea/actualiza la reserva por Partner API,
+      //   incluyendo matrícula si está disponible. El pago está desactivado temporalmente;
       // - solo si la reserva ya está bloqueada/confirmada se intenta actualizar la misma
       //   para evitar cancelaciones no permitidas.
       if (!checked.verified) {
