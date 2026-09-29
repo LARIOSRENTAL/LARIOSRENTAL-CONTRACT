@@ -35,26 +35,39 @@ async function markDone(id){if(window.LariosAccess?.isAdmin?.()!==true)return al
 function decorateAgenda(){const snap=window.LariosReservations?.getAgendaSnapshot?.();if(!snap)return;const admin=window.LariosAccess?.isAdmin?.()===true,cols=document.querySelectorAll('#agenda .agendaCol'),cards=cols[0]?.querySelectorAll('.agendaItem.rich')||[];(snap.deliveries||[]).forEach((x,i)=>{const c=cards[i];if(!c)return;const done=x.status!=='draft'||x.contract_already_done===true;c.classList.toggle('lrContractDone',done);c.querySelector('.lrAlreadyDone')?.remove();const edit=[...c.querySelectorAll('button')].find(b=>/Editar reserva/i.test(b.textContent||''));if(edit)edit.style.display=''})}
 let agendaTimer=0;function scheduleAgenda(){if(!agendaTimer)agendaTimer=setTimeout(()=>{agendaTimer=0;decorateAgenda()},0)}
 function reconcileEditorActions(){
-  const actions=document.querySelector('#reservation .finalActions');if(!actions)return;
-  const gens=[...actions.querySelectorAll('button')].filter(b=>/^(Re)?Generar contrato/i.test(String(b.textContent||'').trim()));
+  const section=$('reservation');if(!section||section.classList.contains('hidden'))return;
+  const all=[...section.querySelectorAll('button')];
+  const save=all.find(b=>/Guardar reserva|Guardar cambios/i.test(String(b.textContent||'').trim()));
+  const gens=all.filter(b=>/^(Re)?Generar contrato/i.test(String(b.textContent||'').trim()));
   if(gens.length>1){
     const keep=gens.find(b=>b.classList.contains('primary'))||gens[gens.length-1];
     gens.forEach(b=>{if(b!==keep)b.remove()});
   }
+  const generate=(gens.find(b=>b.isConnected&&b.classList.contains('primary'))||gens.find(b=>b.isConnected)||[...section.querySelectorAll('button')].find(b=>/^(Re)?Generar contrato/i.test(String(b.textContent||'').trim())));
+  const actions=save?.closest('.finalActions,.actions')||generate?.closest('.finalActions,.actions')||save?.parentElement||generate?.parentElement;
+  if(!actions)return;
+
   const current=window.LariosCurrentContractId||'';
   const admin=window.LariosAccess?.isAdmin?.()===true;
   let b=$('lrAlreadyDoneEditor');
   if(!admin||!current){b?.remove();return}
-  const snap=window.LariosReservations?.getAgendaSnapshot?.();
-  const x=[...(snap?.deliveries||[]),...(snap?.returns||[])].find(v=>v.id===current);
-  const form=$('reservationForm'),status=form?.dataset.contractStatus||x?.status||'draft';
+
+  const form=$('reservationForm');
+  const status=form?.dataset.contractStatus||'draft';
   if(status!=='draft'){b?.remove();return}
+
   if(!b){
     b=document.createElement('button');
-    b.id='lrAlreadyDoneEditor';b.type='button';b.className='lrAlreadyDoneEditor';
-    b.textContent='Contrato ya realizado';b.dataset.adminOnly='true';
+    b.id='lrAlreadyDoneEditor';
+    b.type='button';
+    b.className='lrAlreadyDoneEditor';
+    b.textContent='Contrato ya realizado';
+    b.dataset.adminOnly='true';
     b.onclick=()=>markDone(window.LariosCurrentContractId);
-    actions.prepend(b);
+  }
+  if(!b.isConnected){
+    if(save)save.insertAdjacentElement('afterend',b);
+    else actions.insertBefore(b,generate||actions.firstChild);
   }
 }
 function ensureAlreadyDoneEditorButton(){reconcileEditorActions()}
