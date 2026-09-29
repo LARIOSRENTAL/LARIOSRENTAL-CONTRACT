@@ -68,7 +68,7 @@ function guardPanelOpen(){
     panel.__employeeAccessGuard=true;
   }
 }
-function limitEmployeeAgendaReservationButtons(){document.querySelectorAll('.agendaReservationEdit').forEach(b=>{b.style.display=isAdmin()?'':'none'})}
+function limitEmployeeAgendaReservationButtons(){document.querySelectorAll('.agendaReservationEdit').forEach(b=>{b.style.display=''});document.querySelectorAll('.agendaCancelReservation').forEach(b=>{b.style.display=isAdmin()?'':'none'})}
 function limitEmployeeReservationCreation(){
   const createButton=[...document.querySelectorAll('#home .actions button')].find(b=>/nueva reserva/i.test(b.textContent||''));
   if(createButton)createButton.classList.toggle('hidden',isEmployee());
