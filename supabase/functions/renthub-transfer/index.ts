@@ -846,6 +846,7 @@ async function handler(req: Request) {
   }
 
   if (contract.status === "draft") return json({ error: "Generate the contract before sending it to Renthub" }, 409);
+  if (action === "send" && !String(contract.pdf_path || "").trim()) return json({ error: "Este contrato no tiene PDF generado en Larios Rental. No se pueden mandar datos a Renthub." }, 409);
 
   const [{ data: customer }, { data: driver }] = await Promise.all([
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
