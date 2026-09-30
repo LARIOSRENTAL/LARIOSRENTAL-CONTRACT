@@ -7,7 +7,7 @@ const normalize=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
 const phones=/\+\d[\d\s\u00a0().-]{6,}\d|(?<!\d)[679]\d{8}(?!\d)/g;
 const special=[
  {name:'CITY EXPERT',re:/\b(?:cister\s*city\s*expert|city\s*expert|cister\s*city|cister)\b/i,branch:/\b(?:cister|calle granada|m[aá]laga estaci[oó]n autobuses|estaci[oó]n autobuses|muelle heredia)\b/i},
- {name:'ELE APARTAMENT',re:/\b(?:ele\s*apart(?:ament|amentos)?|l\s*apart(?:ament|amentos)?)\b/i},
+ {name:'L APARTAMENTOS 636638887',re:/\b(?:ele\s*apart(?:a?ment(?:os)?|ments?)|l\s*apart(?:a?ment(?:os)?|ments?)|lapart(?:a?ment(?:os)?|ments?))\b/i},
  {name:'SOL MAESTRANZA',re:/\bsol\s+maestranza\b/i},
  {name:'DULCE HOGAR',re:/\bdulce\s+hogar\b/i},
  {name:'INMOSWISS',re:/\b(?:inmoswiss|imo\s*swiss)\b/i},
