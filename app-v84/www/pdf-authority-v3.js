@@ -25,6 +25,10 @@ function prepareRequiredFields(){
  if(documentField&&!val('customer_document')&&licence){documentField.value=licence;documentField.dispatchEvent(new Event('input',{bubbles:true}));documentField.dispatchEvent(new Event('change',{bubbles:true}))}
  if(!val('customer_phone')){markRequired('customer_phone');alert('Falta el teléfono del cliente. Es obligatorio para generar el contrato.');return false}
  if(!val('payment_method')){markRequired('payment_method');alert('Selecciona la forma de pago. Es obligatoria para generar el contrato.');return false}
+ if(!chk('cash_without_card')){
+  if(!val('card_number')){markRequired('card_number');alert('Introduce los datos de la tarjeta o marca Efectivo sin tarjeta.');return false}
+  if(!val('card_expiry')){markRequired('card_expiry');alert('Introduce la caducidad de la tarjeta o marca Efectivo sin tarjeta.');return false}
+ }
  return true
 }
 function disp(v){const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:String(v||'')}
