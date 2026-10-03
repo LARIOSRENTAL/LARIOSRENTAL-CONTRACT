@@ -145,12 +145,67 @@ function patchPrices(){if(window.LariosWebBooking?.preservePrice())return;
   }
   authoritativeTotal();
 }
-function install(){if(installed||!window.LariosReservations)return;installed=true;let agendaRefresh=null,lastAgendaRefresh=0;const ensureAgenda=async(force=false)=>{if(agendaRefresh)return agendaRefresh;if(!force&&Date.now()-lastAgendaRefresh<1200){decorateAgenda();return}lastAgendaRefresh=Date.now();agendaRefresh=refreshData().then(()=>{decorateAgenda();window.dispatchEvent(new CustomEvent('larios:agenda-controls-ready'))}).catch(e=>console.warn('Agenda lifecycle',e)).finally(()=>{agendaRefresh=null});return agendaRefresh};const oldLoad=LariosReservations.loadAgenda.bind(LariosReservations),oldEdit=LariosReservations.edit.bind(LariosReservations);LariosReservations.loadAgenda=async function(date){const r=await oldLoad(date);await ensureAgenda(true);return r};LariosReservations.edit=function(id){editingId=id;const r=oldEdit(id);setTimeout(()=>{patchPrices();hydrateFinancials(contract(id))},500);return r};LariosReservations.collected=collected;let priceTimer=0;const schedulePrices=()=>{if(priceTimer)return;priceTimer=setTimeout(()=>{priceTimer=0;if(!$('reservation')?.classList.contains('hidden'))patchPrices()},0)};
-const reservation=$('reservation'),form=$('reservationForm'),agenda=$('agenda');
-if(reservation)new MutationObserver(schedulePrices).observe(reservation,{attributes:true,attributeFilter:['class']});
-if(form)new MutationObserver(records=>{if(records.some(r=>Array.from(r.addedNodes).some(n=>n.nodeType===1&&(n.matches?.('input,select')||n.querySelector?.('#rental_price,#v2_additional_driver')))))schedulePrices()}).observe(form,{childList:true,subtree:true});
-if(agenda)new MutationObserver(records=>{if(records.some(r=>Array.from(r.addedNodes).some(n=>n.nodeType===1&&(n.matches?.('.agendaItem.rich')||n.querySelector?.('.agendaItem.rich')))))decorateAgenda()}).observe(agenda,{childList:true,subtree:true});
-window.addEventListener('larios:access-ready',()=>ensureAgenda(true));[0,600,1800,4000].forEach(ms=>setTimeout(()=>ensureAgenda(true),ms))}
+function install(){
+  if(installed||!window.LariosReservations)return;
+  installed=true;
+  let agendaRefresh=null,lastAgendaRefresh=0,agendaTimer=0;
+  const ensureAgenda=async(force=false)=>{
+    if(agendaRefresh)return agendaRefresh;
+    if(!force&&Date.now()-lastAgendaRefresh<1200){decorateAgenda();return}
+    lastAgendaRefresh=Date.now();
+    agendaRefresh=refreshData()
+      .then(()=>{decorateAgenda();window.dispatchEvent(new CustomEvent('larios:agenda-controls-ready'))})
+      .catch(e=>console.warn('Agenda lifecycle',e))
+      .finally(()=>{agendaRefresh=null});
+    return agendaRefresh
+  };
+  const scheduleAgenda=(force=false)=>{
+    if(agendaTimer)return;
+    agendaTimer=setTimeout(()=>{agendaTimer=0;ensureAgenda(force)},40)
+  };
+  let priceTimer=0;
+  const schedulePrices=()=>{if(priceTimer)return;priceTimer=setTimeout(()=>{priceTimer=0;if(!$('reservation')?.classList.contains('hidden'))patchPrices()},0)};
+  const reservation=$('reservation'),form=$('reservationForm'),agenda=$('agenda');
+
+  // LariosReservations is intentionally read-only. Do not monkey-patch its methods.
+  // Use the existing reservation-opened event to hydrate lifecycle pricing.
+  document.addEventListener('larios:reservation-opened',e=>{
+    const x=e?.detail?.record||contract(e?.detail?.id);
+    editingId=e?.detail?.id||x?.id||editingId;
+    setTimeout(()=>{patchPrices();if(x)hydrateFinancials(x)},120);
+  });
+
+  if(reservation)new MutationObserver(schedulePrices).observe(reservation,{attributes:true,attributeFilter:['class']});
+  if(form)new MutationObserver(records=>{
+    if(records.some(r=>Array.from(r.addedNodes).some(n=>n.nodeType===1&&(n.matches?.('input,select')||n.querySelector?.('#rental_price,#v2_additional_driver')))))schedulePrices()
+  }).observe(form,{childList:true,subtree:true});
+
+  if(agenda){
+    // Intercept return collection for admins so deposit/preauthorization handling
+    // continues to use the lifecycle flow without replacing LariosReservations.collected.
+    agenda.addEventListener('click',e=>{
+      const btn=e.target?.closest?.('button');
+      const card=btn?.closest?.('.agendaItem.rich');
+      const isReturn=card&&/Devoluciones/i.test(card.closest('.agendaCol')?.querySelector('.agendaHead')?.textContent||'');
+      if(!btn||!isReturn)return;
+      const onclick=btn.getAttribute('onclick')||'';
+      if(/LariosReservations\.collected\(/.test(onclick)){
+        e.preventDefault();e.stopImmediatePropagation();
+        if(window.LariosAccess?.isAdmin?.()!==true)return;
+        const x=recordByNumber(card.querySelector('.agendaNumber')?.textContent);
+        if(x)collected(x.id);
+      }
+    },true);
+    new MutationObserver(records=>{
+      if(records.some(r=>Array.from(r.addedNodes).some(n=>n.nodeType===1&&(n.matches?.('.agendaItem.rich')||n.querySelector?.('.agendaItem.rich')))))scheduleAgenda(true)
+    }).observe(agenda,{childList:true,subtree:true});
+  }
+
+  window.addEventListener('larios:access-ready',()=>scheduleAgenda(true));
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleAgenda(true)});
+  window.addEventListener('focus',()=>scheduleAgenda(true));
+  [0,300,900,1800,4000].forEach(ms=>setTimeout(()=>scheduleAgenda(true),ms));
+}
 function css(){const s=document.createElement('style');s.textContent='.agendaLifecycleActions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}.agendaLifecycleActions button{display:block!important;width:100%!important;background:#fff!important;color:#166534!important;border:1px solid #86b99b!important}.lrDepositBadge,.lrPendingBadge,.lrStripePaidBadge,.lrStripePendingBadge{padding:10px;margin:8px 0;border-radius:9px;font-weight:900;text-align:center}.lrDepositBadge{background:#fef08a;color:#713f12;border:1px solid #eab308}.lrPendingBadge{background:#fed7aa;color:#9a3412;border:1px solid #f97316}.lrStripePaidBadge{background:#dcfce7;color:#166534;border:1px solid #22c55e}.lrStripePendingBadge{background:#dbeafe;color:#1e40af;border:1px solid #60a5fa}.lrLifecyclePage{position:fixed;inset:0;z-index:100000;background:#f4f6f8;overflow:auto;padding:env(safe-area-inset-top) 14px 30px}.lrLifecyclePage.hidden{display:none}.lrLifecycleShell{max-width:900px;margin:auto;background:#fff;min-height:100%;padding:18px}.lrLifecycleHead{display:flex;align-items:center;gap:12px;border-bottom:1px solid #e5e7eb;margin-bottom:15px}.lrLifecycleHead button{border:0;border-radius:9px;padding:10px 14px;font-size:20px}.lrPanel{padding:14px 0;border-bottom:1px solid #e5e7eb}.lrPanel h3{margin:0 0 12px}.lrLifecycleActions{display:flex;gap:10px;margin-top:18px}.lrLifecycleActions button{flex:1;padding:13px;border-radius:10px;font-weight:800}.lrDepositConfirm{max-width:600px;margin:60px auto;padding:25px;background:#fef9c3;border:2px solid #eab308;border-radius:16px}.lrDepositConfirm>b{display:block;font-size:24px;color:#713f12}.lrAcceptDeposit{background:#ca8a04;color:#fff;border:0}@media(max-width:600px){.agendaLifecycleActions,.lrLifecycleActions{grid-template-columns:1fr;flex-direction:column}.lrLifecycleShell{padding:12px}}';document.head.appendChild(s)}
 function statusCss(){const s=document.createElement('style');s.textContent='.lrLifecycleStatus{margin-top:14px;padding:12px;border:1px solid #86b99b;background:#f0fdf4;color:#166534;border-radius:10px;font-weight:700}.lrLifecycleStatus.error{border-color:#fca5a5;background:#fef2f2;color:#b91c1c}';document.head.appendChild(s)}
 window.LariosLifecycle={extend:openExtension,generateExtension:generateExtensionById,changeVehicle:openVehicleChange,close:closePage,confirmDeposit:id=>markReturned(id,true),__test:{baseRental,extensionCalculation,extensionDaysBetween,calculateTotal,setPricing:rows=>{pricing=rows}}};
