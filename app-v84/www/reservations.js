@@ -19,10 +19,13 @@ async function loadCollaboratorPlaces(){
 }
 function isCollaboratorPlace(value){
   const s=normPlace(value);if(!s||!collaboratorPlacesLoaded)return false;
-  const generic=new Set(['hotel','apart','apartamentos','hostal','hostel','malaga','centro','city','room']);
+  const generic=new Set(['hotel','apart','apartamento','apartamentos','hostal','hostel','malaga','centro','city','room','rooms','boutique','soho','casa','calle','avenida']);
+  const sTokens=new Set(s.split(/[^a-z0-9]+/).filter(t=>t.length>=5&&!generic.has(t)));
   for(const name of collaboratorPlaceNames){
     if(!name||generic.has(name))continue;
     if(s===name||s.includes(name)||(s.length>=5&&name.includes(s)))return true;
+    const nTokens=name.split(/[^a-z0-9]+/).filter(t=>t.length>=5&&!generic.has(t));
+    if(nTokens.some(t=>sTokens.has(t)))return true;
   }
   return false;
 }
