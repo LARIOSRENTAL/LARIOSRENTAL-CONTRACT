@@ -39,8 +39,6 @@ function row(c){
   const purgeLabel=!admin()?'🔒 Eliminar datos locales · Solo administrador':canPurge?'Eliminar datos locales':'Eliminar datos locales · no disponible todavía';
   const localState=managed
     ? `<div class="lrCpLocalState"><b>Reserva en curso en Renthub.</b><span>Se gestiona directamente allí y Larios Rental no enviará más cambios por API.</span></div>`
-    : linked&&c.renthub_sync_status==='verified'
-    ? `<div class="lrCpLocalState"><b>La copia local todavía se conserva.</b><span>${esc(purgeExplanation(c))} Nunca se borra automáticamente.</span></div>`
     : '';
   const special62931=String(c.contract_number||'').replace(/^LR-/i,'').replace(/^0+/,'')==='62931';
   const sendAction=!isWeb(c)&&c.status!=='draft'&&!!c.pdf_path
@@ -57,7 +55,7 @@ function row(c){
     : managed
     ? ''
     : linked&&c.renthub_sync_status==='verified'
-    ? `<button class="danger" data-admin-only="true" ${canPurge?'':'disabled'} onclick="LariosContractPanel.purge('${c.id}')">${esc(purgeLabel)}</button>`
+    ? ''
     : sendAction+cancelAction;
   return `<article class="lrCpRow" data-search="${esc([c.contract_number,c.customer_name,c.vehicle_plate,c.renthub_id,label,payment].join(' ').toLowerCase())}"><header><div><b>${esc(c.contract_number||'Contrato')}</b><span>${esc(c.customer_name||'Sin cliente')} · ${esc(c.vehicle_plate||c.vehicle_group||'Sin vehículo')}</span></div><em class="${kind}">${esc(label)}</em></header><div class="lrCpMeta"><span>Entrega: ${date(c.pickup_at)}</span><span>Devolución: ${date(c.return_at)}</span><span>Total: ${money(c.total)}</span><span>PDF: ${c.pdf_path?'Generado':'Pendiente'}</span><span>Pago: ${esc(payment)}</span></div>${linked?`<small>Renthub: ${esc(c.renthub_id)}${log?.verified_at?' · verificado '+date(log.verified_at):''}</small>`:''}${localState}${c.renthub_sync_error?`<p class="lrCpError">${esc(c.renthub_sync_error)}</p>`:''}<div class="lrCpActions">${lifecycleAction}${actions}</div></article>`;
 }
