@@ -1,8 +1,31 @@
 window.LariosReservations=(function(){
-const $=id=>document.getElementById(id);let editId=null,cache=[],currentAgendaDate='',editOpenSeq=0,editFlight=null,editFlightId='';
+const $=id=>document.getElementById(id);let editId=null,cache=[],currentAgendaDate='',editOpenSeq=0,editFlight=null,editFlightId='',collaboratorPlaceNames=new Set(),collaboratorPlacesLoaded=false;
 function setEditingId(id){editId=id||null;window.LariosCurrentContractId=editId}
 function h(){return {'apikey':cfg.supabasePublishableKey,'Authorization':'Bearer '+token,'Content-Type':'application/json'}}
 async function rpc(name,body){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:h(),body:JSON.stringify(body||{})});if(!r.ok)throw new Error(await r.text());return r.json()}
+function normPlace(v){return String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ')}
+async function loadCollaboratorPlaces(){
+  if(collaboratorPlacesLoaded)return;
+  try{
+    const [cr,ar]=await Promise.all([
+      fetch(cfg.supabaseUrl+'/rest/v1/collaborators?select=name&active=eq.true',{headers:h()}),
+      fetch(cfg.supabaseUrl+'/rest/v1/collaborator_aliases?select=alias',{headers:h()})
+    ]);
+    if(!cr.ok||!ar.ok)throw new Error('No se pudo cargar colaboradores');
+    const [collabs,aliases]=await Promise.all([cr.json(),ar.json()]);
+    collaboratorPlaceNames=new Set([...collabs.map(x=>normPlace(x.name)),...aliases.map(x=>normPlace(x.alias))].filter(Boolean));
+    collaboratorPlacesLoaded=true;
+  }catch(e){console.warn('No se pudo cargar la lista de colaboradores para devoluciones',e)}
+}
+function isCollaboratorPlace(value){
+  const s=normPlace(value);if(!s||!collaboratorPlacesLoaded)return false;
+  const generic=new Set(['hotel','apart','apartamentos','hostal','hostel','malaga','centro','city','room']);
+  for(const name of collaboratorPlaceNames){
+    if(!name||generic.has(name))continue;
+    if(s===name||s.includes(name)||(s.length>=5&&name.includes(s)))return true;
+  }
+  return false;
+}
 function localDate(d){const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value}
 function selectedAgendaDate(){return $('agendaDate')?.value||localDate(new Date())}
 function reservationDate(time){const now=new Date(),parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).format(now).split(':');const nowM=+parts[0]*60 + +parts[1],q=String(time||'00:00').split(':');const target=+q[0]*60 + +q[1];const d=new Date(now.getTime()+(target<nowM?86400000:0));return localDate(d)}
@@ -32,7 +55,7 @@ discount_percent:val('discount_percent')||'0',vat_percent:val('vat_percent')||'2
 billing_notes:val('billing_notes'),accessories_notes:selectedExtrasPayload().map(x=>x.label+' x'+x.qty).join(', ')||val('accessories_notes'),extras_detail:selectedExtrasPayload(),card_number:val('card_number'),card_expiry:val('card_expiry'),cash_without_card:checked('cash_without_card'),agency:val('agency')
 };}
 async function save(status){if(!val('customer_name'))return alert('Indica el nombre del cliente.');if(!val('pickup_time'))return alert('Indica la hora de entrega.');if(!val('customer_email')&&!confirm('El cliente no tiene email. ¿Desea continuar sin email?'))return;const current=cache.find(v=>v.id===(editId||window.LariosCurrentContractId)),generated=current&&current.status!=='draft',targetStatus=generated&&status==='draft'?current.status:status;try{const outgoing={...(current||{}),...window.LariosWebBooking?.preservePayload(payload(targetStatus)),status:targetStatus};const d=await rpc('app_save_contract',{p_payload:outgoing});upsertCache(d);setEditingId(d.id||editId);alert(generated&&status==='draft'?'Cambios guardados. El PDF anterior se conserva; pulsa «Regenerar contrato» si también necesitas actualizarlo.':status==='confirmed'?'Contrato confirmado. La reserva queda bloqueada en entregas y pasa a la agenda de devoluciones.':'Reserva guardada.');close()}catch(e){alert('No se pudo guardar: '+e.message)}}
-async function loadAgenda(date){try{currentAgendaDate=date||selectedAgendaDate();cache=await rpc('app_list_contracts',{});renderAgenda(currentAgendaDate)}catch(e){if($('agenda'))$('agenda').innerHTML='<div class="notice">No se pudo cargar la agenda.</div>'}}
+async function loadAgenda(date){try{currentAgendaDate=date||selectedAgendaDate();await loadCollaboratorPlaces();cache=await rpc('app_list_contracts',{});renderAgenda(currentAgendaDate)}catch(e){if($('agenda'))$('agenda').innerHTML='<div class="notice">No se pudo cargar la agenda.</div>'}}
 function when(x,prefix){return x[prefix+'_at']?new Date(x[prefix+'_at']):null}function sameDay(d,iso){return d&&localDate(d)===iso}function hour(d){return d?new Intl.DateTimeFormat('es-ES',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit'}).format(d):'—'}
 function vehicleType(x){const map={C:'Peugeot 208 o similar'};if(x.vehicle_plate)return x.vehicle_plate+(x.vehicle_model?' · '+x.vehicle_model:'');if(x.vehicle_model&&!/^\d{2,4}$/.test(String(x.vehicle_model)))return x.vehicle_model;return map[String(x.vehicle_group||'').toUpperCase()]||('Grupo '+(x.vehicle_group||'pendiente'))}
 function detailText(x){let d=x.reservation_detail||'';if(!d&&/^\d{2,4}$/.test(String(x.vehicle_model||'')))d=x.vehicle_model;if(!d&&x.customer_phone)d=x.customer_phone;if(!d)return'';const clean=String(d).trim();if(/^\d{2,4}$/.test(clean))return'Habitación '+clean;if(/^\+?\d[\d\s-]{5,}$/.test(clean))return'Tel. '+clean;return clean}
@@ -41,12 +64,15 @@ function agendaSnapshot(date){const selected=date||currentAgendaDate||selectedAg
 function renderAgenda(date){ensureAgendaStyle();const a=$('agenda');if(!a)return;const {deliveries,returns}=agendaSnapshot(date);a.innerHTML='<div class="agendaCol"><div class="agendaHead"><h3>Entregas</h3><span class="agendaCount">'+deliveries.length+' '+(deliveries.length===1?'prevista':'previstas')+'</span></div>'+(deliveries.length?deliveries.map(delivery).join(''):'<div class="agendaEmpty">No hay entregas previstas para esta fecha.</div>')+'</div><div class="agendaCol"><div class="agendaHead"><h3>Devoluciones</h3><span class="agendaCount">'+returns.length+' '+(returns.length===1?'prevista':'previstas')+'</span></div>'+(returns.length?returns.map(ret).join(''):'<div class="agendaEmpty">No hay devoluciones previstas para esta fecha.</div>')+'</div>'}
 function delivery(x){const locked=x.status!=='draft',place=[x.pickup_location,detailText(x)].filter(Boolean).join(' · '),agency=String(x.agency||'').trim(),agencyLine=agency?'<div class="agendaAgency">Colaborador: '+esc(agency)+'</div>':'',hasPdf=!!x.pdf_path;const main='<button class="agendaReservationEdit" '+(locked?'disabled':'')+' onclick="LariosReservations.edit(\''+x.id+'\')">'+(locked?'Contrato bloqueado':'Editar reserva')+'</button>';const print=locked&&hasPdf?'<button class="agendaPrint" onclick="LariosReservations.printContract(\''+x.id+'\')">Imprimir contrato</button>':'';const cancel='<button class="agendaCancelReservation" data-admin-only="true" onclick="LariosReservations.cancelReservation(\''+x.id+'\')">Cancelar reserva</button>';return '<div class="agendaItem rich '+(locked?'locked':'')+'"><div class="agendaTime">'+hour(when(x,'pickup'))+'</div><div class="agendaPlace">'+esc(place||'Lugar pendiente')+'</div><div class="agendaMeta">'+esc((x.customer_name&&x.customer_name!=='Pendiente')?x.customer_name:'Cliente pendiente')+' · '+esc(vehicleType(x))+' · '+esc(daysText(x))+'</div>'+agencyLine+'<div class="agendaNumber">'+esc(x.contract_number||'Reserva')+'</div><div class="agendaActions">'+main+print+cancel+'</div></div>'}
 function returnLocationNeedsAttention(value){
-  const s=String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const s=normPlace(value);
   if(!s)return false;
+  // Estas ubicaciones deben resaltarse aunque existan como colaboradores.
+  if(/\b(dulce hogar|inmobiliaria dulce hogar|parque flat|el parque apart|benhostone|behostone|l apartament|l apartamentos|los flamencos)\b/.test(s))return true;
+  // Oficina y aeropuerto nunca se resaltan.
   if(/\b(ofi|oficina|pasaje noblejas|aeropuerto|airport)\b/.test(s))return false;
-  if(/\bhotel\b/.test(s))return false;
-  if(/\b(croma|miramar|atarazanas|ilunion|rinconsol|rincon sol|posada|novotel|california|maestranza|las vegas|naranjos|barcelo|hilton|staybridge|molina lario|malaga premium|don curro|don paco|eliseos|tribuna|solymar|mariposa|ibis|eurostars|sercotel|soho boutique|campanile|zenit|catalonia|palacio solecio|only you|room mate|vincci|guadalmedina|bro|calabahia)\b/.test(s))return false;
-  if(/\b(ave|maria zambrano|estacion de tren|dulce hogar|benhostone|cister|parking express|easy parking|calle|c\/|avenida|av\.|plaza|paseo|parking motos)\b/.test(s))return true;
+  // Cualquier lugar que coincida con un colaborador o alguno de sus alias se omite.
+  if(isCollaboratorPlace(s))return false;
+  // El resto de ubicaciones especiales/no colaborador se resaltan.
   return true;
 }
 function ret(x){const picked=x.status==='returned'||x.status==='collected',generated=x.status!=='draft'&&x.status!=='cancelled',place=[x.return_location,detailText(x)].filter(Boolean).join(' · '),attention=returnLocationNeedsAttention(x.return_location),deposit=Number(x.deposit||0),depositMethod=String(x.deposit_method||'').toLowerCase(),depositDone=!!x.deposit_return_confirmed_at,depositBadge=deposit>0&&depositMethod!=='preauthorization'?'<div class="lrDepositBadge">'+(depositDone?'DEPÓSITO DEVUELTO · ':'⚠ DEPÓSITO PENDIENTE DE DEVOLUCIÓN · ')+deposit.toFixed(2).replace('.',',')+' €</div>':'',adminActions=generated&&!picked?'<div class="agendaReturnAdminActions"><div class="agendaReturnModifyActions"><button class="agendaReturnAdminAction" data-admin-only="true" onclick="LariosLifecycle.extend(\''+x.id+'\')">Ampliar reserva</button><button class="agendaReturnAdminAction" data-admin-only="true" onclick="LariosLifecycle.changeVehicle(\''+x.id+'\')">Cambio de vehículo</button></div><div class="agendaReturnCollectedActions"><button class="agendaReturnAdminAction agendaReturnCollectedAction" data-admin-only="true" onclick="LariosReservations.collected(\''+x.id+'\')">Marcar como recogido</button></div></div>':'<div class="agendaReturnCollectedActions"><button class="agendaReturnAdminAction agendaReturnCollectedAction" data-admin-only="true" disabled>Vehículo recogido</button></div>';return '<div class="agendaItem rich '+(picked?'picked':'')+'"><div class="agendaTime">'+hour(when(x,'return'))+'</div><div class="agendaPlace'+(attention?' lrReturnLocationAttention':'')+'">'+esc(place||'Lugar pendiente')+'</div><div class="agendaMeta">'+esc(x.customer_name||'Cliente')+' · '+esc(vehicleType(x))+'</div><div class="agendaNumber">'+esc(x.contract_number||'Contrato')+'</div>'+depositBadge+adminActions+'</div>'}
