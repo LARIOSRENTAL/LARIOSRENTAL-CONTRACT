@@ -1743,8 +1743,20 @@ async function handler(req: Request) {
       try {
         await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(oldCode)}`, { method: "DELETE" });
       } catch (cancelError) {
-        await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(replacement.code)}`, { method: "DELETE" }).catch(() => null);
-        throw new Error(`No se pudo cancelar la reserva anterior. La nueva se ha cancelado para evitar duplicados. ${cancelError instanceof Error ? cancelError.message : String(cancelError)}`);
+        const cancelMessage = cancelError instanceof Error ? cancelError.message : String(cancelError);
+        const oldAlreadyGone = /404/.test(cancelMessage) && /invalid booking code|already canceled|already cancelled/i.test(cancelMessage);
+        if (oldAlreadyGone) {
+          console.log(JSON.stringify({
+            event:"renthub_old_booking_already_cancelled",
+            contract_number:contract.contract_number,
+            old_code:oldCode,
+            new_code:replacement.code,
+            detail:cancelMessage
+          }));
+        } else {
+          await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(replacement.code)}`, { method: "DELETE" }).catch(() => null);
+          throw new Error(`No se pudo cancelar la reserva anterior. La nueva se ha cancelado para evitar duplicados. ${cancelMessage}`);
+        }
       }
 
       code = replacement.code;
