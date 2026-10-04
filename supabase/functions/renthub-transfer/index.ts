@@ -500,7 +500,7 @@ function splitCustomerAddress(rawValue: unknown) {
     [/\b(?:ITALY|ITALIA|IT)$/i,"IT"],[/\b(?:PORTUGAL|PT)$/i,"PT"],
     [/\b(?:SWITZERLAND|SUIZA|SCHWEIZ|CH)$/i,"CH"],[/\b(?:NORWAY|NORUEGA|NO)$/i,"NO"],
     [/\b(?:SWEDEN|SUECIA|SE)$/i,"SE"],[/\b(?:DENMARK|DINAMARCA|DK)$/i,"DK"],
-    [/\b(?:NETHERLANDS|HOLANDA|PAISES BAJOS|NL)$/i,"NL"],[/\b(?:BELGIUM|BELGICA|BE)$/i,"BE"],
+    [/\b(?:NETHERLANDS|HOLANDA|PAISES BAJOS|PAÍSES BAJOS|NL)$/i,"NL"],[/\b(?:BELGIUM|BELGICA|BÉLGICA|BE)$/i,"BE"],
     [/\b(?:UNITED KINGDOM|UK|GREAT BRITAIN|GB)$/i,"GB"],[/\b(?:IRELAND|IRLANDA|IE)$/i,"IE"],
     [/\b(?:CZECH REPUBLIC|CZECH REP|CHEQUIA|CZ)$/i,"CZ"],[/\b(?:SLOVAKIA|ESLOVAQUIA|SK)$/i,"SK"],
     [/\b(?:ROMANIA|RUMANIA|RO)$/i,"RO"],[/\b(?:ESTONIA|EE)$/i,"EE"],
@@ -511,42 +511,64 @@ function splitCustomerAddress(rawValue: unknown) {
     if (re.test(raw)) { country=code; raw=raw.replace(re,"").replace(/[\s,]+$/,"").trim(); break; }
   }
 
-  const ukZip=/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
-  const plZip=/\b(\d{2}-\d{3})\b/;
-  const numericZip=/\b(\d{4,6})\b/;
-  let zipMatch=raw.match(ukZip)||raw.match(plZip)||raw.match(numericZip);
-  let beforeZip=raw, afterZip="";
-  if(zipMatch&&zipMatch.index!==undefined){
-    zip=String(zipMatch[1]||zipMatch[0]).trim().toUpperCase();
-    beforeZip=raw.slice(0,zipMatch.index).replace(/[\s,]+$/,"").trim();
-    afterZip=raw.slice(zipMatch.index+zipMatch[0].length).replace(/^[\s,]+/,"").trim();
-  }
+  const parts = raw.split(",").map(x=>x.trim()).filter(Boolean);
+  const zipRe = /^(?:[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|\d{2}-\d{3}|\d{4,6})$/i;
+  const zipIndex = parts.findIndex(p=>zipRe.test(p));
 
-  const beforeParts=beforeZip.split(",").map(x=>x.trim()).filter(Boolean);
-  const afterParts=afterZip.split(",").map(x=>x.trim()).filter(Boolean);
-
-  if(afterParts.length){
-    city=afterParts[0];
-  }else if(zip&&beforeParts.length>=2){
-    const candidate=beforeParts[beforeParts.length-1];
-    if(!/^[A-Z]{2}$/i.test(candidate)){city=candidate;beforeParts.pop();}
-    else if(beforeParts.length>=2){beforeParts.pop();city=beforeParts.pop()||"";}
-  }else if(!zip&&beforeParts.length>=2){
-    city=beforeParts.pop()||"";
-  }
-
-  let streetBlock=(beforeParts.join(", ")||beforeZip||raw).trim();
-  if(zip&&!city&&afterZip)city=afterZip;
-
-  let m=streetBlock.match(/^(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)\s+(.+)$/);
-  if(m){streetNumber=m[1].trim();address=m[2].trim();}
-  else{
-    m=streetBlock.match(/^(.*?)(?:\bNRO\.?|\bNO\.?|Nº|\bNUM\.?|\bNUMBER)\s*:?\s*(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)$/i);
-    if(m){address=m[1].trim().replace(/[\s,]+$/,"");streetNumber=m[2].trim();}
+  const splitStreet = (value:string) => {
+    let v=String(value||"").trim(), a=v, n="";
+    let m=v.match(/^(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)\s+(.+)$/);
+    if(m){n=m[1].trim();a=m[2].trim();}
     else{
-      m=streetBlock.match(/^(.*?)[\s,]+(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)$/);
-      if(m&&m[1].trim()){address=m[1].trim();streetNumber=m[2].trim();}
-      else address=streetBlock;
+      m=v.match(/^(.*?)(?:\bNRO\.?|\bNO\.?|Nº|\bNUM\.?|\bNUMBER)\s*:?\s*(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)$/i);
+      if(m){a=m[1].trim().replace(/[\s,]+$/,"");n=m[2].trim();}
+      else{
+        m=v.match(/^(.*?)[\s,]+(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)$/);
+        if(m&&m[1].trim()){a=m[1].trim();n=m[2].trim();}
+      }
+    }
+    return {address:a.replace(/[\s,]+$/,"").trim(),streetNumber:n};
+  };
+
+  if(zipIndex>=0){
+    zip=parts[zipIndex].toUpperCase();
+    const before=parts.slice(0,zipIndex);
+    const after=parts.slice(zipIndex+1);
+
+    // Formato frecuente europeo: CIUDAD, CP, CALLE NÚMERO
+    // Ej.: "CAPRIOLO (BRESCIA), 25031, VÍA DEL FANTE 17/A, ITALIA".
+    if(before.length===1 && after.length>=1){
+      city=before[0];
+      const s=splitStreet(after.join(", "));
+      address=s.address; streetNumber=s.streetNumber;
+    }
+    // Formato habitual: CALLE NÚMERO, CP, CIUDAD
+    else if(before.length>=1 && after.length>=1){
+      const left=before.join(", ");
+      const right=after.join(", ");
+      const leftLooksStreet=/\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?$/.test(left) || /\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|via|vía|calle|c\/|rue|strasse|straße|weg|laan|straat)\b/i.test(left);
+      if(leftLooksStreet){
+        const s=splitStreet(left); address=s.address; streetNumber=s.streetNumber; city=right;
+      }else{
+        city=left;
+        const s=splitStreet(right); address=s.address; streetNumber=s.streetNumber;
+      }
+    }else if(before.length>=1){
+      const s=splitStreet(before.join(", "));
+      address=s.address; streetNumber=s.streetNumber;
+    }else if(after.length>=1){
+      const s=splitStreet(after.join(", "));
+      address=s.address; streetNumber=s.streetNumber;
+    }
+  }else{
+    if(parts.length>=2){
+      const last=parts[parts.length-1];
+      const first=parts.slice(0,-1).join(", ");
+      const firstLooksStreet=/\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?$/.test(first) || /\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|via|vía|calle|c\/|rue|strasse|straße|weg|laan|straat)\b/i.test(first);
+      if(firstLooksStreet){const s=splitStreet(first);address=s.address;streetNumber=s.streetNumber;city=last;}
+      else{city=first;const s=splitStreet(last);address=s.address;streetNumber=s.streetNumber;}
+    }else{
+      const s=splitStreet(raw);address=s.address;streetNumber=s.streetNumber;
     }
   }
 
@@ -554,7 +576,6 @@ function splitCustomerAddress(rawValue: unknown) {
   city=city.replace(/[\s,]+$/,"").trim();
   return { address, streetNumber, city, zip, country };
 }
-
 function detailHasContactValue(detail: any, kind: "email" | "phone", wanted: string) {
   const wantedEmail = String(wanted || "").trim().toLowerCase();
   const wantedPhone = String(wanted || "").replace(/\D/g, "");
@@ -1057,7 +1078,7 @@ async function handler(req: Request) {
     franchise: desiredFranchise,
   });
 
-  async function verify(code: string, options: { expectedStart?: string; checkStart?: boolean; expectedModel?: string; checkPayment?: boolean; checkVehicle?: boolean } = {}) {
+  async function verify(code: string, options: { expectedStart?: string; expectedEnd?: string; checkStart?: boolean; expectedModel?: string; checkPayment?: boolean; checkVehicle?: boolean } = {}) {
     const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
     const booking = detail?.result?.booking || {};
     const locationMatches = (actual: any, expected: string) => [actual?.id, actual?.code, actual?.name].map(String).includes(String(expected));
@@ -1096,7 +1117,7 @@ async function handler(req: Request) {
       : totalCandidates.some((value) => sameAmount(value, expectedTotal, contract.vat_percent));
     const checks: Record<string, boolean> = {
       code: String(booking.code || "") === code,
-      end: minute(booking.end_datetime) === minute(end),
+      end: minute(booking.end_datetime) === minute(options.expectedEnd || end),
       total: totalMatches,
       customer_email: normalize(detail?.result?.customer?.email) === normalize(customer?.email),
       model: modelMatches,
@@ -1130,7 +1151,27 @@ async function handler(req: Request) {
     return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
   }
 
-  function buildPartnerBookingForm(startValue: string, customerCode = "", requestVehicle = false) {
+  function technicalEndForRenthub(realEnd: string) {
+    const date = String(realEnd || "").slice(0,10);
+    const time = String(realEnd || "").slice(11,16);
+    if (!date || !time) return realEnd;
+    const d = new Date(date+"T12:00:00Z");
+    const isoDay = Number.isNaN(d.getTime()) ? 0 : (d.getUTCDay()===0?7:d.getUTCDay());
+    const weekly = opening?.timetable?.["1"]?.weeklySchedule || {};
+    const windows = isoDay ? (weekly?.[String(isoDay)] || weekly?.[isoDay] || []) : [];
+    const closings = (Array.isArray(windows)?windows:[])
+      .map((w:any)=>String(w?.to||"").slice(0,5))
+      .filter((v:string)=>/^\d{2}:\d{2}$/.test(v))
+      .sort();
+    if (!closings.length) return realEnd;
+    const close = closings[closings.length-1];
+    const [h,m]=close.split(":").map(Number);
+    const safe=Math.max(0,h*60+m-1);
+    const latest=`${String(Math.floor(safe/60)).padStart(2,"0")}:${String(safe%60).padStart(2,"0")}`;
+    return time>latest ? `${date} ${latest}` : realEnd;
+  }
+
+  function buildPartnerBookingForm(startValue: string, customerCode = "", requestVehicle = false, endValue = end) {
     if (!model) throw new Error(`No hay mapeo Renthub para el grupo ${contract.category || "sin grupo"}`);
     const names = splitName(customer?.full_name || contract.app_payload?.customer_name || "Pendiente Larios Rental");
     const phone = splitPhone(customer?.phone || contract.app_payload?.customer_phone || "");
@@ -1154,7 +1195,7 @@ async function handler(req: Request) {
     }
     form.set("model", String(model));
     form.set("start_datetime", startValue);
-    form.set("end_datetime", end);
+    form.set("end_datetime", endValue);
     form.set("pickup_location", pickup);
     form.set("dropoff_location", dropoff);
     const realStartDate = String(contract.delivery_date || "").slice(0, 10);
@@ -1164,10 +1205,12 @@ async function handler(req: Request) {
       ? `${realD}/${realM}/${realY} ${realStartTime}`
       : `${realStartDate} ${realStartTime}`.trim();
     const isReplacementBooking = minute(startValue) !== minute(start);
+    const isTechnicalEnd = minute(endValue) !== minute(end);
     if (pickupAddress) form.set("pickup_at_location", pickupAddress);
     if (dropoffAddress) form.set("dropoff_at_location", dropoffAddress);
     const locationNotes = [
       isReplacementBooking && realStartLabel ? `HORA REAL DE ENTREGA A CAMBIAR: ${realStartLabel}` : "",
+      isTechnicalEnd ? `HORA REAL DE DEVOLUCION A CAMBIAR: ${String(contract.return_date||"")} ${String(contract.return_time||"").slice(0,5)}` : "",
       contractPlate
         ? (requestVehicle
             ? `MATRICULA REAL DEL VEHICULO: ${contractPlate}`
@@ -1381,10 +1424,11 @@ async function handler(req: Request) {
     };
 
     let actualStart = startValue;
+    const actualEnd = technicalEndForRenthub(end);
     let vehicleRequested = !!fleetMatch?.vehicle;
     const doInsert = async (value: string, withVehicle: boolean) => renthubFetch("/module/rental/api/partner/booking/insert", {
       method: "POST",
-      body: buildPartnerBookingForm(value, customerCode, withVehicle),
+      body: buildPartnerBookingForm(value, customerCode, withVehicle, actualEnd),
     });
 
     let insertedBooking: any;
@@ -1658,10 +1702,7 @@ async function handler(req: Request) {
       if (!checked.verified) {
         const currentStatus = normalize(checked.booking?.status || checked.booking?.state || checked.booking?.booking_status || checked.booking?.pm_stato_prenotazione || "");
         const lockedExisting = ["in_progress","confirmed","in corso","in_corso"].includes(currentStatus);
-        const realStartAlreadyPassed = !!minimumStart && start < minimumStart;
-        // Si el contrato ya ha comenzado, no intentamos crear una reserva nueva:
-        // Renthub puede rechazarla por horario/oficina cerrada. Actualizamos la reserva enlazada.
-        if (lockedExisting || realStartAlreadyPassed) {
+        if (lockedExisting) {
           try {
             updated = await updateExistingRenthubBooking(checked.detail);
             checked = await verify(code, { checkStart: false, checkPayment: false });
@@ -1675,7 +1716,6 @@ async function handler(req: Request) {
               const updatedPayload = paymentSyncPayload({
                 ...(contract.app_payload || {}),
                 renthub_updated_existing_booking_at: new Date().toISOString(),
-                renthub_updated_after_real_start: realStartAlreadyPassed,
               }, payment);
               await requireWrite(actor.from("contracts").update({
                 renthub_sync_status: paymentSyncStatus(payment),
@@ -1728,6 +1768,7 @@ async function handler(req: Request) {
       }));
       let replacementChecked = await verify(replacement.code, {
         expectedStart: replacement.actualStart,
+        expectedEnd: replacement.actualEnd,
         checkStart: true,
         expectedModel: model,
         checkPayment: true,
