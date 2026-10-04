@@ -1447,17 +1447,25 @@ async function handler(req: Request) {
         try {
           insertedBooking = await doInsert(actualStart, false);
         } catch (secondError) {
-          if (officeClosed(secondError) && fallbackStart && fallbackStart !== actualStart) {
-            console.log(JSON.stringify({
-              event: "renthub_office_hours_fallback",
-              contract_number: contract.contract_number,
-              requested_start: actualStart,
-              retry_start: fallbackStart,
-              latest_partner_start: latestPartnerStart,
-              reason: secondError instanceof Error ? secondError.message : String(secondError),
-            }));
-            actualStart = fallbackStart;
-            insertedBooking = await doInsert(actualStart, false);
+          if (officeClosed(secondError)) {
+            const retryStart =
+              (fallbackStart && fallbackStart !== actualStart ? fallbackStart : "") ||
+              (nextAvailableStart && nextAvailableStart !== actualStart ? nextAvailableStart : "") ||
+              firstOpeningAtOrAfter(opening, actualStart, end);
+            if (retryStart && retryStart !== actualStart) {
+              console.log(JSON.stringify({
+                event: "renthub_office_hours_fallback",
+                contract_number: contract.contract_number,
+                requested_start: actualStart,
+                retry_start: retryStart,
+                latest_partner_start: latestPartnerStart,
+                minimum_start: minimumStart || null,
+                real_start: start,
+                reason: secondError instanceof Error ? secondError.message : String(secondError),
+              }));
+              actualStart = retryStart;
+              insertedBooking = await doInsert(actualStart, false);
+            } else throw secondError;
           } else throw secondError;
         }
       } else throw firstError;
