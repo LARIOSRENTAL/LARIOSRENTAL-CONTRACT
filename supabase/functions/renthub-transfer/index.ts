@@ -490,15 +490,69 @@ function canonicalRenthubCountry(value: unknown) {
   return mapped || raw.toUpperCase();
 }
 function splitCustomerAddress(rawValue: unknown) {
-  const raw = String(rawValue || "").trim().replace(/\s+/g," ").replace(/,+$/,"");
-  let address=raw, city="", zip="";
-  let m=raw.match(/^(\d{4,6})\s+([^,]+),\s*(.+)$/);
-  if(m){ zip=m[1]; city=m[2].trim(); address=m[3].trim(); return {address,city,zip}; }
-  m=raw.match(/^(.+?\b(?:NRO\.?|NO\.?|Nº|NUM\.?|NUMBER)\s*:?\s*\d+[A-Za-z]?)\s+([^,]+)$/i);
-  if(m){ address=m[1].trim(); city=m[2].trim(); return {address,city,zip}; }
-  m=raw.match(/^(.+?),\s*(\d{4,6})\s+([^,]+)$/);
-  if(m){ address=m[1].trim(); zip=m[2]; city=m[3].trim(); return {address,city,zip}; }
-  return {address,city,zip};
+  let raw = String(rawValue || "").trim().replace(/\s+/g, " ").replace(/,+$/, "");
+  let address = "", streetNumber = "", city = "", zip = "", country = "";
+  if (!raw) return { address, streetNumber, city, zip, country };
+
+  const countrySuffixes: Array<[RegExp,string]> = [
+    [/\b(?:SPAIN|ESPANA|ESPAÑA|ES)$/i,"ES"],[/\b(?:POLAND|POLSKA|PL)$/i,"PL"],
+    [/\b(?:GERMANY|DEUTSCHLAND|DE)$/i,"DE"],[/\b(?:FRANCE|FRANCIA|FR)$/i,"FR"],
+    [/\b(?:ITALY|ITALIA|IT)$/i,"IT"],[/\b(?:PORTUGAL|PT)$/i,"PT"],
+    [/\b(?:SWITZERLAND|SUIZA|SCHWEIZ|CH)$/i,"CH"],[/\b(?:NORWAY|NORUEGA|NO)$/i,"NO"],
+    [/\b(?:SWEDEN|SUECIA|SE)$/i,"SE"],[/\b(?:DENMARK|DINAMARCA|DK)$/i,"DK"],
+    [/\b(?:NETHERLANDS|HOLANDA|PAISES BAJOS|NL)$/i,"NL"],[/\b(?:BELGIUM|BELGICA|BE)$/i,"BE"],
+    [/\b(?:UNITED KINGDOM|UK|GREAT BRITAIN|GB)$/i,"GB"],[/\b(?:IRELAND|IRLANDA|IE)$/i,"IE"],
+    [/\b(?:CZECH REPUBLIC|CZECH REP|CHEQUIA|CZ)$/i,"CZ"],[/\b(?:SLOVAKIA|ESLOVAQUIA|SK)$/i,"SK"],
+    [/\b(?:ROMANIA|RUMANIA|RO)$/i,"RO"],[/\b(?:ESTONIA|EE)$/i,"EE"],
+    [/\b(?:UNITED STATES|USA|US)$/i,"US"],[/\b(?:CANADA|CA)$/i,"CA"],
+    [/\b(?:UNITED ARAB EMIRATES|UAE|AE)$/i,"AE"]
+  ];
+  for (const [re,code] of countrySuffixes) {
+    if (re.test(raw)) { country=code; raw=raw.replace(re,"").replace(/[\s,]+$/,"").trim(); break; }
+  }
+
+  const ukZip=/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
+  const plZip=/\b(\d{2}-\d{3})\b/;
+  const numericZip=/\b(\d{4,6})\b/;
+  let zipMatch=raw.match(ukZip)||raw.match(plZip)||raw.match(numericZip);
+  let beforeZip=raw, afterZip="";
+  if(zipMatch&&zipMatch.index!==undefined){
+    zip=String(zipMatch[1]||zipMatch[0]).trim().toUpperCase();
+    beforeZip=raw.slice(0,zipMatch.index).replace(/[\s,]+$/,"").trim();
+    afterZip=raw.slice(zipMatch.index+zipMatch[0].length).replace(/^[\s,]+/,"").trim();
+  }
+
+  const beforeParts=beforeZip.split(",").map(x=>x.trim()).filter(Boolean);
+  const afterParts=afterZip.split(",").map(x=>x.trim()).filter(Boolean);
+
+  if(afterParts.length){
+    city=afterParts[0];
+  }else if(zip&&beforeParts.length>=2){
+    const candidate=beforeParts[beforeParts.length-1];
+    if(!/^[A-Z]{2}$/i.test(candidate)){city=candidate;beforeParts.pop();}
+    else if(beforeParts.length>=2){beforeParts.pop();city=beforeParts.pop()||"";}
+  }else if(!zip&&beforeParts.length>=2){
+    city=beforeParts.pop()||"";
+  }
+
+  let streetBlock=(beforeParts.join(", ")||beforeZip||raw).trim();
+  if(zip&&!city&&afterZip)city=afterZip;
+
+  let m=streetBlock.match(/^(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)\s+(.+)$/);
+  if(m){streetNumber=m[1].trim();address=m[2].trim();}
+  else{
+    m=streetBlock.match(/^(.*?)(?:\bNRO\.?|\bNO\.?|Nº|\bNUM\.?|\bNUMBER)\s*:?\s*(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)$/i);
+    if(m){address=m[1].trim().replace(/[\s,]+$/,"");streetNumber=m[2].trim();}
+    else{
+      m=streetBlock.match(/^(.*?)[\s,]+(\d+[A-Za-z]?(?:[\/-]\d+[A-Za-z]?)?)$/);
+      if(m&&m[1].trim()){address=m[1].trim();streetNumber=m[2].trim();}
+      else address=streetBlock;
+    }
+  }
+
+  address=address.replace(/[\s,]+$/,"").trim();
+  city=city.replace(/[\s,]+$/,"").trim();
+  return { address, streetNumber, city, zip, country };
 }
 
 function detailHasContactValue(detail: any, kind: "email" | "phone", wanted: string) {
@@ -572,11 +626,13 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
   }
 
   const parsedAddress = splitCustomerAddress(customer.address || payload.customer_address || "");
-  const customerCountry = renthubCountryCode(customer.country || payload.customer_nationality || licenceIssuedBy);
+  const customerCountry = String(parsedAddress.country || renthubCountryCode(customer.country || payload.customer_nationality || licenceIssuedBy) || "").trim();
   const address = String(parsedAddress.address || "").trim();
+  const streetNumber = String(parsedAddress.streetNumber || "").trim();
   const city = String(customer.city || parsedAddress.city || "").trim();
   const zip = String(customer.postal_code || parsedAddress.zip || "").trim();
   if (address) body.address = address;
+  if (streetNumber) body.street_number = streetNumber;
   if (city) body.city = city;
   if (zip) body.zip = zip;
   if (customerCountry) body.country = customerCountry;
@@ -652,6 +708,90 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
   }));
 
   return { update: response, detail: detailResponse, checks: customerChecks };
+}
+
+
+function detailHasAnyContactValue(detail:any,kind:"email"|"phone"){
+  const visit=(value:any,path:string[],depth:number):boolean=>{
+    if(depth>8||value==null)return false;
+    if(typeof value!=="object"){
+      const raw=String(value??"").trim(); if(!raw)return false;
+      if(kind==="email") return path.some(p=>p.includes("email")) && raw.includes("@");
+      const isPhone=path.some(p=>p.includes("phone")||p.includes("mobile")||p.includes("telephone")||p.includes("telefono")||p.includes("cell"));
+      return isPhone && raw.replace(/\D/g,"").length>=6;
+    }
+    if(Array.isArray(value)) return value.some(x=>visit(x,path,depth+1));
+    return Object.entries(value).some(([k,v])=>visit(v,[...path,k.toLowerCase()],depth+1));
+  };
+  return visit(detail,[],0);
+}
+function firstDetailValue(detail:any,...keys:string[]){
+  for(const key of keys){
+    const value=detail?.[key];
+    if(value!==undefined&&value!==null){
+      const raw=typeof value==="object"?(value?.code??value?.name??value?.id??""):value;
+      if(String(raw).trim()!=="") return String(raw).trim();
+    }
+  }
+  return "";
+}
+async function syncPartnerCustomerMissingOnly(customerCode:string,contract:any,customer:any,driver:any){
+  if(!customerCode||!customer)return {skipped:true,reason:"missing_customer"};
+  const payload=contract?.app_payload||{};
+  const names=splitName(customer.full_name||payload.customer_name);
+  const phone=splitPhone(customer.phone||payload.customer_phone);
+  const email=String(customer.email||payload.customer_email||"").trim();
+  const identityDocument=String(customer?.document_number||payload.customer_document||"").trim();
+  const licenceNumber=String(driver?.licence_number||payload.driving_license||"").trim();
+  const licenceIssuedBy=String(driver?.licence_country||payload.license_issued_by||"").trim();
+  const licenceCountryCode=renthubCountryCode(licenceIssuedBy);
+  const licenceIssueDate=String(driver?.issue_date||payload.license_issue||"").trim();
+  const licenceExpiry=String(driver?.expiry_date||payload.license_expiry||"").trim();
+  const birthDate=String(customer.birth_date||driver?.birth_date||payload.customer_birth_date||"").trim();
+  const parsedAddress=splitCustomerAddress(customer.address||payload.customer_address||"");
+  const customerCountry=String(parsedAddress.country||renthubCountryCode(customer.country||payload.customer_nationality||licenceIssuedBy)||"").trim();
+  const address=String(parsedAddress.address||"").trim();
+  const streetNumber=String(parsedAddress.streetNumber||"").trim();
+  const city=String(customer.city||parsedAddress.city||"").trim();
+  const zip=String(customer.postal_code||parsedAddress.zip||"").trim();
+
+  const beforeResponse=await renthubFetch(`/api/partner/customer/details/${encodeURIComponent(customerCode)}`);
+  const before=beforeResponse?.result||{};
+  const body:Record<string,unknown>={contact_type:"private"};
+  const sent:string[]=[];
+
+  if(!firstDetailValue(before,"name","first_name")&&names.name){body.name=names.name;sent.push("name");}
+  if(!firstDetailValue(before,"surname","last_name")&&names.surname){body.surname=names.surname;sent.push("surname");}
+  if(email&&!detailHasAnyContactValue(before,"email")){body.email=email;sent.push("email");}
+  if(phone.mobile&&!detailHasAnyContactValue(before,"phone")){body.mobile_prefix=phone.prefix;body.mobile=phone.mobile;sent.push("phone");}
+  if(address){body.address=address;sent.push("address");}
+  if(streetNumber){body.street_number=streetNumber;sent.push("street_number");}
+  if(city){body.city=city;sent.push("city");}
+  if(zip){body.zip=zip;sent.push("zip");}
+  if(customerCountry){body.country=customerCountry;sent.push("country");}
+  if(birthDate&&!firstDetailValue(before,"birth_date","date_of_birth")){body.birth_date=birthDate;sent.push("birth_date");}
+
+  const existingTax=firstDetailValue(before,"tax_code","fiscal_code");
+  const existingId=firstDetailValue(before,"id_number","document_number","identity_document_number");
+  if(identityDocument&&!existingTax){body.tax_code=identityDocument;sent.push("tax_code");}
+  if(identityDocument&&!existingId){body.id_number=identityDocument;sent.push("id_number");}
+
+  if(licenceNumber&&!firstDetailValue(before,"license_number","driving_license_number")){body.driving_license_number=licenceNumber;sent.push("license_number");}
+  if(licenceIssuedBy&&!firstDetailValue(before,"license_issued_by","driving_license_issued_by")){body.driving_license_issued_by=licenceIssuedBy;sent.push("license_issued_by");}
+  if(licenceCountryCode&&!firstDetailValue(before,"license_issue_country","driving_license_issue_country","driving_license_country")){body.license_issue_country=licenceCountryCode;sent.push("license_issue_country");}
+  if(licenceIssueDate&&!firstDetailValue(before,"license_issue_date","driving_license_issued_at")){body.driving_license_issued_at=licenceIssueDate;sent.push("license_issue_date");}
+  if(licenceExpiry&&!firstDetailValue(before,"license_expiration","driving_license_exp")){body.driving_license_exp=licenceExpiry;sent.push("license_expiration");}
+
+  if(sent.length===0){
+    console.log(JSON.stringify({event:"renthub_customer_missing_only",customer_code:customerCode,sent:[],booking_untouched:true}));
+    return {skipped:true,reason:"no_missing_customer_fields",sent:[],before:beforeResponse};
+  }
+  const response=await renthubFetch(`/api/partner/customer/update/${encodeURIComponent(customerCode)}`,{
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)
+  });
+  const after=await renthubFetch(`/api/partner/customer/details/${encodeURIComponent(customerCode)}`);
+  console.log(JSON.stringify({event:"renthub_customer_missing_only",customer_code:customerCode,sent,booking_untouched:true}));
+  return {skipped:false,sent,update:response,detail:after};
 }
 
 const internalLocationCatalog = [{"id":"124","name":"Larios Malaga"},{"id":"6","name":"ALCAZABA PREMIUM"},{"id":"102","name":"LA MUNDIAL APARTAMENTOS"},{"id":"45","name":"Oficentro Apartamentos Suites"},{"id":"120","name":"AUTOCARAVANAS LA CALA"},{"id":"8","name":"Atarazanas Málaga Boutique Hotel"},{"id":"146","name":"PALACIO DE LA TINTA"},{"id":"36","name":"Málaga Centro B&B HOTEL"},{"id":"11","name":"Barceló Málaga"},{"id":"82","name":"Benhostone"},{"id":"136","name":"EUROSTARS MÁLAGA"},{"id":"103","name":"Malaga Feeling Apartment"},{"id":"127","name":"Living Malaga Apart"},{"id":"125","name":"Ibis Hotel Málaga Centro"},{"id":"128","name":"Los flamencos Apart"},{"id":"96","name":"DOMUS HOSTAL"},{"id":"117","name":"Picasso Apartments"},{"id":"75","name":"CAMPER AREA MH EL RINCON (Málaga)"},{"id":"76","name":"CASA EL MORISCO"},{"id":"14","name":"Castillo Santa Catalina"},{"id":"15","name":"Casual del Mar Málaga"},{"id":"83","name":"Chinitas Boutique Bellavista"},{"id":"85","name":"City Expert CISTER"},{"id":"90","name":"City Expert Calle Granada"},{"id":"93","name":"City Expert CALLE GRANADA"},{"id":"88","name":"City Expert Málaga Estación Autobuses"},{"id":"94","name":"City Expert ESTACIÓN AUTOBUSES"},{"id":"89","name":"City Expert Muelle Heredia"},{"id":"92","name":"City Expert MUELLE HEREDIA"},{"id":"126","name":"El Museo Suites"},{"id":"112","name":"El Nogal Home"},{"id":"54","name":"El Riad Andaluz"},{"id":"7","name":"ASTORIA HOTEL"},{"id":"20","name":"DORMA"},{"id":"121","name":"Fay Hotels Victoria Beach (Elimar)"},{"id":"21","name":"Feel Hostels City Center"},{"id":"61","name":"Soho Feel Hostels Malaga"},{"id":"80","name":"Villa Buenavista Malaga"},{"id":"106","name":"Flat Málaga Centro"},{"id":"43","name":"Miramar Gran Hotel"},{"id":"68","name":"Trebol H-A Hotel"},{"id":"22","name":"H10 Croma Málaga"},{"id":"134","name":"HAMPTON BY HILTON"},{"id":"23","name":"Hilton Garden Inn Málaga"},{"id":"24","name":"Holiday Inn Express Malaga Airport"},{"id":"30","name":"Las Acacias Hostal"},{"id":"110","name":"Moscatel Hostal"},{"id":"113","name":"Nomadas Hotel Boutique"},{"id":"25","name":"HOTEL BRO"},{"id":"12","name":"California Hotel"},{"id":"13","name":"Carlos V Hotel"},{"id":"16","name":"Catalonia Hotel"},{"id":"139","name":"Hotel Catalonia Puerta del Mar"},{"id":"17","name":"del Pintor Hotel"},{"id":"18","name":"Hotel Don Curro"},{"id":"97","name":"Don Paco Hotel"},{"id":"98","name":"Elcano Hotel"},{"id":"19","name":"Eliseos Hotel"},{"id":"99","name":"Goartin Hotel"},{"id":"26","name":"Husa Guadalmedina Hotel"},{"id":"101","name":"ibis Budget VELAZQUEZ Hotel"},{"id":"27","name":"Ilunion hotel"},{"id":"70","name":"Larios Málaga Hotel"},{"id":"37","name":"Malaga Palacio AC Hotel by Marriott"},{"id":"116","name":"Picasso Hotel Málaga"},{"id":"39","name":"Málaga Premium Hotel"},{"id":"122","name":"Maria Cristina Hotel"},{"id":"44","name":"Hotel Molina Lario"},{"id":"109","name":"Hotel Monte Victoria"},{"id":"74","name":"Calabahía Hotel Moon Dreams"},{"id":"35","name":"Hotel MS Maestranza"},{"id":"48","name":"Palacete de Álamos Hotel"},{"id":"79","name":"Rincón Sol Hotel"},{"id":"9","name":"Málaga Centro HOTEL"},{"id":"10","name":"Bahía Hotel Soho Boutique"},{"id":"60","name":"Soho Boutique Equitativa Hotel"},{"id":"31","name":"Las Vegas Hotel Soho Boutique"},{"id":"33","name":"Los Naranjos Hotel Soho Boutique"},{"id":"57","name":"Soho Boutique Hotel"},{"id":"58","name":"Soho Boutique Urban Hotel"},{"id":"63","name":"Solymar Hotel"},{"id":"65","name":"Sur Hotel Malaga"},{"id":"29","name":"Vincci Larios Diez Hotel"},{"id":"72","name":"Zenit Hotel Malaga"},{"id":"73","name":"Zeus Hotel"},{"id":"100","name":"ibis budget Málaga Centro"},{"id":"34","name":"Malabar ICON"},{"id":"77","name":"Imo Swiss Golf Beach"},{"id":"28","name":"Imosur Estacion consigna"},{"id":"104","name":"La Casa Azul"},{"id":"5","name":"Oficina Principal [DESCUENTO - 5%] - Málaga Centro, Pasaje Noblejas 8, Málaga, España"},{"id":"32","name":"Lock And Relax -Luggage storage (Centro-Alameda -C1 line)"},{"id":"108","name":"Lodgingmalaga Plaza de la Constitucion"},{"id":"105","name":"Madeinterranea"},{"id":"130","name":"Madeinterranea Suites"},{"id":"95","name":"Club Hispánico"},{"id":"81","name":"Málaga Nostrum"},{"id":"38","name":"Málaga Planners"},{"id":"40","name":"Málaga Sun Apartments"},{"id":"107","name":"MálagaLodge"},{"id":"41","name":"Marbesol"},{"id":"42","name":"Mariposa Hotel 4 estrellas Málaga centro"},{"id":"143","name":"ME MALAGA"},{"id":"78","name":"Motos Cerezo"},{"id":"114","name":"NONO APARTAMENTOS"},{"id":"64","name":"Novotel Suites Málaga Centro"},{"id":"46","name":"Only YOU Hotel Málaga"},{"id":"47","name":"Pacifico Apartments"},{"id":"49","name":"Palacio Solecio"},{"id":"50","name":"Parador de Málaga Gibralfaro"},{"id":"51","name":"Parador de Málaga Golf Club"},{"id":"84","name":"Chinitas Hostal"},{"id":"119","name":"Villa Amalia Suites"},{"id":"52","name":"Petit Palace Plaza Málaga"},{"id":"53","name":"QQ Bikes"},{"id":"55","name":"Room Mate Valeria Hotel"},{"id":"56","name":"Sercotel Rosaleda Málaga"},{"id":"69","name":"Sercotel Tribuna Málaga"},{"id":"59","name":"Soho Boutique Colón Hotel"},{"id":"62","name":"Sol Maestranza"},{"id":"135","name":"Staybridge Suites Malaga"},{"id":"138","name":"Staybridge Suites Malaga"},{"id":"66","name":"Tandem Soho Suites"},{"id":"67","name":"TOC Hostel Málaga"},{"id":"118","name":"Villa Alicia Guest House"},{"id":"71","name":"Vincci Posada del Patio Hotel"},{"id":"86","name":"EASY PARKING MÁLAGA aeropuerto Costa del Sol, aparcamiento CUBIERTO 24h | iPark"},{"id":"2","name":"Oficina Málaga - Aeropuerto"},{"id":"91","name":"Cenacheros house"},{"id":"87","name":"City Expert Cister"},{"id":"140","name":"Cristine Bedfor Guest Houses Málaga"},{"id":"3","name":"Oficina Málaga - Estación de Tren"},{"id":"141","name":"Eurostars Málaga"},{"id":"137","name":"HAMPTON"},{"id":"129","name":"DOMUS HOTEL"},{"id":"145","name":"Hotel Serenay Málaga"},{"id":"131","name":"AUTOCARAVANA LA CALA"},{"id":"142","name":"SERENAY"},{"id":"4","name":"Oficina Málaga - Estación de Cruceros"},{"id":"132","name":"Otra Ubicación - [Indique dirección en -Observaciones-]"}];
@@ -790,15 +930,24 @@ async function handler(req: Request) {
   const { data: contract, error: contractError } = await service.from("contracts").select("*").eq("id", contractId).single();
   if (contractError || !contract) return json({ error: "Contract not found" }, 404);
   if (action === "cancel") {
-    if (contract.status === "cancelled") return json({ cancelled: true, already_cancelled: true, renthub_cancelled: false });
+    const code = String(contract.renthub_contract_id || contract.app_payload?.renthub_cancel_pending_code || "").trim();
+    const alreadyCancelledLocal = contract.status === "cancelled";
+    const previouslyCancelledInRenthub = !!String(contract.app_payload?.renthub_cancelled_code || "").trim();
+    if (alreadyCancelledLocal && (!code || previouslyCancelledInRenthub)) {
+      return json({
+        cancelled: true,
+        already_cancelled: true,
+        renthub_cancelled: previouslyCancelledInRenthub,
+        external_reference: String(contract.app_payload?.renthub_cancelled_code || code || "").trim() || null,
+      });
+    }
 
-    const code = String(contract.renthub_contract_id || "").trim();
     const pickupDate = String(contract.delivery_date || "").slice(0, 10);
     const pickupTime = String(contract.delivery_time || "00:00").slice(0, 5);
     const pickupAt = pickupDate ? new Date(`${pickupDate}T${pickupTime || "00:00"}:00+02:00`) : null;
     const future = !!pickupAt && Number.isFinite(pickupAt.getTime()) && pickupAt.getTime() > Date.now();
-    const noContract = contract.status === "draft" && !String(contract.pdf_path || "").trim();
-    const cancelRenthub = !!code && future && noContract;
+    const noContract = (contract.status === "draft" || alreadyCancelledLocal) && !String(contract.pdf_path || "").trim();
+    const cancelRenthub = !!code && future && noContract && !previouslyCancelledInRenthub;
 
     if (cancelRenthub) {
       try {
@@ -813,7 +962,8 @@ async function handler(req: Request) {
       ...(contract.app_payload || {}),
       cancelled_at: now,
       cancelled_by_app: true,
-      renthub_cancel_attempted: cancelRenthub,
+      renthub_cancel_attempted: cancelRenthub || contract.app_payload?.renthub_cancel_attempted === true,
+      renthub_cancel_pending_code: cancelRenthub ? null : (alreadyCancelledLocal && code && !previouslyCancelledInRenthub ? code : (contract.app_payload?.renthub_cancel_pending_code || null)),
       renthub_cancelled_code: cancelRenthub ? code : (contract.app_payload?.renthub_cancelled_code || null),
       renthub_cancelled_at: cancelRenthub ? now : (contract.app_payload?.renthub_cancelled_at || null),
       renthub_cancel_skipped_reason: !code ? "not_linked" : !future ? "not_future" : !noContract ? "contract_already_generated" : null,
@@ -852,6 +1002,62 @@ async function handler(req: Request) {
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
+  const preserveExistingBooking =
+    contract.renthub_sync_status === "linked_existing" ||
+    contract.app_payload?.renthub_preserve_existing_booking === true ||
+    !!contract.app_payload?.renthub_linked_existing_code;
+
+  if(action==="send" && preserveExistingBooking){
+    const code=String(contract.renthub_contract_id||contract.app_payload?.renthub_linked_existing_code||"").trim();
+    if(!code)return json({error:"La reserva existente de Renthub no tiene código enlazado."},409);
+    try{
+      const bookingDetail=await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
+      const customerCode=String(bookingDetail?.result?.customer?.code||bookingDetail?.result?.customer_code||"").trim();
+      if(!customerCode){
+        throw new Error("Renthub no devolvió el código del cliente de la reserva existente. No se ha modificado la reserva.");
+      }
+      const updated=await syncPartnerCustomerMissingOnly(customerCode,contract,customer,driver);
+      const now=new Date().toISOString();
+      const protectedPayload={
+        ...(contract.app_payload||{}),
+        renthub_preserve_existing_booking:true,
+        renthub_customer_only_sync:true,
+        renthub_customer_only_last_sync_at:now,
+        renthub_customer_only_last_fields:updated?.sent||[],
+      };
+      await requireWrite(actor.from("contracts").update({
+        renthub_contract_id:code,
+        renthub_sync_status:"linked_existing",
+        renthub_last_sync_at:now,
+        renthub_sync_error:null,
+        app_payload:protectedPayload,
+      }).eq("id",contract.id),"No se pudo guardar la sincronización de cliente");
+      await service.from("renthub_sync_log").insert({
+        contract_id:contract.id,
+        operation:"sync_customer_missing_only",
+        direction:"outbound",
+        external_reference:code,
+        request_data:{protected_existing_booking:true,fields:updated?.sent||[]},
+        response_data:{booking_unchanged:true,customer_updated:!updated?.skipped,fields:updated?.sent||[]},
+        success:true,
+        verified_at:now,
+      });
+      console.log(JSON.stringify({event:"renthub_customer_only_protected",contract_number:contract.contract_number,code,fields:updated?.sent||[],booking_unchanged:true}));
+      return json({
+        verified:true,
+        linked_existing:true,
+        protected_existing_booking:true,
+        booking_unchanged:true,
+        external_reference:code,
+        customer_updated:!updated?.skipped,
+        customer_fields_sent:updated?.sent||[],
+      });
+    }catch(error){
+      const message=error instanceof Error?error.message:String(error);
+      await actor.from("contracts").update({renthub_sync_status:"linked_existing",renthub_sync_error:message}).eq("id",contract.id);
+      return json({error:message,external_reference:code,booking_unchanged:true,protected_existing_booking:true},502);
+    }
+  }
   const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart, latestPartnerStart, opening } = await automaticMappings(contract);
   const contractPlate = String(contract.app_payload?.vehicle_plate || contract.app_payload?.registration || contract.vehicle_plate || "").trim();
   const fleetMatch = contractPlate ? renthubFleetByPlate[plateKey(contractPlate)] : null;
@@ -930,10 +1136,24 @@ async function handler(req: Request) {
       booking?.resource_id,
       booking?.pm_ms_id,
     ].filter((value) => value !== undefined && value !== null && String(value) !== "").map(String);
+    const totalCandidates = [
+      booking?.total_amount,
+      booking?.total,
+      booking?.amount,
+      booking?.grand_total,
+      booking?.total_with_vat,
+      detail?.result?.total_amount,
+      detail?.result?.total,
+      detail?.result?.amount,
+      detail?.result?.grand_total,
+    ].filter((value) => value !== undefined && value !== null && String(value).trim() !== "");
+    const totalMatches = totalCandidates.length === 0
+      ? true
+      : totalCandidates.some((value) => sameAmount(value, expectedTotal, contract.vat_percent));
     const checks: Record<string, boolean> = {
       code: String(booking.code || "") === code,
       end: minute(booking.end_datetime) === minute(end),
-      total: sameAmount(booking.total_amount, expectedTotal, contract.vat_percent),
+      total: totalMatches,
       customer_email: normalize(detail?.result?.customer?.email) === normalize(customer?.email),
       model: modelMatches,
       pickup_location: locationMatches(booking.pickup_location, pickup),
@@ -959,6 +1179,8 @@ async function handler(req: Request) {
       vehicle_expected: fleetMatch?.vehicle || null,
       vehicle_candidates: actualVehicleIds,
       vehicle_check_enabled: options.checkVehicle !== false,
+      total_candidates: totalCandidates.map((value) => String(value)),
+      expected_total: expectedTotal,
       checks,
     }));
     return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
@@ -979,8 +1201,9 @@ async function handler(req: Request) {
       form.set("mobile", phone.mobile);
       form.set("email", String(customer?.email || contract.app_payload?.customer_email || "").trim());
       const parsedAddress = splitCustomerAddress(customer?.address || contract.app_payload?.customer_address || "");
-      const customerCountry = renthubCountryCode(customer?.country || contract.app_payload?.customer_nationality || driver?.licence_country || contract.app_payload?.license_issued_by);
+      const customerCountry = String(parsedAddress.country || renthubCountryCode(customer?.country || contract.app_payload?.customer_nationality || driver?.licence_country || contract.app_payload?.license_issued_by) || "").trim();
       if (parsedAddress.address) form.set("address", parsedAddress.address);
+      if (parsedAddress.streetNumber) form.set("street_number", parsedAddress.streetNumber);
       if (customer?.city || parsedAddress.city) form.set("city", String(customer?.city || parsedAddress.city));
       if (customer?.postal_code || parsedAddress.zip) form.set("zip", String(customer?.postal_code || parsedAddress.zip));
       if (customerCountry) form.set("country", customerCountry);
