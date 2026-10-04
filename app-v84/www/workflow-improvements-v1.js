@@ -1,13 +1,56 @@
 (function(){
 'use strict';
-const $=id=>document.getElementById(id);let record=null,recordId='',resumeTimer=null;
+const $=id=>document.getElementById(id);let record=null,recordId='',resumeTimer=null,cashDirty=false;
 function headers(){return{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'}}
 async function rpc(name,body){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:headers(),body:JSON.stringify(body||{})}),d=await r.json().catch(()=>null);if(!r.ok)throw Error(d?.message||d?.error||'No se pudo guardar');return d}
 async function loadRecord(id){if(!id)return null;if(recordId===id&&record)return record;record=await rpc('app_contract_record',{p_contract_id:id});recordId=id;return record}
-function ensureCashBox(){if($('cash_without_card'))return;const anchor=$('card_expiry')?.closest('label')||$('card_number')?.closest('label');if(!anchor)return;const l=document.createElement('label');l.id='lrCashNoCardLabel';l.className='wide lrCashNoCard';l.innerHTML='<input id="cash_without_card" type="checkbox"> <span><b>Efectivo sin tarjeta</b><small>Marca esta casilla cuando el cliente paga en efectivo y no se guardarán datos de tarjeta.</small></span>';anchor.parentElement?.insertBefore(l,anchor.nextSibling)}
-async function hydrate(){ensureCashBox();const id=window.LariosCurrentContractId||'';if(!id)return;try{const r=await loadRecord(id);if(id!==window.LariosCurrentContractId)return;if($('cash_without_card'))$('cash_without_card').checked=r?.cash_without_card===true||String(r?.cash_without_card)==='true';if($('agency')&&!$('agency').value&&r?.agency)$('agency').value=r.agency}catch(e){console.warn('Workflow hydrate',e)}}
+function ensureCashBox(){
+  let box=$('cash_without_card');
+  if(!box){
+    const anchor=$('card_expiry')?.closest('label')||$('card_number')?.closest('label');
+    if(!anchor)return;
+    const l=document.createElement('label');
+    l.id='lrCashNoCardLabel';
+    l.className='wide lrCashNoCard';
+    l.innerHTML='<input id="cash_without_card" type="checkbox"> <span><b>Efectivo sin tarjeta</b><small>Marca esta casilla cuando el cliente paga en efectivo y no se guardarán datos de tarjeta.</small></span>';
+    anchor.parentElement?.insertBefore(l,anchor.nextSibling);
+    box=$('cash_without_card');
+  }
+  if(!box)return;
+  box.disabled=false;
+  box.removeAttribute('disabled');
+  box.style.pointerEvents='auto';
+  const label=$('lrCashNoCardLabel');
+  if(label){
+    label.style.pointerEvents='auto';
+    label.style.cursor='pointer';
+  }
+  if(box.dataset.lrCashBound!=='1'){
+    box.dataset.lrCashBound='1';
+    box.addEventListener('pointerdown',e=>e.stopPropagation());
+    box.addEventListener('click',e=>e.stopPropagation());
+    box.addEventListener('change',()=>{
+      cashDirty=true;
+      if(box.checked){
+        const cn=$('card_number'),ce=$('card_expiry');
+        if(cn)cn.value='';
+        if(ce)ce.value='';
+      }
+    });
+    if(label&&label.dataset.lrCashBound!=='1'){
+      label.dataset.lrCashBound='1';
+      label.addEventListener('click',e=>{
+        if(e.target===box)return;
+        e.preventDefault();
+        box.checked=!box.checked;
+        box.dispatchEvent(new Event('change',{bubbles:true}));
+      });
+    }
+  }
+}
+async function hydrate(){ensureCashBox();const id=window.LariosCurrentContractId||'';if(!id)return;try{const r=await loadRecord(id);if(id!==window.LariosCurrentContractId)return;if($('cash_without_card')&&!cashDirty)$('cash_without_card').checked=r?.cash_without_card===true||String(r?.cash_without_card)==='true';if($('agency')&&!$('agency').value&&r?.agency)$('agency').value=r.agency}catch(e){console.warn('Workflow hydrate',e)}}
 function currentStatus(){return recordId===window.LariosCurrentContractId&&record?.status?record.status:'draft'}
-async function saveOpenReservation(){const id=window.LariosCurrentContractId||'';if(!id)throw Error('No hay una reserva abierta.');const prior=await loadRecord(id),bridge=window.LariosStripeBridge,p=bridge?.payload?bridge.payload():{...prior};p.id=id;p.status=prior?.status||'draft';p.payment_method=$('payment_method')?.value||p.payment_method||'';p.cash_without_card=!!$('cash_without_card')?.checked;p.agency=$('agency')?.value||prior?.agency||'';const saved=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});record=saved;recordId=saved?.id||id;window.LariosCurrentContractId=recordId;sessionStorage.setItem('lr_resume_contract',recordId);return saved}
+async function saveOpenReservation(){const id=window.LariosCurrentContractId||'';if(!id)throw Error('No hay una reserva abierta.');const prior=await loadRecord(id),bridge=window.LariosStripeBridge,p=bridge?.payload?bridge.payload():{...prior};p.id=id;p.status=prior?.status||'draft';p.payment_method=$('payment_method')?.value||p.payment_method||'';p.cash_without_card=!!$('cash_without_card')?.checked;p.agency=$('agency')?.value||prior?.agency||'';const saved=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});record=saved;recordId=saved?.id||id;cashDirty=false;window.LariosCurrentContractId=recordId;sessionStorage.setItem('lr_resume_contract',recordId);return saved}
 async function resumeContract(id){
   if(!id)return;
   sessionStorage.setItem('lr_resume_contract',id);
