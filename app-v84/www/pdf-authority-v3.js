@@ -30,7 +30,7 @@ function prepareRequiredFields(){
  if(documentField&&!val('customer_document')&&licence){documentField.value=licence;documentField.dispatchEvent(new Event('input',{bubbles:true}));documentField.dispatchEvent(new Event('change',{bubbles:true}))}
  if(!phoneIsValid(val('customer_phone'))){markRequired('customer_phone');alert('Revisa el teléfono. Sin prefijo solo se permiten teléfonos españoles de 9 dígitos. Si tiene más o menos de 9 dígitos, debe incluir prefijo internacional con + o 00.');return false}
  const group=val('vehicle_group').toUpperCase().replace(/^GRUPO\s+/,'').replace(/[_ ]/g,'-');
- if(['BICICLETA','E-BIKE'].includes(group)){if($('fuel_out'))$('fuel_out').value='';clearFuelRequired()}else if(!/^[0-8]\/8$/.test(val('fuel_out'))){markFuelRequired();alert('Debes marcar el nivel de combustible antes de generar el contrato.');return false}else clearFuelRequired();
+ if(['BICICLETA','E-BIKE'].includes(group)){if($('fuel_out')){$('fuel_out').value='';$('fuel_out').dataset.userSelected='0'}clearFuelRequired()}else if(!/^[0-8]\/8$/.test(val('fuel_out'))||$('fuel_out')?.dataset.userSelected!=='1'){markFuelRequired();alert('Debes marcar un nivel de combustible antes de generar el contrato.');return false}else clearFuelRequired();
  if(!val('payment_method')){markRequired('payment_method');alert('Selecciona la forma de pago. Es obligatoria para generar el contrato.');return false}
  if(!chk('cash_without_card')){
   if(cardValue().replace(/\D/g,'').length<12){markRequired('card_number');alert('Introduce los datos completos de la tarjeta o marca Efectivo sin tarjeta.');return false}
