@@ -300,7 +300,7 @@ Deno.serve(async(req:Request)=>{
   const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
   const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});
   const body=await req.json().catch(()=>({})),action=String(body.action||"create"),id=String(body.contract_id||"");
-  const bridge=action==="create_whatsapp";
+  const bridge=action==="create_whatsapp"||action==="amend_whatsapp";
   if(!bridge&&!jwt)return json({error:"Authentication required"},401);
   if(bridge&&!body.import_token)return json({error:"Token del puente obligatorio"},403);
   let actor:any=service;
@@ -313,6 +313,7 @@ Deno.serve(async(req:Request)=>{
   await loadSecret(service);if(!secret)return json({error:"Renthub no está configurado"},503);
   const{data:c,error:ce}=await service.from("contracts").select("*").eq("id",id).single();
   if(ce||!c)return json({error:"Contrato no encontrado"},404);
+  const bridgeAmend=bridge&&(action==="amend_whatsapp"||!!c.app_payload?.whatsapp_amendment_message_id);
   if(bridge){
     const p=c.app_payload||{};
     if(p.source!=="whatsapp_group"||!p.source_whatsapp_group||!p.source_whatsapp_message_id||
@@ -332,15 +333,15 @@ Deno.serve(async(req:Request)=>{
     const madrid=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Madrid",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date());
     if(`${c.delivery_date} ${String(c.delivery_time||"").slice(0,5)}`<=madrid)
       return json({error:"La recogida ya no es futura"},409);
-    if(c.renthub_sync_status==="creating")return json({error:"Creación ya iniciada; verificar en Renthub antes de reintentar"},409);
-    if(c.renthub_sync_status==="failed" &&
+    if(c.renthub_sync_status==="creating"&&!bridgeAmend)return json({error:"Creación ya iniciada; verificar en Renthub antes de reintentar"},409);
+    if(!bridgeAmend&&c.renthub_sync_status==="failed" &&
        !norm(c.renthub_sync_error).includes("codigo internacional es obligatorio"))
       return json({error:"Error anterior pendiente de verificación en Renthub"},409);
   }
   if(action==="update")return json({error:"La actualización queda pendiente del endpoint de Renthub.",pending_endpoint:true},409);
   if(action!=="create"&&!bridge)return json({error:"Unknown action"},400);
-  if(c.renthub_contract_id)return json({created:true,already_created:true,external_reference:c.renthub_contract_id});
-  if(bridge){
+  if(c.renthub_contract_id&&!bridgeAmend)return json({created:true,already_created:true,external_reference:c.renthub_contract_id});
+  if(bridge&&!bridgeAmend){
     let claimQuery=service.from("contracts").update({renthub_sync_status:"creating",renthub_sync_error:null})
       .eq("id",id).eq("renthub_sync_status",c.renthub_sync_status).is("renthub_contract_id",null);
     if(c.renthub_sync_status==="failed")claimQuery=claimQuery.eq("renthub_sync_error",c.renthub_sync_error);
@@ -420,7 +421,7 @@ Deno.serve(async(req:Request)=>{
     if(franchiseToSend>0)form.set("overwrite_damage_franchise",franchiseToSend.toFixed(2));
     console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:true,price_source:priceSource,rental_gross:rentalGross,tariff_category:baseTariff?.category||null,tariff_season_94:baseTariff?.season94??null}));
     const currentPickup=String(map.pickup),currentDropoff=String(map.dropoff);
-    const precheck=await findExistingBookings({
+    const precheck=bridgeAmend?{matches:[],complete:true,partnerChecked:true}:await findExistingBookings({
       phone:String(customer?.phone||payload.customer_phone||""),
       name:String(customer?.full_name||payload.customer_name||""),
       start:realStart,
@@ -553,13 +554,26 @@ Deno.serve(async(req:Request)=>{
     }
     const code=String(inserted?.result?.booking?.code||inserted?.booking?.code||inserted?.code||"");
     if(!code)throw Error("Renthub no devolvió código de reserva");
+    const previousCode=bridgeAmend?String(c.renthub_contract_id||c.app_payload?.renthub_amend_old_code||"").trim():"";
+    if(previousCode&&previousCode!==code){
+      try{
+        await rh("/module/rental/api/partner/booking/cancel/"+encodeURIComponent(previousCode),{method:"DELETE"});
+      }catch(cancelError){
+        const message=cancelError instanceof Error?cancelError.message:String(cancelError);
+        const alreadyGone=/404/.test(message)&&/invalid booking code|already canceled|already cancelled/i.test(message);
+        if(!alreadyGone){
+          await rh("/module/rental/api/partner/booking/cancel/"+encodeURIComponent(code),{method:"DELETE"}).catch(()=>null);
+          throw Error("No se pudo sustituir la reserva anterior de Renthub: "+message);
+        }
+      }
+    }
     await requireWrite(actor.from("contracts").update({
       ...(localPriceMissing?{rental_total:rentalGross.toFixed(2),total:rentalGross.toFixed(2)}:{}),
       renthub_contract_id:code,
       renthub_sync_status:"reservation_created",
       renthub_last_sync_at:new Date().toISOString(),
       renthub_sync_error:null,
-      app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff,renthub_created_start:start,renthub_real_start:realStart,price_source:priceSource,...(localPriceMissing?{base_tariff_price:rentalGross.toFixed(2),base_tariff_category:baseTariff?.category||"",base_tariff_season_94:!!baseTariff?.season94}:{})}
+      app_payload:{...payload,renthub_created_from_quick_reservation:true,renthub_created_at:new Date().toISOString(),renthub_resource:"freesale",renthub_model_id:map.model,renthub_pickup_location_id:map.pickup,renthub_dropoff_location_id:map.dropoff,renthub_created_start:start,renthub_real_start:realStart,price_source:priceSource,...(bridgeAmend?{renthub_amend_old_code:null,renthub_amend_replaced_code:previousCode||null,renthub_amend_pending:false,renthub_amend_applied_at:new Date().toISOString()}:{ }),...(localPriceMissing?{base_tariff_price:rentalGross.toFixed(2),base_tariff_category:baseTariff?.category||"",base_tariff_season_94:!!baseTariff?.season94}:{})}
     }).eq("id",id),"No se pudo guardar el código de Renthub");
     return json({created:true,external_reference:code,resource:"freesale",group:map.group,pickup_location:map.pickup,dropoff_location:map.dropoff,location_fallback:false,start_datetime:start,real_start_datetime:realStart,time_adjusted:start!==realStart});
   }catch(e){
