@@ -1658,7 +1658,10 @@ async function handler(req: Request) {
       if (!checked.verified) {
         const currentStatus = normalize(checked.booking?.status || checked.booking?.state || checked.booking?.booking_status || checked.booking?.pm_stato_prenotazione || "");
         const lockedExisting = ["in_progress","confirmed","in corso","in_corso"].includes(currentStatus);
-        if (lockedExisting) {
+        const realStartAlreadyPassed = !!minimumStart && start < minimumStart;
+        // Si el contrato ya ha comenzado, no intentamos crear una reserva nueva:
+        // Renthub puede rechazarla por horario/oficina cerrada. Actualizamos la reserva enlazada.
+        if (lockedExisting || realStartAlreadyPassed) {
           try {
             updated = await updateExistingRenthubBooking(checked.detail);
             checked = await verify(code, { checkStart: false, checkPayment: false });
@@ -1672,6 +1675,7 @@ async function handler(req: Request) {
               const updatedPayload = paymentSyncPayload({
                 ...(contract.app_payload || {}),
                 renthub_updated_existing_booking_at: new Date().toISOString(),
+                renthub_updated_after_real_start: realStartAlreadyPassed,
               }, payment);
               await requireWrite(actor.from("contracts").update({
                 renthub_sync_status: paymentSyncStatus(payment),
