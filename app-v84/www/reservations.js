@@ -104,6 +104,9 @@ function ensureFuelLevelControl(x){
     input=document.createElement('input');input.type='hidden';input.id='fuel_out';input.name='fuel_out';
     form.appendChild(input);
   }
+  // El selector nativo/antiguo queda siempre oculto. Solo usamos la botonera visual.
+  if(input.tagName==='SELECT'){input.style.display='none';input.setAttribute('aria-hidden','true');input.tabIndex=-1}
+  const legacyLabel=input.closest('label');if(legacyLabel)legacyLabel.style.display='none';
   let box=$('lrFuelOutControl');
   if(!box){
     box=document.createElement('div');box.id='lrFuelOutControl';box.className='lrFuelOutControl';
@@ -111,12 +114,29 @@ function ensureFuelLevelControl(x){
     const anchor=$('fuel_type')?.closest('label')||$('fuel_type')?.parentElement||form.firstElementChild;
     (anchor?.parentElement||form).insertBefore(box,anchor?.nextSibling||null);
     const grid=box.querySelector('.lrFuelOutGrid');
-    for(let i=0;i<=8;i++){const b=document.createElement('button');b.type='button';b.dataset.value=i+'/8';b.textContent=i+'/8';b.onclick=async()=>{input.value=b.dataset.value;grid.querySelectorAll('button').forEach(q=>q.classList.toggle('on',q===b));await persistFuelLevel(input.value)};grid.appendChild(b)}
+    for(let i=0;i<=8;i++){
+      const b=document.createElement('button');b.type='button';b.dataset.value=i+'/8';b.textContent=i+'/8';
+      b.onclick=async()=>{
+        input.value=b.dataset.value;
+        input.dataset.userSelected='1';
+        grid.querySelectorAll('button').forEach(q=>q.classList.toggle('on',q===b));
+        await persistFuelLevel(input.value)
+      };
+      grid.appendChild(b)
+    }
   }
-  if(bike){box.style.display='none';input.value='';persistFuelLevel('').catch(()=>{});return}
+  if(bike){
+    box.style.display='none';
+    input.value='';
+    input.dataset.userSelected='0';
+    persistFuelLevel('').catch(()=>{});
+    return
+  }
   box.style.display='';
-  const saved=String(x?.fuel_out||x?.delivery_fuel||x?.app_payload?.fuel_out||input.value||'').trim();
+  const explicitlySelected=!!x?.app_payload?.fuel_out_selected_at;
+  const saved=explicitlySelected?String(x?.fuel_out||x?.delivery_fuel||x?.app_payload?.fuel_out||'').trim():'';
   input.value=saved;
+  input.dataset.userSelected=explicitlySelected?'1':'0';
   box.querySelectorAll('.lrFuelOutGrid button').forEach(b=>b.classList.toggle('on',b.dataset.value===saved));
 }
 function fill(x){
