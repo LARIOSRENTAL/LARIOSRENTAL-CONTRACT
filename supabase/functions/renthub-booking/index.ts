@@ -270,13 +270,13 @@ async function findExistingBookings(target:{phone:string,name:string,start:strin
   };
 
   try{
-    const q=new URLSearchParams({page:"1",per_page:"100",inserted_after:new Date(Date.now()-1000*60*60*24*30).toISOString().slice(0,16).replace("T"," ")});
+    const q=new URLSearchParams({page:"1",per_page:"50",inserted_after:new Date(Date.now()-1000*60*60*24*30).toISOString().slice(0,16).replace("T"," ")});
     inspect(collectBookings(await rh("/module/rental/api/partner/booking/my-bookings?"+q.toString())),"partner_my");
     partnerChecked=true;
   }catch(e){console.warn("Renthub Partner duplicate precheck failed",e);}
 
   try{
-    const q=new URLSearchParams({page:"1",per_page:"100",start_date_from:target.date,start_date_to:target.date});
+    const q=new URLSearchParams({page:"1",per_page:"50",start_date_from:target.date,start_date_to:target.date});
     const data=await userApiFetch("/module/rental/api/v1/booking?"+q.toString());
     inspect(collectBookings(data),"user_api");
     complete=true;
