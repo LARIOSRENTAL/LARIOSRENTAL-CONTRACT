@@ -1002,62 +1002,6 @@ async function handler(req: Request) {
     contract.customer_id ? service.from("customers").select("*").eq("id", contract.customer_id).maybeSingle() : Promise.resolve({ data: null }),
     contract.main_driver_id ? service.from("drivers").select("*").eq("id", contract.main_driver_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const preserveExistingBooking =
-    contract.renthub_sync_status === "linked_existing" ||
-    contract.app_payload?.renthub_preserve_existing_booking === true ||
-    !!contract.app_payload?.renthub_linked_existing_code;
-
-  if(action==="send" && preserveExistingBooking){
-    const code=String(contract.renthub_contract_id||contract.app_payload?.renthub_linked_existing_code||"").trim();
-    if(!code)return json({error:"La reserva existente de Renthub no tiene código enlazado."},409);
-    try{
-      const bookingDetail=await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
-      const customerCode=String(bookingDetail?.result?.customer?.code||bookingDetail?.result?.customer_code||"").trim();
-      if(!customerCode){
-        throw new Error("Renthub no devolvió el código del cliente de la reserva existente. No se ha modificado la reserva.");
-      }
-      const updated=await syncPartnerCustomerMissingOnly(customerCode,contract,customer,driver);
-      const now=new Date().toISOString();
-      const protectedPayload={
-        ...(contract.app_payload||{}),
-        renthub_preserve_existing_booking:true,
-        renthub_customer_only_sync:true,
-        renthub_customer_only_last_sync_at:now,
-        renthub_customer_only_last_fields:updated?.sent||[],
-      };
-      await requireWrite(actor.from("contracts").update({
-        renthub_contract_id:code,
-        renthub_sync_status:"linked_existing",
-        renthub_last_sync_at:now,
-        renthub_sync_error:null,
-        app_payload:protectedPayload,
-      }).eq("id",contract.id),"No se pudo guardar la sincronización de cliente");
-      await service.from("renthub_sync_log").insert({
-        contract_id:contract.id,
-        operation:"sync_customer_missing_only",
-        direction:"outbound",
-        external_reference:code,
-        request_data:{protected_existing_booking:true,fields:updated?.sent||[]},
-        response_data:{booking_unchanged:true,customer_updated:!updated?.skipped,fields:updated?.sent||[]},
-        success:true,
-        verified_at:now,
-      });
-      console.log(JSON.stringify({event:"renthub_customer_only_protected",contract_number:contract.contract_number,code,fields:updated?.sent||[],booking_unchanged:true}));
-      return json({
-        verified:true,
-        linked_existing:true,
-        protected_existing_booking:true,
-        booking_unchanged:true,
-        external_reference:code,
-        customer_updated:!updated?.skipped,
-        customer_fields_sent:updated?.sent||[],
-      });
-    }catch(error){
-      const message=error instanceof Error?error.message:String(error);
-      await actor.from("contracts").update({renthub_sync_status:"linked_existing",renthub_sync_error:message}).eq("id",contract.id);
-      return json({error:message,external_reference:code,booking_unchanged:true,protected_existing_booking:true},502);
-    }
-  }
   const { model, pickup, dropoff, pickupAddress, dropoffAddress, minimumStart, latestPartnerStart, opening } = await automaticMappings(contract);
   const contractPlate = String(contract.app_payload?.vehicle_plate || contract.app_payload?.registration || contract.vehicle_plate || "").trim();
   const fleetMatch = contractPlate ? renthubFleetByPlate[plateKey(contractPlate)] : null;
@@ -1525,19 +1469,33 @@ async function handler(req: Request) {
   }
 
   if (action === "send") {
-    if (!contract.renthub_contract_id) {
-      return json({
-        error: "Esta reserva no está enlazada con una reserva de Renthub. Marca «Registrar reserva en Renthub» al crearla si quieres vincularla.",
-        linked_renthub_booking_required: true,
-      }, 409);
-    }
+    // Este botón sincroniza un CONTRATO ya generado, no crea una reserva preliminar.
+    // Si existe una reserva enlazada, se sustituye por una nueva con todos los datos
+    // del contrato y después se cancela la anterior. Si no existe, se crea directamente.
     let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null, payment: any = null;
     try {
       if (!code) {
-        if (minimumStart && start < minimumStart) throw new Error(`Renthub no admite crear reservas con una entrega anterior a ${minimumStart}. Este contrato histórico se conserva únicamente en Larios Rental.`);
         const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
         if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
-        const created = await insertPartnerBooking(start);
+        let technicalStart = start;
+        if (minimumStart && technicalStart < minimumStart) {
+          const preferred = renthubReplacementStart(contract, latestPartnerStart || "19:59");
+          technicalStart = preferred >= minimumStart && preferred < end
+            ? preferred
+            : firstOpeningAtOrAfter(opening, minimumStart, end);
+          if (!technicalStart || technicalStart >= end) {
+            throw new Error(`Renthub no admite la hora real ${start} y no existe una hora técnica válida antes de la devolución ${end}.`);
+          }
+          console.log(JSON.stringify({
+            event:"renthub_contract_send_past_time_fallback",
+            contract_number:contract.contract_number,
+            real_start:start,
+            minimum_start:minimumStart,
+            technical_start:technicalStart,
+            end
+          }));
+        }
+        const created = await insertPartnerBooking(technicalStart);
         inserted = created.inserted;
         code = created.code;
         await requireWrite(actor.from("contracts").update({
@@ -1550,6 +1508,9 @@ async function handler(req: Request) {
             renthub_pickup_location_id: pickup,
             renthub_dropoff_location_id: dropoff,
             renthub_vehicle_requested: created.vehicleRequested,
+            renthub_created_from_contract_send: true,
+            renthub_real_contract_start: start,
+            renthub_technical_start: created.actualStart,
           },
         }).eq("id", contract.id), "No se pudo guardar el código de Renthub");
         let createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
@@ -1560,10 +1521,14 @@ async function handler(req: Request) {
         }
         if (!createdChecked.verified) {
           const mismatchKeys = Object.entries(createdChecked.checks).filter(([, ok]) => !ok).map(([key]) => key);
+          await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(code)}`, { method: "DELETE" }).catch(() => null);
           throw new Error(`Renthub verification mismatch: ${mismatchKeys.join(", ")}`);
         }
         payment = await syncRenthubAccountingPayment(contract, createdChecked.detail, paymentMethod, paymentAmount);
-        const createdPaymentPayload = paymentSyncPayload(contract.app_payload || {}, payment);
+        const createdPaymentPayload = paymentSyncPayload({
+          ...(contract.app_payload || {}),
+          renthub_created_from_contract_send: true,
+        }, payment);
         await requireWrite(actor.from("contracts").update({
           renthub_sync_status: paymentSyncStatus(payment),
           renthub_last_sync_at: new Date().toISOString(),
@@ -1573,6 +1538,7 @@ async function handler(req: Request) {
         return json({
           verified: true,
           payment_pending: !!payment?.pending,
+          created_from_contract_send: true,
           external_reference: code,
           checks: createdChecked.checks,
           vehicle_requested: created.vehicleRequested,
