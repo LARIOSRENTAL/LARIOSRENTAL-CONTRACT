@@ -20,6 +20,13 @@ async function rpc(name,body={}){
 const admin=()=>!!window.LariosAccess?.isAdmin?.();
 const plate=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 const upper=v=>String(v||'').trim().toUpperCase();
+function normalizeMakeModel(makeRaw,modelRaw){
+  const make=upper(makeRaw);
+  let model=upper(modelRaw);
+  if(!make)return{make,model};
+  while(model.startsWith(make+' '))model=model.slice(make.length).trim();
+  return{make,model:model||upper(modelRaw)};
+}
 const activeContract=c=>!['draft','returned','collected','cancelled'].includes(String(c?.status||'draft').toLowerCase());
 
 function vehicleType(v){
@@ -184,7 +191,8 @@ function bindForm(){$('lrVehicleForm')?.addEventListener('submit',save);}
 async function save(e){
   e.preventDefault();if(!admin())return;
   const id=$('lrVmId').value;
-  const p={registration:plate($('lrVmPlate').value),make:$('lrVmMake').value.trim().toUpperCase(),model:$('lrVmModel').value.trim().toUpperCase(),fuel_type:$('lrVmFuel').value.trim().toUpperCase()||null};
+  const mm=normalizeMakeModel($('lrVmMake').value,$('lrVmModel').value);
+  const p={registration:plate($('lrVmPlate').value),make:mm.make,model:mm.model,fuel_type:$('lrVmFuel').value.trim().toUpperCase()||null};
   if(!p.registration||!p.make||!p.model)return alert('Completa matrícula, marca y modelo.');
   try{
     if(id)await request('vehicles?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({...p,updated_at:new Date().toISOString()})});
@@ -221,6 +229,6 @@ function install(){
   setInterval(patchFuelDefault,1200);
   load().catch(()=>{});
 }
-window.LariosVehicleManager={open,close,reload:load,newVehicle,edit,cancelEdit,remove,filter,setFilter,__test:{plate,vehicleType,stateOf,setVehicles:v=>vehicles=v}};
+window.LariosVehicleManager={open,close,reload:load,newVehicle,edit,cancelEdit,remove,filter,setFilter,__test:{plate,vehicleType,stateOf,normalizeMakeModel,setVehicles:v=>vehicles=v}};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else setTimeout(install,0);
 })();
