@@ -59,8 +59,8 @@ function applyMatch(){
     model.title=existing?'Los datos del vehículo se editan únicamente desde el panel de Vehículos.':'';
   }
   if(fuelEl){
-    fuelEl.disabled=existing;
-    fuelEl.title=existing?'Los datos del vehículo se editan únicamente desde el panel de Vehículos.':'';
+    fuelEl.disabled=false;
+    fuelEl.title='Combustible que debe figurar en este contrato/PDF.';
   }
   if(color){
     color.readOnly=existing;
