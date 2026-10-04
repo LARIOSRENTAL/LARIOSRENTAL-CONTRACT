@@ -23,7 +23,7 @@ function markRequired(id){const el=$(id);if(el){el.focus();el.style.borderColor=
 function cardValue(){const saved=window.LariosSafeCardPersistence?.read?.(currentContractId());return saved?.card||val('card_number')}
 function cardExpiryValue(){const saved=window.LariosSafeCardPersistence?.read?.(currentContractId());return saved?.expiry||val('card_expiry')}
 function phoneIsValid(raw){const s=String(raw||'').trim(),digits=s.replace(/\D/g,'');if(!s)return false;if(/^00\d+/.test(s)||/^\+\d+/.test(s))return digits.length>=8&&digits.length<=15;return digits.length===9}
-function markFuelRequired(){const select=$('fuel_out');if(select)select.style.borderColor='#dc2626';const grid=select?.nextElementSibling?.classList?.contains('fuelGrid')?select.nextElementSibling:null;if(grid){grid.style.border='2px solid #dc2626';grid.style.borderRadius='8px';grid.style.padding='6px'}return select}
+function markFuelRequired(){const select=$('fuel_out');if(select)select.style.borderColor='#dc2626';const grid=select?.parentElement?.querySelector('.fuelGrid')||null;if(grid){grid.style.border='2px solid #dc2626';grid.style.borderRadius='8px';grid.style.padding='6px'}return select}
 function clearFuelRequired(){const select=$('fuel_out');if(select)select.style.borderColor='';const grid=select?.nextElementSibling?.classList?.contains('fuelGrid')?select.nextElementSibling:null;if(grid){grid.style.border='';grid.style.borderRadius='';grid.style.padding=''}}
 function prepareRequiredFields(){
  const documentField=$('customer_document'),licence=val('driving_license');
