@@ -27,7 +27,7 @@ function loadFleetOnce(){
   if(fleetPromise)return fleetPromise;
   fleetPromise=(async()=>{
     try{
-      const rows=await api('vehicles?select=registration,make,model,fuel_type,status&status=neq.retired&status=neq.sold&order=registration');
+      const rows=await api('vehicles?select=registration,make,model,fuel_type,color,status&status=neq.retired&status=neq.sold&order=registration');
       fleet=Array.isArray(rows)?rows:[];
     }catch(e){
       console.warn('No se pudo precargar la flota',e);
@@ -49,17 +49,30 @@ function setValue(id,value){
 }
 
 function applyMatch(){
-  const plate=$('vehicle_plate');
+  const plate=$('vehicle_plate'),model=$('vehicle_model'),fuelEl=$('fuel_type'),color=$('vehicle_color');
   if(!plate)return false;
   const key=norm(plate.value);
-  if(key.length<1)return false;
   const vehicle=fleet.find(v=>norm(v.registration)===key);
+  const existing=!!vehicle;
+  if(model){
+    model.readOnly=existing;
+    model.title=existing?'Los datos del vehículo se editan únicamente desde el panel de Vehículos.':'';
+  }
+  if(fuelEl){
+    fuelEl.disabled=existing;
+    fuelEl.title=existing?'Los datos del vehículo se editan únicamente desde el panel de Vehículos.':'';
+  }
+  if(color){
+    color.readOnly=existing;
+    color.title=existing?'Los datos del vehículo se editan únicamente desde el panel de Vehículos.':'';
+  }
   if(!vehicle)return false;
   setValue('vehicle_model',[vehicle.make,vehicle.model].filter(Boolean).join(' '));
   if(vehicle.fuel_type){
     const fuel=String(vehicle.fuel_type).toUpperCase();
     setValue('fuel_type',fuel.includes('DIESEL')?'DIESEL':fuel.includes('ELECT')?'ELECTRICO':fuel.includes('HIBR')?'HIBRIDO':'GASOLINA');
   }
+  if(vehicle.color)setValue('vehicle_color',vehicle.color);
   return true;
 }
 
