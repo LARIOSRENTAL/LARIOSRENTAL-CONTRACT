@@ -22,10 +22,15 @@ function validateTypedDates(){
 function markRequired(id){const el=$(id);if(el){el.focus();el.style.borderColor='#dc2626'}return el}
 function cardValue(){const saved=window.LariosSafeCardPersistence?.read?.(currentContractId());return saved?.card||val('card_number')}
 function cardExpiryValue(){const saved=window.LariosSafeCardPersistence?.read?.(currentContractId());return saved?.expiry||val('card_expiry')}
+function phoneIsValid(raw){const s=String(raw||'').trim(),digits=s.replace(/\D/g,'');if(!s)return false;if(/^00\d+/.test(s)||/^\+\d+/.test(s))return digits.length>=8&&digits.length<=15;return digits.length===9}
+function markFuelRequired(){const select=$('fuel_out');if(select)select.style.borderColor='#dc2626';const grid=select?.nextElementSibling?.classList?.contains('fuelGrid')?select.nextElementSibling:null;if(grid){grid.style.border='2px solid #dc2626';grid.style.borderRadius='8px';grid.style.padding='6px'}return select}
+function clearFuelRequired(){const select=$('fuel_out');if(select)select.style.borderColor='';const grid=select?.nextElementSibling?.classList?.contains('fuelGrid')?select.nextElementSibling:null;if(grid){grid.style.border='';grid.style.borderRadius='';grid.style.padding=''}}
 function prepareRequiredFields(){
  const documentField=$('customer_document'),licence=val('driving_license');
  if(documentField&&!val('customer_document')&&licence){documentField.value=licence;documentField.dispatchEvent(new Event('input',{bubbles:true}));documentField.dispatchEvent(new Event('change',{bubbles:true}))}
- if(!val('customer_phone')){markRequired('customer_phone');alert('Falta el teléfono del cliente. Es obligatorio para generar el contrato.');return false}
+ if(!phoneIsValid(val('customer_phone'))){markRequired('customer_phone');alert('Revisa el teléfono. Sin prefijo solo se permiten teléfonos españoles de 9 dígitos. Si tiene más o menos de 9 dígitos, debe incluir prefijo internacional con + o 00.');return false}
+ const group=val('vehicle_group').toUpperCase().replace(/^GRUPO\s+/,'').replace(/[_ ]/g,'-');
+ if(['BICICLETA','E-BIKE'].includes(group)){if($('fuel_out'))$('fuel_out').value='';clearFuelRequired()}else if(!/^[0-8]\/8$/.test(val('fuel_out'))){markFuelRequired();alert('Debes marcar el nivel de combustible antes de generar el contrato.');return false}else clearFuelRequired();
  if(!val('payment_method')){markRequired('payment_method');alert('Selecciona la forma de pago. Es obligatoria para generar el contrato.');return false}
  if(!chk('cash_without_card')){
   if(cardValue().replace(/\D/g,'').length<12){markRequired('card_number');alert('Introduce los datos completos de la tarjeta o marca Efectivo sin tarjeta.');return false}
