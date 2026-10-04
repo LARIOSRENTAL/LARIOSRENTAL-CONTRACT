@@ -70,7 +70,7 @@ function returnLocationNeedsAttention(value){
   const s=normPlace(value);
   if(!s)return false;
   // Estas ubicaciones deben resaltarse aunque existan como colaboradores.
-  if(/\b(dulce hogar|inmobiliaria dulce hogar|parque flat|el parque apart|benhostone|behostone|l apartament|l apartamentos|los flamencos)\b/.test(s))return true;
+  if(/\b(dulce hogar|inmobiliaria dulce hogar|parque flat|el parque apart|benhostone|behostone|l apartament|l apartamentos|los flamencos|parking express)\b/.test(s))return true;
   // Oficina y aeropuerto nunca se resaltan.
   if(/\b(ofi|oficina|pasaje noblejas|aeropuerto|airport)\b/.test(s))return false;
   // Cualquier lugar que coincida con un colaborador o alguno de sus alias se omite.
