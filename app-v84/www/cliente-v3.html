@@ -58,23 +58,23 @@ textarea{min-height:90px}
 .compactMode .head{display:none}
 .compactMode .main{padding:0;height:100vh;overflow:hidden}
 .compactMode #step2,.compactMode #step4{width:100vw;height:100vh;margin:0;border:0;border-radius:0;overflow:hidden}
-.priceMode #step2{display:grid!important;grid-template-rows:auto auto auto minmax(0,1fr) auto auto;gap:4px;padding:6px 10px}
-.priceMode #step2 h2{font-size:18px;margin:0}
-.priceMode #priceRows .row{padding:4px 0;font-size:12px}
-.priceMode #step2>.muted{font-size:11px;margin:0;line-height:1.2}
-.priceMode .insurance{grid-template-columns:1fr 1fr;gap:8px;margin-top:0;min-height:0}
-.priceMode .insuranceBox{min-height:0;padding:10px}
-.priceMode .insuranceBox .choice{font-size:15px;margin-bottom:4px}
-.priceMode .insuranceBox .big{font-size:23px}
-.priceMode .insuranceBox .tap{margin-top:4px;font-size:11px}
-.priceMode #selectedInsurance{margin-top:0;padding:8px;font-size:12px}
-.priceMode #step2 .btn{margin-top:0;padding:10px 12px;font-size:14px;min-height:40px}
+.priceMode #step2{display:block!important;width:100vw;height:100vh;margin:0;padding:8px 12px 54px;border:0;border-radius:0;overflow:hidden}
+.priceMode #step2 h2{font-size:20px;margin:0 0 8px}
+.priceMode #priceRows .row{padding:7px 0;font-size:13px}
+.priceMode #step2>.muted{font-size:12px;margin:6px 0 8px;line-height:1.25}
+.priceMode .insurance{grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.priceMode .insuranceBox{min-height:155px;padding:12px}
+.priceMode .insuranceBox .choice{font-size:16px;margin-bottom:6px}
+.priceMode .insuranceBox .big{font-size:26px}
+.priceMode .insuranceBox .tap{margin-top:8px;font-size:12px}
+.priceMode #selectedInsurance{margin-top:8px;padding:9px;font-size:12px}
+.priceMode #step2 .btn{position:absolute;left:12px;right:12px;bottom:8px;width:calc(100vw - 24px);margin:0;padding:11px 12px;font-size:14px;min-height:42px}
 .signatureMode{overflow:hidden;background:#fff}
 .signatureMode .wrap{max-width:none;width:100vw;height:100vh;min-height:0;background:#fff;overflow:hidden}
 .signatureMode .head{display:none}
 .signatureMode .main{padding:0;height:100vh;overflow:hidden}
-.signatureMode #step4{display:grid!important;grid-template-rows:auto auto auto auto minmax(160px,1fr) auto auto;gap:3px;width:100vw;height:100vh;margin:0;padding:4px 8px;border:0;border-radius:0;overflow:hidden}
-.signatureMode #step4 h2{font-size:18px;margin:0}
+.signatureMode #step4{display:grid!important;grid-template-rows:auto auto auto auto minmax(140px,1fr) auto auto;gap:3px;width:100vw;height:100vh;margin:0;padding:6px 8px 48px;border:0;border-radius:0;overflow:hidden}
+.signatureMode #step4 h2{font-size:20px;margin:0 0 4px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff}
 .signatureMode #summaryRows{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .signatureMode #summaryRows .row{padding:2px 0;font-size:11px;min-height:22px}
 .signatureMode #summaryRows .row:last-child{grid-column:1 / -1}
@@ -82,9 +82,9 @@ textarea{min-height:90px}
 .signatureMode .checkline input{width:24px;height:24px}
 .signatureMode .checkline label{font-size:11px;line-height:1.15}
 .signatureMode #step4 h3{font-size:15px;margin:0}
-.signatureMode #sig{height:100%!important;min-height:160px;max-height:none;border-width:2px}
+.signatureMode #sig{height:100%!important;min-height:140px;max-height:none;border-width:2px}
 .signatureMode .signatureHint{font-size:10px;margin:0}
-.signatureMode #step4 .btn{margin-top:0;padding:8px 10px;font-size:13px}.signatureMode .signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:6px;margin:0}.signatureMode .signatureActions .btn{min-height:36px}.signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:6px;margin-top:6px}
+.signatureMode #step4 .btn{margin-top:0;padding:8px 10px;font-size:13px}.signatureMode .signatureActions{position:absolute;left:8px;right:8px;bottom:6px;display:grid;grid-template-columns:1fr 1.35fr;gap:6px;margin:0}.signatureMode .signatureActions .btn{min-height:38px}.signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:6px;margin-top:6px}
 .signatureMode #submitStatus{position:absolute;right:10px;bottom:8px;max-width:45%}
 @media(max-width:520px){
  .insurance{grid-template-columns:1fr}
