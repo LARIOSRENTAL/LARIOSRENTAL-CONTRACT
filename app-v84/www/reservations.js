@@ -1,6 +1,17 @@
 window.LariosReservations=(function(){
 const $=id=>document.getElementById(id);let editId=null,cache=[],currentAgendaDate='',editOpenSeq=0,editFlight=null,editFlightId='',collaboratorPlaceNames=new Set(),collaboratorPlacesLoaded=false;
 function setEditingId(id){editId=id||null;window.LariosCurrentContractId=editId}
+function reservationReferenceValue(){
+  for(const id of ['reservation_detail','customer_reference','room_reference']){
+    const el=$(id);if(el&&String(el.value||'').trim())return String(el.value).trim();
+  }
+  for(const label of document.querySelectorAll('#reservationForm label')){
+    if(/habitaci[oó]n\s*\/\s*referencia|referencia/i.test(label.textContent||'')){
+      const el=label.querySelector('input,textarea');if(el&&String(el.value||'').trim())return String(el.value).trim();
+    }
+  }
+  return '';
+}
 function h(){return {'apikey':cfg.supabasePublishableKey,'Authorization':'Bearer '+token,'Content-Type':'application/json'}}
 async function rpc(name,body){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:h(),body:JSON.stringify(body||{})});if(!r.ok)throw new Error(await r.text());return r.json()}
 function normPlace(v){return String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ')}
@@ -55,7 +66,7 @@ pickup_date:val('pickup_date')||reservationDate(val('pickup_time')),pickup_time:
 tariff94:checked('tariff94'),tariff_name:$('tariff94')?.dataset.tariffName||'',tariff_markup_percent:$('tariff94')?.dataset.markup||'',
 rental_price:val('rental_price')||'0',full_insurance:checked('full_insurance'),insurance_total:val('insurance_total')||'0',young_driver:checked('young_driver'),young_driver_amount:val('young_driver_amount')||'0',
 discount_percent:val('discount_percent')||'0',vat_percent:val('vat_percent')||'21',total:val('contract_total')||'0',deposit:val('deposit')||'0',franchise:val('franchise')||'0',payment_method:val('payment_method'),
-reservation_detail:val('reservation_detail')||val('customer_reference')||val('room_reference'),
+reservation_detail:reservationReferenceValue(),
 billing_notes:val('billing_notes'),accessories_notes:selectedExtrasPayload().map(x=>x.label+' x'+x.qty).join(', ')||val('accessories_notes'),extras_detail:selectedExtrasPayload(),card_number:val('card_number'),card_expiry:val('card_expiry'),cash_without_card:checked('cash_without_card'),agency:val('agency')
 };}
 async function save(status){if(!val('customer_name'))return alert('Indica el nombre del cliente.');if(!val('pickup_time'))return alert('Indica la hora de entrega.');if(!val('customer_email')&&!confirm('El cliente no tiene email. ¿Desea continuar sin email?'))return;const current=cache.find(v=>v.id===(editId||window.LariosCurrentContractId)),generated=current&&current.status!=='draft',targetStatus=generated&&status==='draft'?current.status:status;try{const outgoing={...(current||{}),...window.LariosWebBooking?.preservePayload(payload(targetStatus)),status:targetStatus};const d=await rpc('app_save_contract',{p_payload:outgoing});upsertCache(d);setEditingId(d.id||editId);alert(generated&&status==='draft'?'Cambios guardados. El PDF anterior se conserva; pulsa «Regenerar contrato» si también necesitas actualizarlo.':status==='confirmed'?'Contrato confirmado. La reserva queda bloqueada en entregas y pasa a la agenda de devoluciones.':'Reserva guardada.');close()}catch(e){alert('No se pudo guardar: '+e.message)}}
