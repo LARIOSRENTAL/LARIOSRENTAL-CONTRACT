@@ -52,7 +52,24 @@ textarea{min-height:90px}
 .checkline label{margin:1px 0;font-size:15px}
 .checkline a{color:#0f5bd8;font-weight:700}
 #sig{display:block;width:100%;height:52vh;min-height:320px;max-height:520px;border:3px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}
-.signatureHint{text-align:center;color:#6b7280;font-size:13px;margin:6px 0 0}
+.signatureHint{text-align:center;color:#6b7280;font-size:13px;margin:4px 0 0}
+.signatureMode{overflow:hidden;background:#fff}
+.signatureMode .wrap{max-width:none;width:100vw;height:100vh;min-height:0;background:#fff;overflow:hidden}
+.signatureMode .head{display:none}
+.signatureMode .main{padding:0;height:100vh;overflow:hidden}
+.signatureMode #step4{display:grid!important;grid-template-rows:auto auto auto auto minmax(240px,1fr) auto auto;gap:5px;width:100vw;height:100vh;margin:0;padding:8px 12px;border:0;border-radius:0;overflow:hidden}
+.signatureMode #step4 h2{font-size:18px;margin:0}
+.signatureMode #summaryRows{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.signatureMode #summaryRows .row{padding:4px 0;font-size:12px;min-height:28px}
+.signatureMode #summaryRows .row:last-child{grid-column:1 / -1}
+.signatureMode .checkline{margin:2px 0;min-height:34px}
+.signatureMode .checkline input{width:24px;height:24px}
+.signatureMode .checkline label{font-size:12px;line-height:1.25}
+.signatureMode #step4 h3{font-size:15px;margin:0}
+.signatureMode #sig{height:100%!important;min-height:240px;max-height:none;border-width:2px}
+.signatureMode .signatureHint{font-size:11px;margin:0}
+.signatureMode #step4 .btn{margin-top:0;padding:9px 12px;font-size:14px}
+.signatureMode #submitStatus{position:absolute;right:10px;bottom:8px;max-width:45%}
 @media(max-width:520px){
  .insurance{grid-template-columns:1fr}
  .main{padding:10px}
@@ -166,7 +183,7 @@ function rpc(name,body,cb){
 }
 function rnd(n,digits){var a=digits?"0123456789":"ABCDEFGHJKLMNPQRSTUVWXYZ23456789",o="";for(var i=0;i<n;i++)o+=a.charAt(Math.floor(Math.random()*a.length));return o}
 function show(id){
-  document.body.className=id==="waiting"?"idle":"";
+  document.body.className=id==="waiting"?"idle":(id==="step4"?"signatureMode":"");
   ["pair","waiting","step1","step2","step3","step4","done"].forEach(function(x){
     if(x==="waiting")$(x).className=x===id?"idleScreen":"idleScreen hidden";
     else $(x).className=x===id?"card":"card hidden";
@@ -272,7 +289,7 @@ window.goStep=function(n){
     }
   }
   if(n===3)review();
-  if(n===4){summary();show("step4");window.scrollTo(0,0);setTimeout(setupCanvas,50);return}
+  if(n===4){summary();show("step4");window.scrollTo(0,0);setTimeout(function(){setupCanvas();window.scrollTo(0,0)},50);return}
   show("step"+n);window.scrollTo(0,0);
 };
 window.confirmData=function(){checkedData=true;goStep(4)};
