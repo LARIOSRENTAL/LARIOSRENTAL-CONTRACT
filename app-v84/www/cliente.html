@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111827">
+<title>Larios Rental · Cliente</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}body{min-height:100vh}
+.wrap{max-width:720px;margin:0 auto;min-height:100vh;background:#fff}
+.head{background:#111827;color:#fff;padding:22px 20px}.head h1{font-size:25px;margin:0}.head p{margin:6px 0 0;color:#d1d5db}
+.main{padding:18px}.card{border:1px solid #e5e7eb;border-radius:16px;padding:18px;margin-bottom:14px;background:#fff}.hidden{display:none}
+h2{font-size:22px;margin:0 0 12px}h3{font-size:16px;margin:18px 0 8px}.muted{color:#6b7280;font-size:14px;line-height:1.45}
+label{display:block;font-weight:700;font-size:13px;margin:12px 0 4px}input,textarea{width:100%;font-size:18px;padding:13px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}textarea{min-height:82px}
+.btn{width:100%;border:0;border-radius:11px;padding:14px 16px;font-size:17px;font-weight:800;margin-top:12px}.primary{background:#111827;color:#fff}.secondary{background:#e5e7eb;color:#111827}
+.code{letter-spacing:.12em;text-transform:uppercase;font-weight:800;text-align:center}
+.row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #eee}.row span:first-child{color:#6b7280}.row b{text-align:right}
+.insurance{display:grid;grid-template-columns:1fr 1fr;gap:10px}.insuranceBox{border:2px solid #e5e7eb;border-radius:12px;padding:12px}.insuranceBox.selected{border-color:#111827;background:#f9fafb}.insuranceBox h3{margin:0 0 8px}.big{font-size:24px;font-weight:800}
+.checkline{display:flex;align-items:flex-start;gap:10px;margin:14px 0}.checkline input{width:26px;height:26px;margin:0}.checkline label{margin:1px 0;font-size:15px;font-weight:600}
+a{color:#0f5bd8;font-weight:700}
+#sig{width:100%;height:180px;border:2px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}
+.ok{background:#ecfdf5;border-color:#10b981;color:#065f46}.err{background:#fef2f2;border-color:#ef4444;color:#991b1b}
+.status{padding:12px;border-radius:10px;margin-top:12px;font-weight:700}
+@media(max-width:520px){.insurance{grid-template-columns:1fr}.main{padding:12px}.card{padding:15px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head"><h1>Larios Rental</h1><p>Datos y firma del contrato</p></div>
+  <div class="main">
+    <div id="connect" class="card">
+      <h2>Conectar con el contrato</h2>
+      <p class="muted">Pide al empleado el código que aparece en su ordenador.</p>
+      <label>Código de conexión</label>
+      <input id="code" class="code" maxlength="14" autocomplete="off" autocapitalize="characters" placeholder="XXXX-XXXX-XXXX">
+      <button class="btn primary" onclick="connectContract()">Conectar</button>
+      <div id="connectStatus"></div>
+    </div>
+
+    <div id="step1" class="card hidden">
+      <h2>1. Complete sus datos</h2>
+      <label>Teléfono</label><input id="phone" type="tel">
+      <label>Email</label><input id="email" type="email">
+      <label>Domicilio</label><textarea id="address"></textarea>
+      <button class="btn primary" onclick="goStep(2)">Siguiente</button>
+    </div>
+
+    <div id="step2" class="card hidden">
+      <h2>2. Precio, seguro y franquicia</h2>
+      <div id="priceRows"></div>
+      <h3>Información del seguro</h3>
+      <div class="insurance">
+        <div id="standardBox" class="insuranceBox">
+          <h3>Seguro estándar</h3>
+          <div>Franquicia</div><div id="standardFranchise" class="big">—</div>
+          <p class="muted">En caso de daños cubiertos, puede existir responsabilidad hasta el importe de la franquicia.</p>
+        </div>
+        <div id="fullBox" class="insuranceBox">
+          <h3>Seguro completo</h3>
+          <div>Franquicia</div><div class="big">0 €</div>
+          <div id="fullPrice" class="muted"></div>
+          <p class="muted">Reduce a 0 € la franquicia indicada para el contrato, sujeto a las exclusiones de las condiciones generales.</p>
+        </div>
+      </div>
+      <div id="selectedInsurance" class="status ok"></div>
+      <p class="muted">Esta pantalla es solo informativa. Si desea modificar el seguro, indíqueselo al empleado.</p>
+      <button class="btn primary" onclick="goStep(3)">Siguiente</button>
+    </div>
+
+    <div id="step3" class="card hidden">
+      <h2>3. Compruebe sus datos</h2>
+      <div id="reviewRows"></div>
+      <button class="btn primary" onclick="confirmData()">Aceptar y continuar</button>
+    </div>
+
+    <div id="step4" class="card hidden">
+      <h2>4. Resumen y firma</h2>
+      <div id="summaryRows"></div>
+      <div class="checkline">
+        <input id="terms" type="checkbox">
+        <label for="terms">Acepto las <a id="termsLink" href="https://www.lariosrental.com/condiciones-generales/" target="_blank">condiciones generales del alquiler</a>.</label>
+      </div>
+      <h3>Firma del cliente</h3>
+      <canvas id="sig"></canvas>
+      <button class="btn secondary" onclick="clearSignature()">Borrar firma</button>
+      <button class="btn primary" onclick="submitAll()">Confirmar y finalizar</button>
+      <div id="submitStatus"></div>
+    </div>
+
+    <div id="done" class="card hidden ok">
+      <h2>✓ Datos enviados</h2>
+      <p>El empleado ya ha recibido sus datos y su firma.</p>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+var ENDPOINT="https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/renthub-once-62957-preview";
+var snapshot=null, code="", dataChecked=false, hasInk=false;
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]})}
+function money(v){var n=Number(v||0);return n.toFixed(2).replace(".",",")+" €"}
+function request(payload,cb){
+  var x=new XMLHttpRequest();
+  x.open("POST",ENDPOINT,true);
+  x.setRequestHeader("Content-Type","application/json");
+  x.onreadystatechange=function(){
+    if(x.readyState!==4)return;
+    var d={};try{d=JSON.parse(x.responseText||"{}")}catch(e){}
+    if(x.status>=200&&x.status<300)cb(null,d);else cb(new Error(d.error||"No se pudo conectar"));
+  };
+  x.onerror=function(){cb(new Error("No se pudo conectar"))};
+  x.send(JSON.stringify(payload));
+}
+function normalizeCode(v){return String(v||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,12)}
+function standardFranchise(group){
+  var g=String(group||"").toUpperCase().replace(/^GRUPO\s*/,"").replace(/[_ ]/g,"-");
+  if(g==="BICICLETA"||g==="B1")return 50;
+  if(g==="E-BIKE"||g==="B2")return 150;
+  if(g==="50CC"||g==="50"||g==="M1"||g==="125CC"||g==="125"||g==="M2")return 400;
+  if(g==="A"||g==="B"||g==="C")return 600;
+  if(g==="D"||g==="F"||g==="G"||g==="I"||g==="J"||g==="K")return 800;
+  if(g==="H"||g==="L")return 1000;
+  if(g==="Q")return 1500;
+  return Number(snapshot&&snapshot.franchise||0);
+}
+function row(label,value){return '<div class="row"><span>'+esc(label)+'</span><b>'+esc(value||"—")+'</b></div>'}
+window.connectContract=function(){
+  code=normalizeCode($("code").value);
+  if(code.length<10){$("connectStatus").innerHTML='<div class="status err">Revisa el código.</div>';return}
+  $("connectStatus").innerHTML='<div class="status">Conectando…</div>';
+  request({action:"poll",code:code},function(err,d){
+    if(err){$("connectStatus").innerHTML='<div class="status err">'+esc(err.message)+'</div>';return}
+    snapshot=d.snapshot||{};
+    $("phone").value=snapshot.customer_phone||"";
+    $("email").value=snapshot.customer_email||"";
+    $("address").value=snapshot.customer_address||"";
+    $("termsLink").href=snapshot.conditions_url||"https://www.lariosrental.com/condiciones-generales/";
+    renderInfo();
+    $("connect").className="card hidden";$("step1").className="card";
+    setupCanvas();
+  });
+};
+window.goStep=function(n){
+  if(n===2){
+    if(!$("phone").value.trim()||!$("email").value.trim()||!$("address").value.trim()){alert("Completa teléfono, email y domicilio.");return}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($("email").value.trim())){alert("Revisa el email.");return}
+  }
+  var i;for(i=1;i<=4;i++)$("step"+i).className="card hidden";
+  $("step"+n).className="card";window.scrollTo(0,0);
+};
+window.confirmData=function(){dataChecked=true;goStep(4)};
+function renderInfo(){
+  var f=standardFranchise(snapshot.vehicle_group);
+  $("priceRows").innerHTML=row("Precio alquiler",money(snapshot.rental_price))+row("Seguro seleccionado",snapshot.full_insurance?"Seguro completo":"Seguro estándar")+row("Total contrato",money(snapshot.total));
+  $("standardFranchise").innerHTML=money(f);
+  $("fullPrice").innerHTML=Number(snapshot.full_insurance_quote||0)>0?"Coste del seguro completo: "+money(snapshot.full_insurance_quote):"Consulte el precio con el empleado.";
+  $("standardBox").className="insuranceBox"+(!snapshot.full_insurance?" selected":"");
+  $("fullBox").className="insuranceBox"+(snapshot.full_insurance?" selected":"");
+  $("selectedInsurance").innerHTML=snapshot.full_insurance?"Seleccionado por el empleado: Seguro completo · franquicia 0 €":"Seleccionado por el empleado: Seguro estándar · franquicia "+money(f);
+  $("reviewRows").innerHTML=
+    row("Nombre",snapshot.customer_name)+row("DNI/Pasaporte",snapshot.customer_document)+row("Nacimiento",snapshot.customer_birth_date)+
+    row("Permiso de conducir",snapshot.driving_license)+row("País expedición",snapshot.license_issued_by)+row("Expedición",snapshot.license_issue)+row("Caducidad",snapshot.license_expiry)+
+    row("Teléfono",$("phone").value)+row("Email",$("email").value)+row("Domicilio",$("address").value);
+  $("summaryRows").innerHTML=
+    row("Vehículo",((snapshot.vehicle_model||snapshot.vehicle_group||"")+" "+(snapshot.vehicle_plate||"")).trim())+
+    row("Entrega",(snapshot.pickup_date||"")+" "+(snapshot.pickup_time||"")+" · "+(snapshot.pickup_location||""))+
+    row("Devolución",(snapshot.return_date||"")+" "+(snapshot.return_time||"")+" · "+(snapshot.return_location||""))+
+    row("Seguro",snapshot.full_insurance?"Completo · franquicia 0 €":"Estándar · franquicia "+money(f))+
+    row("Total",money(snapshot.total));
+}
+function setupCanvas(){
+  var c=$("sig"),ctx=c.getContext("2d"),drawing=false,lastX=0,lastY=0;
+  function resize(){
+    var r=c.getBoundingClientRect(),ratio=window.devicePixelRatio||1;
+    c.width=Math.max(1,Math.round(r.width*ratio));c.height=Math.max(1,Math.round(180*ratio));
+    ctx=c.getContext("2d");ctx.scale(ratio,ratio);ctx.lineWidth=2.4;ctx.lineCap="round";ctx.strokeStyle="#111827";
+  }
+  resize();
+  function point(e){var r=c.getBoundingClientRect(),t=e.touches&&e.touches[0]?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top}}
+  function start(e){e.preventDefault();drawing=true;var p=point(e);lastX=p.x;lastY=p.y}
+  function move(e){if(!drawing)return;e.preventDefault();var p=point(e);ctx.beginPath();ctx.moveTo(lastX,lastY);ctx.lineTo(p.x,p.y);ctx.stroke();lastX=p.x;lastY=p.y;hasInk=true}
+  function end(e){if(e)e.preventDefault();drawing=false}
+  c.addEventListener("touchstart",start,false);c.addEventListener("touchmove",move,false);c.addEventListener("touchend",end,false);
+  c.addEventListener("mousedown",start,false);c.addEventListener("mousemove",move,false);c.addEventListener("mouseup",end,false);c.addEventListener("mouseleave",end,false);
+}
+window.clearSignature=function(){var c=$("sig");c.getContext("2d").clearRect(0,0,c.width,c.height);hasInk=false};
+window.submitAll=function(){
+  if(!dataChecked){alert("Primero debes comprobar tus datos.");return}
+  if(!$("terms").checked){alert("Debes aceptar las condiciones generales.");return}
+  if(!hasInk){alert("Falta la firma.");return}
+  $("submitStatus").innerHTML='<div class="status">Enviando…</div>';
+  var c=$("sig");
+  request({action:"submit",code:code,response:{
+    customer_phone:$("phone").value.trim(),customer_email:$("email").value.trim(),customer_address:$("address").value.trim(),
+    data_checked:true,accepted_terms:true,signature_data_url:c.toDataURL("image/png")
+  }},function(err){
+    if(err){$("submitStatus").innerHTML='<div class="status err">'+esc(err.message)+'</div>';return}
+    $("step4").className="card hidden";$("done").className="card ok";window.scrollTo(0,0);
+  });
+};
+$("code").oninput=function(){var v=normalizeCode(this.value),p=[];for(var i=0;i<v.length;i+=4)p.push(v.slice(i,i+4));this.value=p.join("-")};
+})();
+</script>
+</body>
+</html>
