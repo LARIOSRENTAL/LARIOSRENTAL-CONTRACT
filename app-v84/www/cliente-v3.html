@@ -57,7 +57,7 @@ textarea{min-height:90px}
 .signatureMode .wrap{max-width:none;width:100vw;height:100vh;min-height:0;background:#fff;overflow:hidden}
 .signatureMode .head{display:none}
 .signatureMode .main{padding:0;height:100vh;overflow:hidden}
-.signatureMode #step4{display:grid!important;grid-template-rows:auto auto auto auto minmax(240px,1fr) auto auto;gap:5px;width:100vw;height:100vh;margin:0;padding:8px 12px;border:0;border-radius:0;overflow:hidden}
+.signatureMode #step4{display:grid!important;grid-template-rows:auto auto auto auto minmax(200px,1fr) auto auto auto;gap:4px;width:100vw;height:100vh;margin:0;padding:6px 10px;border:0;border-radius:0;overflow:hidden}
 .signatureMode #step4 h2{font-size:18px;margin:0}
 .signatureMode #summaryRows{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .signatureMode #summaryRows .row{padding:4px 0;font-size:12px;min-height:28px}
@@ -66,9 +66,9 @@ textarea{min-height:90px}
 .signatureMode .checkline input{width:24px;height:24px}
 .signatureMode .checkline label{font-size:12px;line-height:1.25}
 .signatureMode #step4 h3{font-size:15px;margin:0}
-.signatureMode #sig{height:100%!important;min-height:240px;max-height:none;border-width:2px}
+.signatureMode #sig{height:100%!important;min-height:200px;max-height:none;border-width:2px}
 .signatureMode .signatureHint{font-size:11px;margin:0}
-.signatureMode #step4 .btn{margin-top:0;padding:9px 12px;font-size:14px}
+.signatureMode #step4 .btn{margin-top:0;padding:10px 12px;font-size:14px}.signatureMode .signatureActions{display:grid;grid-template-columns:1fr 1.4fr;gap:8px}.signatureMode .signatureActions .btn{min-height:40px}.signatureActions{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-top:8px}
 .signatureMode #submitStatus{position:absolute;right:10px;bottom:8px;max-width:45%}
 @media(max-width:520px){
  .insurance{grid-template-columns:1fr}
@@ -149,8 +149,7 @@ textarea{min-height:90px}
       <h3>Firma <span class="en">Signature</span></h3>
       <canvas id="sig"></canvas>
       <div class="signatureHint">Firme dentro del recuadro · Sign inside the box</div>
-      <button class="btn secondary" onclick="clearSignature()">Borrar firma · Clear signature</button>
-      <button class="btn primary" onclick="submitAll()">Confirmar y finalizar · Confirm and finish</button>
+      <div class="signatureActions"><button class="btn secondary" onclick="clearSignature()">Borrar firma · Clear signature</button><button class="btn primary" onclick="submitAll()">Confirmar y finalizar · Confirm and finish</button></div>
       <div id="submitStatus"></div>
     </div>
 
