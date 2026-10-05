@@ -1,40 +1,333 @@
 <!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="apple-mobile-web-app-capable" content="yes"><title>Larios Rental · Cliente</title>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Larios Rental · Cliente / Customer</title>
 <style>
-*{box-sizing:border-box}html,body{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}.wrap{max-width:720px;margin:auto;min-height:100vh;background:#fff}.idle .wrap{max-width:none;width:100%;height:100vh;background:#111827}.idle .head{display:none}.idle .main{padding:0;height:100vh}.idleScreen{position:fixed;inset:0;background:#21a4be;display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}.idleScreen.hidden{display:none}.idleLogo{display:none}.idleBrand{width:100%;height:100%;object-fit:contain;display:block}.head{background:#111827;color:#fff;padding:22px 20px}.head h1{margin:0;font-size:25px}.head p{margin:6px 0 0;color:#d1d5db}.main{padding:18px}.card{border:1px solid #e5e7eb;border-radius:16px;padding:18px;margin-bottom:14px}.hidden{display:none}h2{font-size:22px;margin:0 0 12px}.muted{color:#6b7280;font-size:14px;line-height:1.45}label{display:block;font-weight:700;font-size:13px;margin:12px 0 4px}input,textarea{width:100%;font-size:18px;padding:13px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}textarea{min-height:82px}.btn{width:100%;border:0;border-radius:11px;padding:14px 16px;font-size:17px;font-weight:800;margin-top:12px}.primary{background:#111827;color:#fff}.secondary{background:#e5e7eb}.row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #eee}.row span:first-child{color:#6b7280}.row b{text-align:right}.pairCode{font-size:34px;letter-spacing:.12em;font-weight:900;text-align:center;padding:16px;background:#f3f4f6;border-radius:12px;margin:12px 0}.status{padding:12px;border-radius:10px;margin-top:12px;font-weight:700}.ok{background:#ecfdf5;color:#065f46}.err{background:#fef2f2;color:#991b1b}.insurance{display:grid;grid-template-columns:1fr 1fr;gap:10px}.insuranceBox{border:2px solid #e5e7eb;border-radius:12px;padding:12px}.insuranceBox.selected{border-color:#111827;background:#f9fafb}.big{font-size:24px;font-weight:800}.checkline{display:flex;gap:10px;align-items:flex-start;margin:14px 0}.checkline input{width:26px;height:26px;margin:0}.checkline label{margin:2px 0;font-size:15px}.checkline a{color:#0f5bd8;font-weight:700}#sig{width:100%;height:180px;border:2px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}@media(max-width:520px){.insurance{grid-template-columns:1fr}.main{padding:12px}}
-</style></head><body>
-<div class="wrap"><div class="head"><h1>Larios Rental</h1><p>Terminal de cliente</p></div><div class="main">
-<div id="pair" class="card"><h2>Vincular esta tablet</h2><p class="muted">Este código identifica esta tablet en el ordenador.</p><div id="pairCode" class="pairCode">Preparando…</div><div id="pairStatus" class="status">Registrando tablet…</div></div>
-<div id="waiting" class="idleScreen hidden" aria-label="Larios Rental"><img class="idleBrand" alt="Larios Rental" src="larios-idle-logo.svg?v=20261005-4"></div>
-<div id="step1" class="card hidden"><h2>1. Complete sus datos</h2><label>Teléfono</label><input id="phone" type="tel"><label>Email</label><input id="email" type="email"><label>Domicilio</label><textarea id="address"></textarea><button class="btn primary" onclick="goStep(2)">Siguiente</button></div>
-<div id="step2" class="card hidden"><h2>2. Precio, seguro y franquicia</h2><div id="priceRows"></div><div class="insurance"><div id="standardBox" class="insuranceBox"><b>Seguro estándar</b><div>Franquicia</div><div id="standardFranchise" class="big">—</div></div><div id="fullBox" class="insuranceBox"><b>Seguro completo</b><div>Franquicia</div><div class="big">0 €</div><div id="fullPrice" class="muted"></div></div></div><div id="selectedInsurance" class="status ok"></div><p class="muted">Esta pantalla es informativa. El empleado es quien cambia el seguro.</p><button class="btn primary" onclick="goStep(3)">Siguiente</button></div>
-<div id="step3" class="card hidden"><h2>3. Compruebe sus datos</h2><div id="reviewRows"></div><button class="btn primary" onclick="confirmData()">Aceptar y continuar</button></div>
-<div id="step4" class="card hidden"><h2>4. Resumen y firma</h2><div id="summaryRows"></div><div class="checkline"><input id="terms" type="checkbox"><label for="terms">Acepto las <a id="termsLink" href="https://www.lariosrental.com/condiciones-generales/" target="_blank">condiciones generales del alquiler</a>.</label></div><h3>Firma</h3><canvas id="sig"></canvas><button class="btn secondary" onclick="clearSignature()">Borrar firma</button><button class="btn primary" onclick="submitAll()">Confirmar y finalizar</button><div id="submitStatus"></div></div>
-<div id="done" class="card hidden ok"><h2>✓ Datos enviados</h2><p>El empleado ya ha recibido sus datos y su firma.</p></div>
-</div></div>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#21a4be;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+.wrap{max-width:760px;margin:auto;min-height:100vh;background:#fff}
+.idle,.idle html,.idle body{background:#21a4be}
+.idle .wrap{max-width:none;width:100vw;height:100vh;background:#21a4be}
+.idle .head{display:none}
+.idle .main{padding:0;height:100vh;background:#21a4be}
+.idleScreen{position:fixed;left:0;top:0;width:100vw;height:100vh;background:#21a4be;display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}
+.idleScreen.hidden{display:none}
+.idleBrand{display:block;width:82%;max-width:1000px;height:auto;max-height:82vh;object-fit:contain}
+.head{background:#111827;color:#fff;padding:20px}
+.head h1{margin:0;font-size:24px}
+.head p{margin:5px 0 0;color:#d1d5db;font-size:14px}
+.main{padding:16px}
+.card{border:1px solid #e5e7eb;border-radius:16px;padding:18px;margin-bottom:14px;background:#fff}
+.hidden{display:none}
+h2{font-size:22px;margin:0 0 12px}
+h3{font-size:18px;margin:14px 0 8px}
+.muted{color:#6b7280;font-size:14px;line-height:1.45}
+.bi{display:block}
+.en{display:block;color:#6b7280;font-size:.82em;font-weight:500;margin-top:2px}
+label{display:block;font-weight:700;font-size:14px;margin:12px 0 4px}
+input,textarea{width:100%;font-size:18px;padding:13px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
+textarea{min-height:90px}
+.btn{width:100%;border:0;border-radius:11px;padding:14px 16px;font-size:17px;font-weight:800;margin-top:12px}
+.primary{background:#111827;color:#fff}
+.secondary{background:#e5e7eb;color:#111827}
+.row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #eee}
+.row span:first-child{color:#6b7280}
+.row b{text-align:right}
+.pairCode{font-size:34px;letter-spacing:.12em;font-weight:900;text-align:center;padding:16px;background:#f3f4f6;border-radius:12px;margin:12px 0}
+.status{padding:12px;border-radius:10px;margin-top:12px;font-weight:700}
+.ok{background:#ecfdf5;color:#065f46}
+.err{background:#fef2f2;color:#991b1b}
+.insurance{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.insuranceBox{border:3px solid #e5e7eb;border-radius:14px;padding:16px;cursor:pointer;background:#fff;min-height:160px}
+.insuranceBox.selected{border-color:#21a4be;background:#eefcff;box-shadow:0 0 0 2px rgba(33,164,190,.08)}
+.insuranceBox .choice{font-size:17px;font-weight:900;margin-bottom:7px}
+.insuranceBox .tap{margin-top:10px;font-size:13px;color:#5f6b76}
+.big{font-size:27px;font-weight:900}
+.checkline{display:flex;gap:10px;align-items:flex-start;margin:14px 0}
+.checkline input{width:28px;height:28px;margin:0;flex:0 0 auto}
+.checkline label{margin:1px 0;font-size:15px}
+.checkline a{color:#0f5bd8;font-weight:700}
+#sig{display:block;width:100%;height:52vh;min-height:320px;max-height:520px;border:3px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}
+.signatureHint{text-align:center;color:#6b7280;font-size:13px;margin:6px 0 0}
+@media(max-width:520px){
+ .insurance{grid-template-columns:1fr}
+ .main{padding:10px}
+ .card{padding:14px}
+ #sig{height:48vh;min-height:300px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>Larios Rental</h1>
+    <p>Terminal de cliente · Customer terminal</p>
+  </div>
+  <div class="main">
+    <div id="pair" class="card">
+      <h2>Vincular esta tablet <span class="en">Pair this tablet</span></h2>
+      <p class="muted">Este código identifica esta tablet en el ordenador.<span class="en">This code identifies this tablet on the computer.</span></p>
+      <div id="pairCode" class="pairCode">Preparando…</div>
+      <div id="pairStatus" class="status">Registrando tablet… / Registering tablet…</div>
+    </div>
+
+    <div id="waiting" class="idleScreen hidden" aria-label="Larios Rental">
+      <img class="idleBrand" alt="Larios Rental" src="larios-idle-logo.svg?v=20261005-5">
+    </div>
+
+    <div id="step1" class="card hidden">
+      <h2>1. Complete sus datos <span class="en">Complete your details</span></h2>
+      <label>Teléfono <span class="en">Phone</span></label>
+      <input id="phone" type="tel">
+      <label>Email <span class="en">Email</span></label>
+      <input id="email" type="email">
+      <label>Domicilio <span class="en">Address</span></label>
+      <textarea id="address"></textarea>
+      <button class="btn primary" onclick="goStep(2)">Siguiente · Next</button>
+    </div>
+
+    <div id="step2" class="card hidden">
+      <h2>2. Precio, seguro y franquicia <span class="en">Price, insurance and excess</span></h2>
+      <div id="priceRows"></div>
+      <p class="muted">Seleccione el seguro que desea para este contrato.<span class="en">Select the insurance option you want for this rental.</span></p>
+      <div class="insurance">
+        <div id="standardBox" class="insuranceBox" onclick="chooseInsurance(false)">
+          <div class="choice">Seguro estándar <span class="en">Standard insurance</span></div>
+          <div>Franquicia <span class="en">Excess</span></div>
+          <div id="standardFranchise" class="big">—</div>
+          <div class="tap">Pulse para seleccionar · Tap to select</div>
+        </div>
+        <div id="fullBox" class="insuranceBox" onclick="chooseInsurance(true)">
+          <div class="choice">Seguro completo <span class="en">Full insurance</span></div>
+          <div>Franquicia <span class="en">Excess</span></div>
+          <div class="big">0 €</div>
+          <div id="fullPrice" class="muted"></div>
+          <div class="tap">Pulse para seleccionar · Tap to select</div>
+        </div>
+      </div>
+      <div id="selectedInsurance" class="status ok"></div>
+      <button class="btn primary" onclick="goStep(3)">Siguiente · Next</button>
+    </div>
+
+    <div id="step3" class="card hidden">
+      <h2>3. Compruebe sus datos <span class="en">Check your details</span></h2>
+      <div id="reviewRows"></div>
+      <button class="btn primary" onclick="confirmData()">Aceptar y continuar · Accept and continue</button>
+    </div>
+
+    <div id="step4" class="card hidden">
+      <h2>4. Resumen y firma <span class="en">Summary and signature</span></h2>
+      <div id="summaryRows"></div>
+      <div class="checkline">
+        <input id="terms" type="checkbox">
+        <label for="terms">
+          Acepto las <a id="termsLink" href="https://www.lariosrental.com/condiciones-generales/" target="_blank">condiciones generales del alquiler</a>.
+          <span class="en">I accept the <a id="termsLinkEn" href="https://www.lariosrental.com/condiciones-generales/" target="_blank">rental terms and conditions</a>.</span>
+        </label>
+      </div>
+      <h3>Firma <span class="en">Signature</span></h3>
+      <canvas id="sig"></canvas>
+      <div class="signatureHint">Firme dentro del recuadro · Sign inside the box</div>
+      <button class="btn secondary" onclick="clearSignature()">Borrar firma · Clear signature</button>
+      <button class="btn primary" onclick="submitAll()">Confirmar y finalizar · Confirm and finish</button>
+      <div id="submitStatus"></div>
+    </div>
+
+    <div id="done" class="card hidden ok">
+      <h2>✓ Datos enviados <span class="en">Details sent</span></h2>
+      <p>El empleado ya ha recibido sus datos y su firma.<span class="en">The employee has received your details and signature.</span></p>
+    </div>
+  </div>
+</div>
+
 <script src="config.js"></script>
 <script>
 (function(){
 var cfg=window.LARIOS_CONFIG||{},BASE=cfg.supabaseUrl+"/rest/v1/rpc/",KEY=cfg.supabasePublishableKey||"";
-var token="",pair="",jobId="",snap={},checkedData=false,ink=false,timer=null,lastDone="";
+var token="",pair="",jobId="",snap={},checkedData=false,ink=false,timer=null,lastDone="",selectedFull=false;
+
 function $(id){return document.getElementById(id)}
-function rpc(name,body,cb){var x=new XMLHttpRequest();x.open("POST",BASE+name,true);x.setRequestHeader("apikey",KEY);x.setRequestHeader("Content-Type","application/json");x.onreadystatechange=function(){if(x.readyState!==4)return;var d=null;try{d=x.responseText?JSON.parse(x.responseText):null}catch(e){}if(x.status>=200&&x.status<300)cb(null,d);else cb(new Error((d&&d.message)||"No se pudo conectar"))};x.onerror=function(){cb(new Error("No se pudo conectar"))};x.send(JSON.stringify(body||{}))}
+function rpc(name,body,cb){
+  var x=new XMLHttpRequest();
+  x.open("POST",BASE+name,true);
+  x.setRequestHeader("apikey",KEY);
+  x.setRequestHeader("Content-Type","application/json");
+  x.onreadystatechange=function(){
+    if(x.readyState!==4)return;
+    var d=null;try{d=x.responseText?JSON.parse(x.responseText):null}catch(e){}
+    if(x.status>=200&&x.status<300)cb(null,d);else cb(new Error((d&&d.message)||"No se pudo conectar / Connection failed"));
+  };
+  x.onerror=function(){cb(new Error("No se pudo conectar / Connection failed"))};
+  x.send(JSON.stringify(body||{}));
+}
 function rnd(n,digits){var a=digits?"0123456789":"ABCDEFGHJKLMNPQRSTUVWXYZ23456789",o="";for(var i=0;i<n;i++)o+=a.charAt(Math.floor(Math.random()*a.length));return o}
-function show(id){document.body.className=id==="waiting"?"idle":"";["pair","waiting","step1","step2","step3","step4","done"].forEach(function(x){if(x==="waiting")$(x).className=x===id?"idleScreen":"idleScreen hidden";else $(x).className=x===id?"card":"card hidden"})}
-function row(a,b){return'<div class="row"><span>'+a+'</span><b>'+(b||"—")+'</b></div>'}
+function show(id){
+  document.body.className=id==="waiting"?"idle":"";
+  ["pair","waiting","step1","step2","step3","step4","done"].forEach(function(x){
+    if(x==="waiting")$(x).className=x===id?"idleScreen":"idleScreen hidden";
+    else $(x).className=x===id?"card":"card hidden";
+  });
+}
+function row(a,b){return '<div class="row"><span>'+a+'</span><b>'+(b||"—")+'</b></div>'}
 function money(v){return Number(v||0).toFixed(2).replace(".",",")+" €"}
-function boot(){try{token=localStorage.getItem("lr_tab_token")||"";pair=localStorage.getItem("lr_tab_pair")||""}catch(e){}if(!token||!pair){token=rnd(40,false);pair=rnd(6,true);try{localStorage.setItem("lr_tab_token",token);localStorage.setItem("lr_tab_pair",pair)}catch(e){}}register()}
-function register(){show("pair");$("pairCode").textContent=pair;$("pairStatus").textContent="Registrando tablet…";rpc("tablet_register",{p_pair_code:pair,p_token:token},function(err){if(err){$("pairStatus").className="status err";$("pairStatus").textContent=err.message;return}$("pairStatus").className="status ok";$("pairStatus").textContent="Tablet lista. Busca este código en el ordenador.";startPoll()})}
+function baseTotal(){return Math.max(0,Number(snap.total||0)-Number(snap.insurance_total||0))}
+function chosenInsuranceTotal(){return selectedFull?Number(snap.full_insurance_quote||0):0}
+function chosenTotal(){return baseTotal()+chosenInsuranceTotal()}
+
+function boot(){
+  try{token=localStorage.getItem("lr_tab_token")||"";pair=localStorage.getItem("lr_tab_pair")||""}catch(e){}
+  if(!token||!pair){
+    token=rnd(40,false);pair=rnd(6,true);
+    try{localStorage.setItem("lr_tab_token",token);localStorage.setItem("lr_tab_pair",pair)}catch(e){}
+  }
+  register();
+}
+function register(){
+  show("pair");
+  $("pairCode").textContent=pair;
+  $("pairStatus").textContent="Registrando tablet… / Registering tablet…";
+  rpc("tablet_register",{p_pair_code:pair,p_token:token},function(err){
+    if(err){$("pairStatus").className="status err";$("pairStatus").textContent=err.message;return}
+    $("pairStatus").className="status ok";
+    $("pairStatus").textContent="Tablet lista / Tablet ready";
+    startPoll();
+  });
+}
 function startPoll(){if(timer)clearInterval(timer);timer=setInterval(poll,2500);poll()}
-function poll(){rpc("tablet_poll",{p_token:token},function(err,d){if(err)return;var j=Array.isArray(d)?d[0]:d;if(!j||!j.job_id){if(!jobId||lastDone===jobId){show("waiting")}return}if(j.job_id===lastDone)return;if(j.job_id!==jobId){jobId=j.job_id;load(j.payload||{})}})}
-function load(s){snap=s||{};checkedData=false;ink=false;$("phone").value=snap.customer_phone||"";$("email").value=snap.customer_email||"";$("address").value=snap.customer_address||"";$("terms").checked=false;renderInsurance();setupCanvas();show("step1");window.scrollTo(0,0)}
-function renderInsurance(){var f=Number(snap.franchise||0);$("priceRows").innerHTML=row("Precio alquiler",money(snap.rental_price))+row("Seguro seleccionado",snap.full_insurance?"Seguro completo":"Seguro estándar")+row("Total",money(snap.total));$("standardFranchise").textContent=money(f);$("fullPrice").textContent=Number(snap.full_insurance_quote||0)>0?"Coste: "+money(snap.full_insurance_quote):"Consulte el precio con el empleado";$("standardBox").className="insuranceBox"+(!snap.full_insurance?" selected":"");$("fullBox").className="insuranceBox"+(snap.full_insurance?" selected":"");$("selectedInsurance").textContent=snap.full_insurance?"Seleccionado: Seguro completo · franquicia 0 €":"Seleccionado: Seguro estándar · franquicia "+money(f)}
-function review(){$("reviewRows").innerHTML=row("Nombre",snap.customer_name)+row("DNI/Pasaporte",snap.customer_document)+row("Nacimiento",snap.customer_birth_date)+row("Permiso",snap.driving_license)+row("País expedición",snap.license_issued_by)+row("Caducidad",snap.license_expiry)+row("Teléfono",$("phone").value)+row("Email",$("email").value)+row("Domicilio",$("address").value)}
-function summary(){var f=Number(snap.franchise||0);$("summaryRows").innerHTML=row("Vehículo",((snap.vehicle_model||snap.vehicle_group||"")+" "+(snap.vehicle_plate||"")).replace(/^\s+|\s+$/g,""))+row("Entrega",(snap.pickup_date||"")+" "+(snap.pickup_time||"")+" · "+(snap.pickup_location||""))+row("Devolución",(snap.return_date||"")+" "+(snap.return_time||"")+" · "+(snap.return_location||""))+row("Seguro",snap.full_insurance?"Completo · franquicia 0 €":"Estándar · franquicia "+money(f))+row("Total",money(snap.total))}
-window.goStep=function(n){if(n===2){if(!$("phone").value||!$("email").value||!$("address").value){alert("Completa teléfono, email y domicilio.");return}if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($("email").value)){alert("Revisa el email.");return}}if(n===3)review();if(n===4)summary();show("step"+n);window.scrollTo(0,0)};
+function poll(){
+  rpc("tablet_poll",{p_token:token},function(err,d){
+    if(err)return;
+    var j=Array.isArray(d)?d[0]:d;
+    if(!j||!j.job_id){if(!jobId||lastDone===jobId)show("waiting");return}
+    if(j.job_id===lastDone)return;
+    if(j.job_id!==jobId){jobId=j.job_id;load(j.payload||{})}
+  });
+}
+function load(s){
+  snap=s||{};
+  selectedFull=!!snap.full_insurance;
+  checkedData=false;ink=false;
+  $("phone").value=snap.customer_phone||"";
+  $("email").value=snap.customer_email||"";
+  $("address").value=snap.customer_address||"";
+  $("terms").checked=false;
+  $("termsLink").href=snap.conditions_url||"https://www.lariosrental.com/condiciones-generales/";
+  $("termsLinkEn").href=snap.conditions_url||"https://www.lariosrental.com/condiciones-generales/";
+  renderInsurance();
+  show("step1");
+  window.scrollTo(0,0);
+}
+window.chooseInsurance=function(full){
+  selectedFull=!!full;
+  renderInsurance();
+};
+function renderInsurance(){
+  var f=Number(snap.franchise||0);
+  $("priceRows").innerHTML=
+    row("Precio alquiler · Rental price",money(snap.rental_price))+
+    row("Seguro · Insurance",selectedFull?"Seguro completo · Full insurance":"Seguro estándar · Standard insurance")+
+    row("Total",money(chosenTotal()));
+  $("standardFranchise").textContent=money(f);
+  $("fullPrice").textContent=Number(snap.full_insurance_quote||0)>0?
+    "Coste / Cost: "+money(snap.full_insurance_quote):
+    "Consulte el precio / Ask the employee";
+  $("standardBox").className="insuranceBox"+(!selectedFull?" selected":"");
+  $("fullBox").className="insuranceBox"+(selectedFull?" selected":"");
+  $("selectedInsurance").textContent=selectedFull?
+    "Seleccionado: Seguro completo · franquicia 0 € / Selected: Full insurance · 0 € excess":
+    "Seleccionado: Seguro estándar · franquicia "+money(f)+" / Selected: Standard insurance · "+money(f)+" excess";
+}
+function review(){
+  $("reviewRows").innerHTML=
+    row("Nombre · Name",snap.customer_name)+
+    row("DNI/Pasaporte · ID/Passport",snap.customer_document)+
+    row("Nacimiento · Date of birth",snap.customer_birth_date)+
+    row("Permiso · Driving licence",snap.driving_license)+
+    row("País expedición · Issuing country",snap.license_issued_by)+
+    row("Caducidad · Expiry",snap.license_expiry)+
+    row("Teléfono · Phone",$("phone").value)+
+    row("Email",$("email").value)+
+    row("Domicilio · Address",$("address").value);
+}
+function summary(){
+  var f=Number(snap.franchise||0);
+  $("summaryRows").innerHTML=
+    row("Vehículo · Vehicle",((snap.vehicle_model||snap.vehicle_group||"")+" "+(snap.vehicle_plate||"")).replace(/^\s+|\s+$/g,""))+
+    row("Entrega · Pick-up",(snap.pickup_date||"")+" "+(snap.pickup_time||"")+" · "+(snap.pickup_location||""))+
+    row("Devolución · Return",(snap.return_date||"")+" "+(snap.return_time||"")+" · "+(snap.return_location||""))+
+    row("Seguro · Insurance",selectedFull?"Completo · 0 € franquicia / Full · 0 € excess":"Estándar · "+money(f)+" franquicia / Standard · "+money(f)+" excess")+
+    row("Total",money(chosenTotal()));
+}
+window.goStep=function(n){
+  if(n===2){
+    if(!$("phone").value||!$("email").value||!$("address").value){
+      alert("Completa teléfono, email y domicilio. / Complete phone, email and address.");return;
+    }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($("email").value)){
+      alert("Revisa el email. / Check the email address.");return;
+    }
+  }
+  if(n===3)review();
+  if(n===4){summary();show("step4");window.scrollTo(0,0);setTimeout(setupCanvas,50);return}
+  show("step"+n);window.scrollTo(0,0);
+};
 window.confirmData=function(){checkedData=true;goStep(4)};
-function setupCanvas(){var c=$("sig"),r=c.getBoundingClientRect(),ratio=window.devicePixelRatio||1,ctx,d=false,lx=0,ly=0;c.width=Math.max(1,Math.round(r.width*ratio));c.height=Math.max(1,Math.round(180*ratio));ctx=c.getContext("2d");ctx.scale(ratio,ratio);ctx.lineWidth=2.4;ctx.lineCap="round";function pt(e){var rr=c.getBoundingClientRect(),t=e.touches&&e.touches[0]?e.touches[0]:e;return{x:t.clientX-rr.left,y:t.clientY-rr.top}}function st(e){e.preventDefault();d=true;var p=pt(e);lx=p.x;ly=p.y}function mv(e){if(!d)return;e.preventDefault();var p=pt(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(p.x,p.y);ctx.stroke();lx=p.x;ly=p.y;ink=true}function en(e){if(e)e.preventDefault();d=false}c.ontouchstart=st;c.ontouchmove=mv;c.ontouchend=en;c.onmousedown=st;c.onmousemove=mv;c.onmouseup=en}
-window.clearSignature=function(){var c=$("sig");c.getContext("2d").clearRect(0,0,c.width,c.height);ink=false};
-window.submitAll=function(){if(!checkedData){alert("Primero comprueba tus datos.");return}if(!$("terms").checked){alert("Debes aceptar las condiciones.");return}if(!ink){alert("Falta la firma.");return}var resp={customer_phone:$("phone").value,customer_email:$("email").value,customer_address:$("address").value,data_checked:true,accepted_terms:true,accepted_terms_at:new Date().toISOString(),conditions_url:$("termsLink").href,signature_data_url:$("sig").toDataURL("image/png")};$("submitStatus").innerHTML='<div class="status">Enviando…</div>';rpc("tablet_submit",{p_token:token,p_job_id:jobId,p_response:resp},function(err,d){if(err||d!==true){$("submitStatus").innerHTML='<div class="status err">'+(err?err.message:"No se pudo completar")+'</div>';return}lastDone=jobId;show("done");setTimeout(function(){show("waiting")},1800)})};
-boot()})();
-</script></body></html>
+
+function setupCanvas(){
+  var c=$("sig"),r=c.getBoundingClientRect(),ratio=window.devicePixelRatio||1,ctx,d=false,lx=0,ly=0;
+  c.width=Math.max(1,Math.round(r.width*ratio));
+  c.height=Math.max(1,Math.round(r.height*ratio));
+  ctx=c.getContext("2d");
+  ctx.scale(ratio,ratio);
+  ctx.lineWidth=3;
+  ctx.lineCap="round";
+  ctx.strokeStyle="#111827";
+  function pt(e){var rr=c.getBoundingClientRect(),t=e.touches&&e.touches[0]?e.touches[0]:e;return{x:t.clientX-rr.left,y:t.clientY-rr.top}}
+  function st(e){e.preventDefault();d=true;var p=pt(e);lx=p.x;ly=p.y}
+  function mv(e){if(!d)return;e.preventDefault();var p=pt(e);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(p.x,p.y);ctx.stroke();lx=p.x;ly=p.y;ink=true}
+  function en(e){if(e)e.preventDefault();d=false}
+  c.ontouchstart=st;c.ontouchmove=mv;c.ontouchend=en;c.onmousedown=st;c.onmousemove=mv;c.onmouseup=en;c.onmouseleave=en;
+}
+window.clearSignature=function(){
+  var c=$("sig");
+  c.getContext("2d").clearRect(0,0,c.width,c.height);
+  ink=false;
+};
+window.submitAll=function(){
+  if(!checkedData){alert("Primero compruebe sus datos. / Please check your details first.");return}
+  if(!$("terms").checked){alert("Debe aceptar las condiciones. / You must accept the terms and conditions.");return}
+  if(!ink){alert("Falta la firma. / Signature required.");return}
+  var resp={
+    customer_phone:$("phone").value,
+    customer_email:$("email").value,
+    customer_address:$("address").value,
+    data_checked:true,
+    accepted_terms:true,
+    accepted_terms_at:new Date().toISOString(),
+    conditions_url:$("termsLink").href,
+    signature_data_url:$("sig").toDataURL("image/png"),
+    full_insurance:selectedFull,
+    insurance_total:chosenInsuranceTotal(),
+    franchise:selectedFull?0:Number(snap.franchise||0),
+    total:chosenTotal()
+  };
+  $("submitStatus").innerHTML='<div class="status">Enviando… / Sending…</div>';
+  rpc("tablet_submit",{p_token:token,p_job_id:jobId,p_response:resp},function(err,d){
+    if(err||d!==true){
+      $("submitStatus").innerHTML='<div class="status err">'+(err?err.message:"No se pudo completar / Could not complete")+'</div>';
+      return;
+    }
+    lastDone=jobId;
+    show("done");
+    setTimeout(function(){show("waiting")},1800);
+  });
+};
+boot();
+})();
+</script>
+</body>
+</html>
