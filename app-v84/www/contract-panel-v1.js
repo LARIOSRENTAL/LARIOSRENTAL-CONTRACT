@@ -11,6 +11,20 @@ async function stripeEdge(action,contractId){const r=await sessionFetch(cfg.supa
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=v=>Number(v||0).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
 const date=v=>{if(!v)return'—';const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString('es-ES',{dateStyle:'short',timeStyle:v.includes?.('T')?'short':undefined})};
+const searchNorm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+function localSearchMatch(c,q){
+  const tokens=searchNorm(q).split(/\s+/).filter(Boolean);
+  if(!tokens.length)return true;
+  const hay=searchNorm([
+    c.contract_number,c.customer_name,c.customer_phone,c.vehicle_plate,c.renthub_id,
+    c.delivery_location,c.return_location,c.agency,c.vehicle_group
+  ].join(' '));
+  return tokens.every(t=>hay.includes(t));
+}
+function applyLocalSearch(){
+  const rows=[...document.querySelectorAll('.lrCpRow')];
+  rows.forEach((el,i)=>el.classList.toggle('hidden',!localSearchMatch(contracts[i],panelQuery)));
+}
 function newestFirst(rows){return[...(Array.isArray(rows)?rows:[])].sort((a,b)=>{const bt=Date.parse(b.created_at||'')||0,at=Date.parse(a.created_at||'')||0;if(bt!==at)return bt-at;return String(b.contract_number||'').localeCompare(String(a.contract_number||''),'es',{numeric:true})})}
 function historical(c){const pickup=Date.parse(c?.pickup_at||'');return Number.isFinite(pickup)&&pickup<Date.now()}
 function historicalUnsent(c){return historical(c)&&!c?.renthub_id}
@@ -60,7 +74,7 @@ function row(c){
   return `<article class="lrCpRow" data-search="${esc([c.contract_number,c.customer_name,c.customer_phone,c.vehicle_plate,c.renthub_id,c.delivery_location,c.return_location,c.agency,label,payment].join(' ').toLowerCase())}"><header><div><b>${esc(c.contract_number||'Contrato')}</b><span>${esc(c.customer_name||'Sin cliente')} · ${esc(c.vehicle_plate||c.vehicle_group||'Sin vehículo')}</span></div><em class="${kind}">${esc(label)}</em></header><div class="lrCpMeta"><span>Entrega: ${date(c.pickup_at)}</span><span>Devolución: ${date(c.return_at)}</span><span>Total: ${money(c.total)}</span><span>PDF: ${c.pdf_path?'Generado':'Pendiente'}</span><span>Pago: ${esc(payment)}</span></div>${linked?`<small>Renthub: ${esc(c.renthub_id)}${log?.verified_at?' · verificado '+date(log.verified_at):''}</small>`:''}${localState}${c.renthub_sync_error?`<p class="lrCpError">${esc(c.renthub_sync_error)}</p>`:''}<div class="lrCpActions">${lifecycleAction}${actions}</div></article>`;
 }
 function removeLegacyCancelButtons(){document.querySelectorAll('.lrCpActions button').forEach(b=>{if(/eliminar reserva cancelada/i.test(b.textContent||''))b.remove()})}
-function render(){const body=$('lrContractPanelBody');if(!body)return;const title=$('lrCpTitle'),subtitle=$('lrCpSubtitle');if(title)title.textContent=panelMode==='sync'?'Sincronización Renthub':'Panel contractual';if(subtitle)subtitle.textContent=panelMode==='sync'?'Envíos, errores y caché de Renthub':'Consulta y gestión de contratos';const active=document.activeElement,keepSearchFocus=active?.id==='lrCpSearch',selStart=keepSearchFocus?active.selectionStart:null,selEnd=keepSearchFocus?active.selectionEnd:null;const more=contracts.length<panelTotal&&!panelQuery&&!panelFrom&&!panelTo?`<button class="lrCpLoadMore" onclick="LariosContractPanel.loadMore()">Cargar 60 contratos más</button>`:'';const filters=`<div class="lrCpFilters"><input id="lrCpSearch" value="${esc(panelQuery)}" placeholder="Buscar contrato, cliente, teléfono, matrícula, lugar o colaborador" oninput="LariosContractPanel.search(this.value)"><select id="lrCpFilter" onchange="LariosContractPanel.filter()"><option value="">Todos</option><option value="pending">Pendientes</option><option value="verified">Verificados</option><option value="failed">Errores</option></select><label>Desde<input id="lrCpFrom" type="date" value="${esc(panelFrom)}" onchange="LariosContractPanel.setDates()"></label><label>Hasta<input id="lrCpTo" type="date" value="${esc(panelTo)}" onchange="LariosContractPanel.setDates()"></label></div>`;if(panelMode==='sync'){body.innerHTML=accessNotice()+summary()+bulkCard()+cacheCard()+filters+`<div id="lrCpRows">${contracts.map(row).join('')||'<div class="notice">No hay contratos.</div>'}</div>${more}`}else{body.innerHTML=accessNotice()+summary()+filters+`<div id="lrCpRows">${contracts.map(row).join('')||'<div class="notice">No hay contratos.</div>'}</div>${more}`}renderCardButtons();removeLegacyCancelButtons();decorateEditors();if(keepSearchFocus){const input=$('lrCpSearch');if(input){input.focus({preventScroll:true});try{input.setSelectionRange(selStart,selEnd)}catch(_){}}}}
+function render(){const body=$('lrContractPanelBody');if(!body)return;const title=$('lrCpTitle'),subtitle=$('lrCpSubtitle');if(title)title.textContent=panelMode==='sync'?'Sincronización Renthub':'Panel contractual';if(subtitle)subtitle.textContent=panelMode==='sync'?'Envíos, errores y caché de Renthub':'Consulta y gestión de contratos';const active=document.activeElement,keepSearchFocus=active?.id==='lrCpSearch',selStart=keepSearchFocus?active.selectionStart:null,selEnd=keepSearchFocus?active.selectionEnd:null;const more=contracts.length<panelTotal&&!panelQuery&&!panelFrom&&!panelTo?`<button class="lrCpLoadMore" onclick="LariosContractPanel.loadMore()">Cargar 60 contratos más</button>`:'';const filters=`<div class="lrCpFilters"><input id="lrCpSearch" value="${esc(panelQuery)}" placeholder="Buscar contrato, cliente, teléfono, matrícula, lugar o colaborador" oninput="LariosContractPanel.search(this.value)"><select id="lrCpFilter" onchange="LariosContractPanel.filter()"><option value="">Todos</option><option value="pending">Pendientes</option><option value="verified">Verificados</option><option value="failed">Errores</option></select><label>Desde<input id="lrCpFrom" type="date" value="${esc(panelFrom)}" onchange="LariosContractPanel.setDates()"></label><label>Hasta<input id="lrCpTo" type="date" value="${esc(panelTo)}" onchange="LariosContractPanel.setDates()"></label></div>`;if(panelMode==='sync'){body.innerHTML=accessNotice()+summary()+bulkCard()+cacheCard()+filters+`<div id="lrCpRows">${contracts.map(row).join('')||'<div class="notice">No hay contratos.</div>'}</div>${more}`}else{body.innerHTML=accessNotice()+summary()+filters+`<div id="lrCpRows">${contracts.map(row).join('')||'<div class="notice">No hay contratos.</div>'}</div>${more}`}renderCardButtons();removeLegacyCancelButtons();decorateEditors();applyLocalSearch();if(keepSearchFocus){const input=$('lrCpSearch');if(input){input.focus({preventScroll:true});try{input.setSelectionRange(selStart,selEnd)}catch(_){}}}}
 function cachePanelRows(){try{sessionStorage.setItem('lr_contract_panel_rows',JSON.stringify({at:Date.now(),rows:contracts.slice(0,pageSize),total:panelTotal}))}catch(_){}}
 function restorePanelRows(){try{const x=JSON.parse(sessionStorage.getItem('lr_contract_panel_rows')||'null');if(x&&Array.isArray(x.rows)&&Date.now()-Number(x.at||0)<300000){contracts=x.rows.slice(0,pageSize);panelTotal=Number(x.total||contracts.length);render();return true}}catch(_){}return false}
 async function refreshPanelBackground(){
@@ -97,9 +111,10 @@ async function loadMore(){
   finally{loadingPage=false}
 }
 function search(value){
-  panelQuery=String(value||'').trim();
+  panelQuery=String(value||'');
+  applyLocalSearch();
   clearTimeout(searchTimer);
-  searchTimer=setTimeout(()=>refreshPanelBackground(),220);
+  searchTimer=setTimeout(()=>refreshPanelBackground(),500);
 }
 function setDates(){panelFrom=$('lrCpFrom')?.value||'';panelTo=$('lrCpTo')?.value||'';refreshPanelBackground()}
 async function load(){const body=$('lrContractPanelBody');const restored=!panelQuery&&!panelFrom&&!panelTo&&restorePanelRows();if(!restored&&body)body.innerHTML='<div class="notice">Cargando panel…</div>';await refreshPanelBackground()}
