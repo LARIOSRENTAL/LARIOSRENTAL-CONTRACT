@@ -159,6 +159,18 @@ function fill(x){
   ensureFuelLevelControl(x);
 }
 function emitReservationOpened(x){try{document.dispatchEvent(new CustomEvent('larios:reservation-opened',{detail:{id:x.id,record:x}}))}catch(e){console.warn('Reservation opened event',e)}}
+document.addEventListener('larios:client-tablet-completed',async function(){
+  const id=window.LariosCurrentContractId||editId;
+  if(!id)return;
+  try{
+    const fresh=await rpc('app_contract_record',{p_contract_id:id});
+    if(fresh&&fresh.id){
+      upsertCache(fresh);
+      fill(fresh);
+      emitReservationOpened(fresh);
+    }
+  }catch(e){console.warn('No se pudo refrescar el contrato tras la tablet',e)}
+});
 async function edit(id){
   if(!id)return;
   if(editFlight&&editFlightId===id)return editFlight;
