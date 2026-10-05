@@ -126,6 +126,13 @@ function applyResponse(r){
   setField('customer_phone',r.customer_phone);
   setField('customer_email',r.customer_email);
   setField('customer_address',r.customer_address);
+  if(typeof r.full_insurance!=='undefined'){
+    var fi=$('full_insurance');
+    if(fi){fi.checked=!!r.full_insurance;fi.dispatchEvent(new Event('change',{bubbles:true}));}
+  }
+  if(typeof r.insurance_total!=='undefined')setField('insurance_total',r.insurance_total);
+  if(typeof r.franchise!=='undefined')setField('franchise',r.franchise);
+  if(typeof r.total!=='undefined')setField('contract_total',r.total);
   var drawn=drawSignature(r.signature_data_url);
   var form=$('reservationForm');
   if(form){
