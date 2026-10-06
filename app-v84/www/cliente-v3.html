@@ -17,9 +17,9 @@ html,body{margin:0;min-height:100%;background:#21a4be;color:#111827;font-family:
 .idleScreen{position:fixed;left:0;top:0;width:100vw;height:100vh;background:#21a4be;display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}
 .idleScreen.hidden{display:none}
 .idleBrand{display:block;width:82%;max-width:1000px;height:auto;max-height:82vh;object-fit:contain}
-.head{background:#111827;color:#fff;padding:20px}
+.head{background:#21a4be;color:#fff;padding:20px}
 .head h1{margin:0;font-size:24px}
-.head p{margin:5px 0 0;color:#d1d5db;font-size:14px}
+.head p{margin:5px 0 0;color:#e8fbff;font-size:14px}
 .main{padding:16px}
 .card{border:1px solid #e5e7eb;border-radius:16px;padding:18px;margin-bottom:14px;background:#fff}
 .hidden{display:none}
@@ -32,7 +32,7 @@ label{display:block;font-weight:700;font-size:14px;margin:12px 0 4px}
 input,textarea{width:100%;font-size:18px;padding:13px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
 textarea{min-height:90px}
 .btn{width:100%;border:0;border-radius:11px;padding:14px 16px;font-size:17px;font-weight:800;margin-top:12px}
-.primary{background:#111827;color:#fff}
+.primary{background:#21a4be;color:#fff}
 .secondary{background:#e5e7eb;color:#111827}
 .row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #eee}
 .row span:first-child{color:#6b7280}
@@ -53,39 +53,41 @@ textarea{min-height:90px}
 .checkline a{color:#0f5bd8;font-weight:700}
 #sig{display:block;width:100%;height:52vh;min-height:320px;max-height:520px;border:3px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}
 .signatureHint{text-align:center;color:#6b7280;font-size:13px;margin:4px 0 0}
-.compactMode{overflow:hidden;background:#fff}
-.compactMode .wrap{max-width:none;width:100vw;height:100vh;min-height:0;background:#fff;overflow:hidden}
-.compactMode .head{display:none}
-.compactMode .main{padding:0;height:100vh;overflow:hidden}
-.compactMode #step2,.compactMode #step4{width:100vw;height:100vh;margin:0;border:0;border-radius:0;overflow:hidden}
-.priceMode #step2{display:block!important;width:100vw;height:100vh;margin:0;padding:8px 12px 54px;border:0;border-radius:0;overflow:hidden}
-.priceMode #step2 h2{font-size:20px;margin:0 0 8px}
-.priceMode #priceRows .row{padding:7px 0;font-size:13px}
-.priceMode #step2>.muted{font-size:12px;margin:6px 0 8px;line-height:1.25}
-.priceMode .insurance{grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
-.priceMode .insuranceBox{min-height:155px;padding:12px}
-.priceMode .insuranceBox .choice{font-size:16px;margin-bottom:6px}
+.compactMode{overflow:hidden;background:#21a4be}
+.compactMode .wrap{max-width:760px;width:100%;height:100vh;min-height:0;background:#fff;overflow:hidden}
+.compactMode .head{display:block;background:#21a4be;padding:12px 18px}
+.compactMode .head h1{font-size:21px}
+.compactMode .head p{font-size:12px;margin-top:2px}
+.compactMode .main{padding:10px;height:calc(100vh - 72px);overflow:hidden}
+.compactMode #step2,.compactMode #step4{height:100%;margin:0;border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden}
+
+.priceMode #step2{display:flex!important;flex-direction:column;padding:14px}
+.priceMode #step2 h2{font-size:22px;margin:0 0 8px}
+.priceMode #priceRows .row{padding:6px 0;font-size:14px}
+.priceMode #step2>.muted{font-size:13px;margin:6px 0 8px;line-height:1.25}
+.priceMode .insurance{grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
+.priceMode .insuranceBox{min-height:138px;padding:12px}
+.priceMode .insuranceBox .choice{font-size:17px;margin-bottom:5px}
 .priceMode .insuranceBox .big{font-size:26px}
-.priceMode .insuranceBox .tap{margin-top:8px;font-size:12px}
-.priceMode #selectedInsurance{margin-top:8px;padding:9px;font-size:12px}
-.priceMode #step2 .btn{position:absolute;left:12px;right:12px;bottom:8px;width:calc(100vw - 24px);margin:0;padding:11px 12px;font-size:14px;min-height:42px}
-.signatureMode{overflow:hidden;background:#fff}
-.signatureMode .wrap{max-width:none;width:100vw;height:100vh;min-height:0;background:#fff;overflow:hidden}
-.signatureMode .head{display:none}
-.signatureMode .main{padding:0;height:100vh;overflow:hidden}
-.signatureMode #step4{display:grid!important;grid-template-rows:auto auto auto auto minmax(140px,1fr) auto auto;gap:3px;width:100vw;height:100vh;margin:0;padding:6px 8px 48px;border:0;border-radius:0;overflow:hidden}
-.signatureMode #step4 h2{font-size:20px;margin:0 0 4px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff}
+.priceMode .insuranceBox .tap{margin-top:6px;font-size:12px}
+.priceMode #selectedInsurance{margin-top:4px;padding:9px;font-size:12px}
+.priceMode #step2 .btn{position:static;width:100%;margin-top:auto;padding:12px 14px;font-size:16px;min-height:44px}
+
+.signatureMode #step4{display:flex!important;flex-direction:column;padding:14px}
+.signatureMode #step4 h2{font-size:22px;margin:0 0 8px;padding:0;border:0;border-radius:0;background:transparent}
 .signatureMode #summaryRows{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.signatureMode #summaryRows .row{padding:2px 0;font-size:11px;min-height:22px}
+.signatureMode #summaryRows .row{padding:4px 0;font-size:12px;min-height:26px}
 .signatureMode #summaryRows .row:last-child{grid-column:1 / -1}
-.signatureMode .checkline{margin:0;min-height:28px}
+.signatureMode .checkline{margin:6px 0;min-height:32px}
 .signatureMode .checkline input{width:24px;height:24px}
-.signatureMode .checkline label{font-size:11px;line-height:1.15}
-.signatureMode #step4 h3{font-size:15px;margin:0}
-.signatureMode #sig{height:100%!important;min-height:140px;max-height:none;border-width:2px}
-.signatureMode .signatureHint{font-size:10px;margin:0}
-.signatureMode #step4 .btn{margin-top:0;padding:8px 10px;font-size:13px}.signatureMode .signatureActions{position:absolute;left:8px;right:8px;bottom:6px;display:grid;grid-template-columns:1fr 1.35fr;gap:6px;margin:0}.signatureMode .signatureActions .btn{min-height:38px}.signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:6px;margin-top:6px}
-.signatureMode #submitStatus{position:absolute;right:10px;bottom:8px;max-width:45%}
+.signatureMode .checkline label{font-size:12px;line-height:1.2}
+.signatureMode #step4 h3{font-size:17px;margin:2px 0 4px}
+.signatureMode #sig{height:250px!important;min-height:250px;max-height:250px;border-width:2px}
+.signatureMode .signatureHint{font-size:11px;margin:2px 0}
+.signatureMode .signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:8px;margin-top:auto;position:static}
+.signatureMode .signatureActions .btn{min-height:42px;margin:0;padding:10px 12px;font-size:14px}
+.signatureMode #submitStatus{position:static;max-width:none}
+.signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:8px;margin-top:8px}
 @media(max-width:520px){
  .insurance{grid-template-columns:1fr}
  .main{padding:10px}
