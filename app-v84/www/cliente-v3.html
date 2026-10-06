@@ -3,96 +3,103 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Larios Rental · Cliente / Customer</title>
 <style>
+:root{--larios:#21a4be;--larios-dark:#18869c;--ink:#16202a;--muted:#68727d;--line:#dfe5e8;--soft:#eefbfe}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:#21a4be;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+html,body{margin:0;min-height:100%;background:var(--larios);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
 .wrap{max-width:760px;margin:auto;min-height:100vh;background:#fff}
-.idle,.idle html,.idle body{background:#21a4be}
-.idle .wrap{max-width:none;width:100vw;height:100vh;background:#21a4be}
-.idle .head{display:none}
-.idle .main{padding:0;height:100vh;background:#21a4be}
-.idleScreen{position:fixed;left:0;top:0;width:100vw;height:100vh;background:#21a4be;display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}
-.idleScreen.hidden{display:none}
-.idleBrand{display:block;width:82%;max-width:1000px;height:auto;max-height:82vh;object-fit:contain}
-.head{background:#21a4be;color:#fff;padding:20px}
-.head h1{margin:0;font-size:24px}
-.head p{margin:5px 0 0;color:#e8fbff;font-size:14px}
-.main{padding:16px}
-.card{border:1px solid #e5e7eb;border-radius:16px;padding:18px;margin-bottom:14px;background:#fff}
-.hidden{display:none}
-h2{font-size:22px;margin:0 0 12px}
-h3{font-size:18px;margin:14px 0 8px}
-.muted{color:#6b7280;font-size:14px;line-height:1.45}
-.bi{display:block}
-.en{display:block;color:#6b7280;font-size:.82em;font-weight:500;margin-top:2px}
+.head{background:var(--larios);color:#fff;padding:16px 20px}
+.head h1{margin:0;font-size:24px;line-height:1.1}
+.head p{margin:4px 0 0;color:#effcff;font-size:14px}
+.main{padding:14px}
+.card{border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px;background:#fff}
+.hidden{display:none!important}
+h2{font-size:24px;line-height:1.1;margin:0 0 12px}
+h3{font-size:19px;margin:10px 0 6px}
+.en{display:block;color:var(--muted);font-size:.78em;font-weight:500;margin-top:3px}
+.muted{color:var(--muted);font-size:14px;line-height:1.35}
 label{display:block;font-weight:700;font-size:14px;margin:12px 0 4px}
 input,textarea{width:100%;font-size:18px;padding:13px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
-textarea{min-height:90px}
-.btn{width:100%;border:0;border-radius:11px;padding:14px 16px;font-size:17px;font-weight:800;margin-top:12px}
-.primary{background:#21a4be;color:#fff}
-.secondary{background:#e5e7eb;color:#111827}
-.row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #eee}
-.row span:first-child{color:#6b7280}
+textarea{min-height:86px}
+.btn{width:100%;border:0;border-radius:11px;padding:13px 16px;font-size:17px;font-weight:800;margin-top:10px}
+.primary{background:var(--larios);color:#fff}
+.primary:active{background:var(--larios-dark)}
+.secondary{background:#edf1f3;color:var(--ink)}
+.row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #edf0f2;font-size:14px}
+.row span:first-child{color:var(--muted)}
 .row b{text-align:right}
 .pairCode{font-size:34px;letter-spacing:.12em;font-weight:900;text-align:center;padding:16px;background:#f3f4f6;border-radius:12px;margin:12px 0}
-.status{padding:12px;border-radius:10px;margin-top:12px;font-weight:700}
+.status{padding:10px;border-radius:10px;margin-top:8px;font-weight:700}
 .ok{background:#ecfdf5;color:#065f46}
 .err{background:#fef2f2;color:#991b1b}
-.insurance{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-.insuranceBox{border:3px solid #e5e7eb;border-radius:14px;padding:16px;cursor:pointer;background:#fff;min-height:160px}
-.insuranceBox.selected{border-color:#21a4be;background:#eefcff;box-shadow:0 0 0 2px rgba(33,164,190,.08)}
-.insuranceBox .choice{font-size:17px;font-weight:900;margin-bottom:7px}
-.insuranceBox .tap{margin-top:10px;font-size:13px;color:#5f6b76}
-.big{font-size:27px;font-weight:900}
-.checkline{display:flex;gap:10px;align-items:flex-start;margin:14px 0}
-.checkline input{width:28px;height:28px;margin:0;flex:0 0 auto}
-.checkline label{margin:1px 0;font-size:15px}
+.insurance{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.insuranceBox{border:2px solid var(--line);border-radius:14px;padding:14px;background:#fff;min-height:145px}
+.insuranceBox.selected{border-color:var(--larios);background:var(--soft);box-shadow:0 0 0 1px rgba(33,164,190,.12)}
+.insuranceBox .choice{font-size:18px;font-weight:900;margin-bottom:6px}
+.insuranceBox .tap{margin-top:8px;font-size:12px;color:var(--muted)}
+.big{font-size:28px;font-weight:900}
+.checkline{display:flex;gap:9px;align-items:flex-start;margin:8px 0}
+.checkline input{width:25px;height:25px;margin:0;flex:0 0 auto}
+.checkline label{margin:0;font-size:13px;line-height:1.2}
 .checkline a{color:#0f5bd8;font-weight:700}
-#sig{display:block;width:100%;height:52vh;min-height:320px;max-height:520px;border:3px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}
-.signatureHint{text-align:center;color:#6b7280;font-size:13px;margin:4px 0 0}
-.compactMode{overflow:hidden;background:#21a4be}
-.compactMode .wrap{max-width:760px;width:100%;height:100vh;min-height:0;background:#fff;overflow:hidden}
-.compactMode .head{display:block;background:#21a4be;padding:12px 18px}
-.compactMode .head h1{font-size:21px}
-.compactMode .head p{font-size:12px;margin-top:2px}
-.compactMode .main{padding:10px;height:calc(100vh - 72px);overflow:hidden}
-.compactMode #step2,.compactMode #step4{height:100%;margin:0;border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden}
+#sig{display:block;width:100%;height:240px;border:2px solid #9ca3af;border-radius:12px;touch-action:none;background:#fff}
+.signatureHint{text-align:center;color:var(--muted);font-size:11px;margin:3px 0}
+.signatureActions{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-top:6px}
 
-.priceMode #step2{display:flex!important;flex-direction:column;padding:14px}
-.priceMode #step2 h2{font-size:22px;margin:0 0 8px}
-.priceMode #priceRows .row{padding:6px 0;font-size:14px}
-.priceMode #step2>.muted{font-size:13px;margin:6px 0 8px;line-height:1.25}
-.priceMode .insurance{grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
-.priceMode .insuranceBox{min-height:138px;padding:12px}
-.priceMode .insuranceBox .choice{font-size:17px;margin-bottom:5px}
-.priceMode .insuranceBox .big{font-size:26px}
-.priceMode .insuranceBox .tap{margin-top:6px;font-size:12px}
-.priceMode #selectedInsurance{margin-top:4px;padding:9px;font-size:12px}
-.priceMode #step2 .btn{position:static;width:100%;margin-top:auto;padding:12px 14px;font-size:16px;min-height:44px}
+/* Waiting screen */
+.idle .wrap{max-width:none;width:100vw;height:100vh;background:var(--larios)}
+.idle .head{display:none}
+.idle .main{padding:0;height:100vh;background:var(--larios)}
+.idleScreen{position:fixed;inset:0;background:var(--larios);display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}
+.idleScreen.hidden{display:none!important}
+.idleBrand{display:block;width:82%;max-width:1000px;height:auto;max-height:82vh;object-fit:contain}
 
-.signatureMode #step4{display:flex!important;flex-direction:column;padding:14px}
-.signatureMode #step4 h2{font-size:22px;margin:0 0 8px;padding:0;border:0;border-radius:0;background:transparent}
+/* Step 2: same visual hierarchy as steps 1 and 3, but fits without scrolling */
+.priceMode{background:var(--larios)}
+.priceMode .wrap{height:100vh;min-height:0;overflow:hidden}
+.priceMode .head{padding:11px 18px}
+.priceMode .head h1{font-size:20px}
+.priceMode .head p{font-size:12px}
+.priceMode .main{height:calc(100vh - 64px);padding:10px;overflow:hidden}
+.priceMode #step2{display:flex!important;flex-direction:column;height:100%;margin:0;padding:16px;border-radius:16px}
+.priceMode #step2 h2{font-size:24px;margin-bottom:8px}
+.priceMode #priceRows .row{padding:5px 0;font-size:13px}
+.priceMode #step2>.muted{font-size:13px;margin:6px 0}
+.priceMode .insurance{margin-top:4px}
+.priceMode .insuranceBox{min-height:132px;padding:12px}
+.priceMode #selectedInsurance{font-size:12px;padding:8px;margin-top:6px}
+.priceMode #step2>.btn{margin-top:auto;min-height:44px;padding:11px 14px;font-size:16px}
+
+/* Step 4: readable title like step 3, compact summary, signature/buttons visible */
+.signatureMode{background:var(--larios)}
+.signatureMode .wrap{height:100vh;min-height:0;overflow:hidden}
+.signatureMode .head{padding:9px 18px}
+.signatureMode .head h1{font-size:20px}
+.signatureMode .head p{font-size:12px}
+.signatureMode .main{height:calc(100vh - 60px);padding:8px;overflow:hidden}
+.signatureMode #step4{display:flex!important;flex-direction:column;height:100%;margin:0;padding:14px;border-radius:16px}
+.signatureMode #step4 h2{font-size:24px;margin-bottom:6px}
 .signatureMode #summaryRows{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.signatureMode #summaryRows .row{padding:4px 0;font-size:12px;min-height:26px}
-.signatureMode #summaryRows .row:last-child{grid-column:1 / -1}
-.signatureMode .checkline{margin:6px 0;min-height:32px}
-.signatureMode .checkline input{width:24px;height:24px}
-.signatureMode .checkline label{font-size:12px;line-height:1.2}
-.signatureMode #step4 h3{font-size:17px;margin:2px 0 4px}
-.signatureMode #sig{height:250px!important;min-height:250px;max-height:250px;border-width:2px}
-.signatureMode .signatureHint{font-size:11px;margin:2px 0}
-.signatureMode .signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:8px;margin-top:auto;position:static}
-.signatureMode .signatureActions .btn{min-height:42px;margin:0;padding:10px 12px;font-size:14px}
-.signatureMode #submitStatus{position:static;max-width:none}
-.signatureActions{display:grid;grid-template-columns:1fr 1.35fr;gap:8px;margin-top:8px}
+.signatureMode #summaryRows .row{padding:3px 0;font-size:12px;min-height:24px}
+.signatureMode #summaryRows .row:last-child{grid-column:1/-1}
+.signatureMode #step4 h3{font-size:18px;margin:2px 0 4px}
+.signatureMode #sig{height:210px;min-height:210px;max-height:210px}
+.signatureMode .checkline{margin:4px 0}
+.signatureMode .signatureActions{margin-top:auto}
+.signatureMode .signatureActions .btn{min-height:42px;margin:0;padding:9px 10px;font-size:14px}
+.signatureMode #submitStatus{margin:0}
+
 @media(max-width:520px){
- .insurance{grid-template-columns:1fr}
  .main{padding:10px}
  .card{padding:14px}
- #sig{height:48vh;min-height:300px}
+ .insurance{grid-template-columns:1fr}
+ #sig{height:210px;min-height:210px}
 }
 </style>
 </head>
@@ -200,7 +207,7 @@ function rpc(name,body,cb){
 }
 function rnd(n,digits){var a=digits?"0123456789":"ABCDEFGHJKLMNPQRSTUVWXYZ23456789",o="";for(var i=0;i<n;i++)o+=a.charAt(Math.floor(Math.random()*a.length));return o}
 function show(id){
-  document.body.className=id==="waiting"?"idle":(id==="step4"?"compactMode signatureMode":(id==="step2"?"compactMode priceMode":""));
+  document.body.className=id==="waiting"?"idle":(id==="step4"?"signatureMode":(id==="step2"?"priceMode":""));
   ["pair","waiting","step1","step2","step3","step4","done"].forEach(function(x){
     if(x==="waiting")$(x).className=x===id?"idleScreen":"idleScreen hidden";
     else $(x).className=x===id?"card":"card hidden";
