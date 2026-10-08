@@ -1008,12 +1008,12 @@ async function handler(req: Request) {
       success: true,
       verified_at: now,
     });
-    return {
+    return json({
       cancelled: true,
       renthub_cancelled: cancelRenthub,
       external_reference: code || null,
       renthub_skipped_reason: !cancelRenthub ? payload.renthub_cancel_skipped_reason : null,
-    };
+    });
   }
 
   if (contract.status === "draft") return json({ error: "Generate the contract before sending it to Renthub" }, 409);
@@ -1171,6 +1171,12 @@ async function handler(req: Request) {
     return time>latest ? `${date} ${latest}` : realEnd;
   }
 
+  const lariosFuelLabel = String(contract.app_payload?.fuel_out || contract.app_payload?.delivery_fuel || contract.fuel_out || "").trim();
+  const renthubFuelLevel = (() => {
+    const match = lariosFuelLabel.match(/^([0-8])\s*\/\s*8$/);
+    return match ? match[1] : "";
+  })();
+
   function buildPartnerBookingForm(startValue: string, customerCode = "", requestVehicle = false, endValue = end) {
     if (!model) throw new Error(`No hay mapeo Renthub para el grupo ${contract.category || "sin grupo"}`);
     const names = splitName(customer?.full_name || contract.app_payload?.customer_name || "Pendiente Larios Rental");
@@ -1216,6 +1222,7 @@ async function handler(req: Request) {
             ? `MATRICULA REAL DEL VEHICULO: ${contractPlate}`
             : `VEHICULO POR ASIGNAR - MATRICULA REAL A CAMBIAR: ${contractPlate}`)
         : "",
+      lariosFuelLabel ? `NIVEL DE COMBUSTIBLE ENTREGA: ${lariosFuelLabel}` : "",
     ].filter(Boolean).join("\n");
     if (locationNotes) form.set("notes", locationNotes);
     form.set("booking_type", "booking");
@@ -1299,7 +1306,7 @@ async function handler(req: Request) {
       pm_actual_end_time: "",
       pm_data_fine: renthubPanelDate(String(contract.return_date || "").slice(0,10)),
       pm_ora_fine: String(contract.return_time || "").slice(0,5),
-      pm_benzina_ritiro: "4",
+      pm_benzina_ritiro: renthubFuelLevel || "4",
       pm_benzina_consegna: "",
       pm_km_included: String(booking?.kms?.included || 0),
       pm_extra_km_price: String(booking?.kms?.extra_km_price?.without_tax || 0),
@@ -1382,6 +1389,8 @@ async function handler(req: Request) {
       end,
       deposit: Number(contract.deposit || 0),
       damage_franchise: desiredFranchise,
+      fuel_out: lariosFuelLabel || null,
+      renthub_fuel_level: renthubFuelLevel || null,
     }));
 
     if (!response.ok || String(data?.id || "") !== bookingId) {
