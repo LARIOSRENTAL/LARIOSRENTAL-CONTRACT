@@ -225,28 +225,59 @@ function paymentInvoiceId(detail: any) {
   return 0;
 }
 
-async function findCreatedPaymentId(bookingId: number, method: string, paymentAmount: number, date: string) {
-  const query = new URLSearchParams({
-    created_from: `${date} 00:00`,
-    created_to: `${date} 23:59`,
-    method,
-    payment_date_from: date,
-    payment_date_to: date,
-    direction: "inflow",
-    type: "final_payment",
-    payment_status: "all",
-  });
+function paymentLookupId(data: any, bookingId: number, method: string, paymentAmount: number) {
+  const rows = userApiRows(data);
+  if (rows.some((row: any) =>
+    Math.round(amount(row?.amount ?? row?.rp_importo) * 100) === Math.round(paymentAmount * 100) &&
+    String(row?.method ?? row?.rp_method ?? "") === method &&
+    (!Number(row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0) ||
+      !String(row?.refers_to_model ?? row?.reference_model ?? "")))) {
+    throw new Error("Hay un pago del mismo importe sin una referencia inequívoca; no se insertará otro.");
+  }
+  const matches = rows.filter((row: any) =>
+    String(row?.refers_to_model ?? row?.reference_model ?? "") === "rental_reservation" &&
+    Number(row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0) === bookingId &&
+    String(row?.method ?? row?.rp_method ?? "") === method &&
+    Math.round(amount(row?.amount ?? row?.rp_importo) * 100) === Math.round(paymentAmount * 100)
+  );
+  if (matches.length > 1) throw new Error("Hay varios pagos equivalentes vinculados a esta reserva; no se insertará otro.");
+  if (matches.length === 1) {
+    const id = Number(matches[0]?.id ?? matches[0]?.rp_id ?? 0);
+    if (Number.isInteger(id) && id > 0) return id;
+    throw new Error("El pago equivalente no tiene ID verificable; no se insertará otro.");
+  }
+  const total = data?.result?.meta?.total ?? data?.meta?.total ?? data?.result?.total ?? data?.total;
+  const next = data?.result?.next_page_url ?? data?.next_page_url ?? data?.links?.next;
+  if (total === undefined || Number(total) !== rows.length || next) {
+    throw new Error("No se pudo demostrar que la lectura de pagos esté completa; no se insertará el pago.");
+  }
+  return 0;
+}
+
+function assertAccountingPaymentReceipt(data: any, paymentId: number, bookingId: number, method: string, paymentAmount: number) {
+  const root = data?.result ?? data;
+  const row = root?.payment ?? root;
+  const prepaid = row?.prepaid;
+  const verified = Number(row?.id) === paymentId &&
+    String(row?.refers_to_model || "") === "rental_reservation" && Number(row?.refers_to_id) === bookingId &&
+    row?.method === method && row?.direction === "inflow" && row?.type === "final_payment" &&
+    Math.round(amount(row?.amount) * 100) === Math.round(paymentAmount * 100) &&
+    [false, 0, "0"].includes(prepaid) && !!String(row?.payment_date || "").trim();
+  if (!verified) throw new Error("El ID existe, pero no se ha verificado un cobro contable pagado, no prepago, de esta reserva.");
+}
+
+function paymentTrialTarget(contract: any, bookingId: number, method: string, paymentAmount: number) {
+  return Number(contract?.contract_number) === 63290 &&
+    String(contract?.renthub_contract_id || "") === "FBFOD-LHWY0" &&
+    bookingId === 10502 && method === "credit_card" &&
+    Number.isFinite(paymentAmount) && Math.round(paymentAmount * 100) === 100;
+}
+
+async function findCreatedPaymentId(bookingId: number, method: string, paymentAmount: number, _date: string) {
+  // Do not limit by today's date: a previous attempt may have registered the payment earlier.
+  const query = new URLSearchParams({ method, direction: "inflow", type: "final_payment", payment_status: "all" });
   const data = await userApiFetch(`/module/payment/api/v1/payment?${query.toString()}`);
-  const matches = userApiRows(data).filter((row: any) => {
-    const rowAmount = amount(row?.amount ?? row?.rp_importo);
-    const rowMethod = String(row?.method ?? row?.rp_method ?? "");
-    const refId = Number(row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0);
-    return Math.abs(rowAmount - paymentAmount) <= 0.02 &&
-      (!rowMethod || rowMethod === method) &&
-      (!refId || refId === bookingId);
-  });
-  matches.sort((a: any, b: any) => Number(b?.id ?? b?.rp_id ?? 0) - Number(a?.id ?? a?.rp_id ?? 0));
-  return Number(matches[0]?.id ?? matches[0]?.rp_id ?? 0) || 0;
+  return paymentLookupId(data, bookingId, method, paymentAmount);
 }
 
 async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, method: string, paymentAmount: number) {
@@ -259,12 +290,17 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
     return { pending: true, reason: "booking_id_not_available", method, amount: paymentAmount };
   }
 
+  if (!paymentTrialTarget(contract, bookingId, method, paymentAmount)) {
+    return { skipped: true, reason: "payment_trial_only", booking_id: bookingId };
+  }
   const date = madridDate();
 
   // Idempotencia: si ya existe un pago equivalente para la reserva, reutilizarlo.
   try {
     const existingId = await findCreatedPaymentId(bookingId, method, paymentAmount, date);
     if (existingId) {
+      const receipt = await userApiFetch(`/module/payment/api/v1/payment/${existingId}?payment_expand=all`);
+      assertAccountingPaymentReceipt(receipt, existingId, bookingId, method, paymentAmount);
       console.log(JSON.stringify({
         event: "renthub_user_payment_existing",
         contract_number: contract?.contract_number,
@@ -291,7 +327,31 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
       booking_id: bookingId,
       detail: error instanceof Error ? error.message : String(error),
     }));
+    return {
+      pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
+      reason: "payment_lookup_failed",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
+
+  // A durable atomic claim prevents concurrent inserts and prevents a retry after an ambiguous POST.
+  if (contract?.app_payload?.renthub_payment_attempted_at) {
+    return { pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
+      reason: "previous_payment_attempt_requires_verification",
+      error: "Existe un intento previo sin confirmar. Revisar el pago antes de permitir otra inserción." };
+  }
+  const attemptedAt = new Date().toISOString();
+  const claimedPayload = { ...(contract.app_payload || {}), renthub_payment_attempted_at: attemptedAt };
+  const paymentService = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: claimed, error: claimError } = await paymentService.from("contracts")
+    .update({ app_payload: claimedPayload }).eq("id", contract.id)
+    .is("app_payload->renthub_payment_attempted_at", null).select("id").maybeSingle();
+  if (claimError || !claimed) {
+    return { pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
+      reason: "payment_attempt_not_claimed", error: "No se pudo reservar un intento único de pago." };
+  }
+  contract.app_payload = claimedPayload;
 
   const form = new FormData();
   form.set("method", method);
@@ -302,9 +362,11 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   form.set("refers_to_id", String(bookingId));
   form.set("date", date);
   form.set("payment_date", date);
-  form.set("inserted_from", "direct");
+  form.set("inserted_from", "object");
+  form.set("prepaid", "0");
   form.set("note", `Larios Rental contrato ${contract?.contract_number || ""}`);
 
+  let createdPaymentId = 0;
   try {
     const created = await userApiFetch("/module/payment/api/v1/payment/upsert", {
       method: "POST",
@@ -317,6 +379,10 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
     if (!paymentId) {
       throw new Error("Renthub aceptó la petición de pago, pero no devolvió ni permitió localizar un ID de pago.");
     }
+
+    createdPaymentId = paymentId;
+    const receipt = await userApiFetch(`/module/payment/api/v1/payment/${paymentId}?payment_expand=all`);
+    assertAccountingPaymentReceipt(receipt, paymentId, bookingId, method, paymentAmount);
 
     console.log(JSON.stringify({
       event: "renthub_user_payment_created",
@@ -355,6 +421,7 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
       verified: false,
       pending: true,
       reason: "user_api_payment_failed",
+      payment_id: createdPaymentId || null,
       error: message,
     };
   }
@@ -381,8 +448,8 @@ function paymentSyncPayload(base: any, payment: any) {
       renthub_payment_amount: payment.amount,
       renthub_payment_invoice_requested: payment.invoice_requested,
       renthub_payment_invoice_id: payment.invoice_id,
-      renthub_payment_pending: false,
-      renthub_payment_error: null,
+      renthub_payment_pending: !!payment.pending,
+      renthub_payment_error: payment.pending ? (payment.error || payment.reason) : null,
     };
   }
   if (payment?.pending) {
@@ -1261,7 +1328,8 @@ async function handler(req: Request) {
   // Partner API payment fields remain disabled. Accounting payment is handled separately
   // through User API /module/payment/api/v1/payment/upsert so this block can be reverted independently.
   const RENTHUB_PARTNER_PAYMENT_FIELDS_ENABLED = false;
-  const RENTHUB_USER_PAYMENT_SYNC_ENABLED = true;
+  const RENTHUB_USER_PAYMENT_SYNC_ENABLED = Number(contract.contract_number) === 63290 &&
+    String(contract.renthub_contract_id || "") === "FBFOD-LHWY0";
   const paymentMethod = RENTHUB_USER_PAYMENT_SYNC_ENABLED
     ? partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method)
     : "";
