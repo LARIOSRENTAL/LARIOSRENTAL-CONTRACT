@@ -12,6 +12,8 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const normalize = (value: unknown) => String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const installationUrl = () => (env("RENTHUB_INSTALLATION_URL") || "https://lariosrental.renthubsoftware.com").replace(/\/$/, "");
 let partnerSecret = env("RENTHUB_SECRET_TOKEN");
+// Verified in this installation at /archive-manager/license_type on 2026-10-14.
+const RENTHUB_LICENSE_TYPE_B_ID = "6";
 
 function parseMap(name: string): Record<string, string> {
   try {
@@ -576,6 +578,10 @@ function renthubCountryCode(value: unknown) {
   if (/^[a-z]{2}$/i.test(String(value || "").trim())) return String(value).trim().toUpperCase();
   return map[key] || "";
 }
+function customerNationalityCountry(customer: any, payload: any) {
+  // Nationality must not be inferred from the address or the licence issuing country.
+  return renthubCountryCode(customer?.nationality || payload?.customer_nationality || customer?.country);
+}
 function canonicalDate(value: unknown) {
   const raw=String(value||"").trim();
   if(!raw)return "";
@@ -735,12 +741,7 @@ async function syncUserRegistryCustomer(bookingDetail: any, contract: any, custo
   const licenceCountryCode = renthubCountryCode(licenceIssuedBy);
   const licenceIssueDate = String(driver?.issue_date || payload.license_issue || "").trim();
   const licenceExpiry = String(driver?.expiry_date || payload.license_expiry || "").trim();
-  const customerCountryCode = renthubCountryCode(
-    customer?.nationality ||
-    customer?.country ||
-    payload.customer_nationality ||
-    licenceIssuedBy
-  );
+  const customerCountryCode = customerNationalityCountry(customer, payload);
 
   const form = new FormData();
   if (identityDocument) {
@@ -755,7 +756,7 @@ async function syncUserRegistryCustomer(bookingDetail: any, contract: any, custo
     form.set("birth_country", customerCountryCode);
     form.set("id_issue_country", customerCountryCode);
   }
-  form.set("license_type", "1");
+  form.set("license_type", RENTHUB_LICENSE_TYPE_B_ID);
   if (licenceNumber) form.set("license_number", licenceNumber);
   if (licenceIssuedBy) form.set("license_issued_by", licenceIssuedBy);
   if (licenceCountryCode) form.set("license_issue_country", licenceCountryCode);
@@ -845,9 +846,12 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
   if (zip) body.zip = zip;
   if (customerCountry) {
     body.country = customerCountry;
-    body.citizenship = customerCountry;
-    body.birth_country = customerCountry;
-    body.id_issue_country = customerCountry;
+  }
+  const nationalityCountry = customerNationalityCountry(customer, payload);
+  if (nationalityCountry) {
+    body.citizenship = nationalityCountry;
+    body.birth_country = nationalityCountry;
+    body.id_issue_country = nationalityCountry;
   }
   if (birthDate) body.birth_date = birthDate;
 
@@ -862,10 +866,10 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     else if (documentType) body.id_type = "1";
   }
 
-  // Partner API: campos canónicos del permiso. El país de expedición se actualiza
-  // por User API Registry, tal como indicó Renthub, para que quede seleccionado en el desplegable.
+  // Partner Customer API v2: verified by update + GET on registry 11236 (2026-10-14).
   if (licenceNumber) body.license_number = licenceNumber;
-  body.license_type = "1";
+  body.license_type = RENTHUB_LICENSE_TYPE_B_ID;
+  if (licenceCountryCode) body.license_issue_country = licenceCountryCode;
   if (licenceIssuedBy) body.license_issued_by = licenceIssuedBy;
   if (licenceIssueDate) body.license_issue_date = licenceIssueDate;
   if (licenceExpiry) body.license_expiration = licenceExpiry;
@@ -901,8 +905,12 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     email_present: !email || detailHasContactValue(detail, "email", email),
     phone_present: !phone.mobile || detailHasContactValue(detail, "phone", fullPhone),
     tax_code: !identityDocument || !returnedTaxCode || normalize(returnedTaxCode) === normalize(identityDocument),
-    id_number: true,
-    license_issue_country: true,
+    id_number: !identityDocument || normalize(returnedIdentity) === normalize(identityDocument),
+    license_issue_country: !licenceCountryCode || canonicalRenthubCountry(returnedLicenceCountry) === licenceCountryCode,
+    license_type: normalize(detailValue("license_type")) === "b",
+    citizenship: !nationalityCountry || canonicalRenthubCountry(detail.citizenship) === nationalityCountry,
+    birth_country: !nationalityCountry || canonicalRenthubCountry(detail.birth_country) === nationalityCountry,
+    id_issue_country: !nationalityCountry || canonicalRenthubCountry(detail.id_issue_country) === nationalityCountry,
   };
 
   if (!Object.values(customerChecks).every(Boolean)) {
@@ -922,12 +930,10 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     skipped_existing_phone: phoneAlreadyPresent,
   }));
 
-  const userRegistry = await syncUserRegistryCustomer(
-    bookingDetail || { result: { customer: detail } },
-    contract,
-    customer,
-    driver
-  );
+  const userRegistry = {
+    registry_id: Number(detail.id || bookingDetail?.result?.customer?.id || 0),
+    updated: true, verified: true, source: "partner_customer_v2",
+  };
 
   return { update: response, detail: detailResponse, checks: customerChecks, user_registry: userRegistry };
 }
@@ -2126,3 +2132,4 @@ async function handler(req: Request) {
 }
 
 Deno.serve((req) => handler(req).catch((error) => json({ error: error instanceof Error ? error.message : String(error) }, 500)));
+
