@@ -18,6 +18,8 @@ const fields = {
   vehicle_group: { value: 'A', style: {} },
   full_insurance: { checked: true, style: {} },
   young_driver: { checked: false, style: {} },
+  fuel_out: { value: '4/8', dataset: { userSelected: '1' }, style: {} },
+  cash_without_card: { checked: true },
 };
 
 global.window = global;
@@ -26,7 +28,11 @@ global.LariosReservations = { edit() {}, save() {}, close() {} };
 global.document = {
   getElementById: id => fields[id] || null,
   querySelectorAll: () => [],
+  addEventListener() {},
 };
+global.PDFLib = {};
+global.location = { href: 'https://example.invalid/' };
+global.fetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) });
 global.Event = function Event() {};
 global.alert = () => { throw new Error('No debía mostrarse una alerta'); };
 global.setTimeout = fn => { fn(); return 1; };
@@ -45,10 +51,10 @@ assert.equal(snapshot.days, 2);
 assert.equal(snapshot.paymentMethod, 'Efectivo');
 
 const source = fs.readFileSync(require.resolve('../app-v84/www/pdf-authority-v3.js'), 'utf8');
-assert.match(source, /buildPdf\(draft,snapshot\)/);
-assert.match(source, /payload\('confirmed',snapshot\)/);
+assert.match(source, /buildPdf\(draft,snapshot,signature\)/);
+assert.match(source, /rpc\(\{\.\.\.savedPayload,id:draft.id\|\|id,status:'confirmed'\}\)/);
 assert.match(source, /La liquidación está a 0/);
-assert.match(source, /Falta el teléfono del cliente/);
+assert.match(source, /Revisa el teléfono/);
 assert.match(source, /Selecciona la forma de pago/);
 
 console.log('contract generation v3: stable id, required fields and frozen totals ok');

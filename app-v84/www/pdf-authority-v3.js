@@ -20,6 +20,18 @@ function validateTypedDates(){
  return true
 }
 function markRequired(id){const el=$(id);if(el){el.focus();el.style.borderColor='#dc2626'}return el}
+function captureSignature(){
+ const canvas=$('signatureCanvas');
+ if(!canvas||!canvas.width||!canvas.height)return null;
+ const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+ let ink=0;
+ // Inspect pixels, not a cached "signed" flag: clearing or accepting an empty
+ // fullscreen signature must not leave the contract eligible for generation.
+ for(let i=0;i<pixels.length;i+=4){
+  if(pixels[i+3]>16&&pixels[i]+pixels[i+1]+pixels[i+2]<720&&++ink>=8)return canvas.toDataURL('image/png');
+ }
+ return null;
+}
 function cardValue(){const saved=window.LariosSafeCardPersistence?.read?.(currentContractId());return saved?.card||val('card_number')}
 function cardExpiryValue(){const saved=window.LariosSafeCardPersistence?.read?.(currentContractId());return saved?.expiry||val('card_expiry')}
 function phoneIsValid(raw){const s=String(raw||'').trim(),digits=s.replace(/\D/g,'');if(!s)return false;if(/^00\d+/.test(s)||/^\+\d+/.test(s))return digits.length>=8&&digits.length<=15;return digits.length===9}
@@ -52,10 +64,10 @@ function responseError(text,fallback){try{const d=JSON.parse(text);return d.mess
 async function rpc(p){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_save_contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_payload:p})});if(!r.ok)throw new Error(responseError(await r.text(),'No se pudo guardar el contrato'));return r.json()}
 let pdfLibPromise=null,templateBytesPromise=null;
 function loadPdfLib(){if(window.PDFLib)return Promise.resolve();if(pdfLibPromise)return pdfLibPromise;pdfLibPromise=new Promise((ok,no)=>{const existing=[...document.scripts].find(s=>/vendor\/pdf-lib\.min\.js/.test(s.src||''));if(existing){existing.addEventListener('load',ok,{once:true});existing.addEventListener('error',()=>no(new Error('No se pudo cargar PDF-lib')),{once:true});return}const s=document.createElement('script');s.src='vendor/pdf-lib.min.js';s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar PDF-lib'));document.head.appendChild(s)});return pdfLibPromise}
-function loadTemplateBytes(){if(templateBytesPromise)return templateBytesPromise;templateBytesPromise=fetch(new URL('assets/contrato-larios-normalizado.pdf',location.href).href,{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('No se pudo cargar la plantilla oficial');return r.arrayBuffer()}).catch(e=>{templateBytesPromise=null;throw e});return templateBytesPromise}
+function loadTemplateBytes(){if(templateBytesPromise)return templateBytesPromise;templateBytesPromise=fetch(new URL('assets/contrato-larios-optimizado.pdf',location.href).href,{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('No se pudo cargar la plantilla oficial');return r.arrayBuffer()}).catch(e=>{templateBytesPromise=null;throw e});return templateBytesPromise}
 function fit(page,font,x,y,w,size,text,center=true){if(text===undefined||text===null||String(text)==='')return;let t=String(text),s=size;while(font.widthOfTextAtSize(t,s)>w&&s>5)s-=.25;const tw=font.widthOfTextAtSize(t,s);page.drawText(t,{x:center?x+(w-tw)/2:x,y,size:s,font,color:PDFLib.rgb(.03,.03,.03)})}
 function rows(items){const all=items||selectedExtras(),driver=all.find(x=>x.key==='additional_driver'),others=all.filter(x=>x.key!=='additional_driver'),out=[];if(driver)out.push(driver);if(others.length===1)out.push(others[0]);else if(others.length>1)out.push({label:others.map(x=>x.label).join(' + '),qty:'',unit:'',total:others.reduce((s,x)=>s+x.total,0)});if(!driver){out.length=0;if(all.length===1)out.push(all[0]);else if(all.length>1){out.push(all[0]);const rest=all.slice(1);if(rest.length===1)out.push(rest[0]);else if(rest.length>1)out.push({label:rest.map(x=>x.label).join(' + '),qty:'',unit:'',total:rest.reduce((s,x)=>s+x.total,0)})}}return out.slice(0,2)}
-async function buildPdf(record,snapshot){await loadPdfLib();const template=await loadTemplateBytes();const doc=await PDFLib.PDFDocument.load(template.slice(0)),p=doc.getPage(0),font=await doc.embedFont(PDFLib.StandardFonts.Helvetica),bold=await doc.embedFont(PDFLib.StandardFonts.HelveticaBold),f=snapshot||captureFinancialSnapshot();
+async function buildPdf(record,snapshot,signature){await loadPdfLib();const template=await loadTemplateBytes();const doc=await PDFLib.PDFDocument.load(template.slice(0)),p=doc.getPage(0),font=await doc.embedFont(PDFLib.StandardFonts.Helvetica),bold=await doc.embedFont(PDFLib.StandardFonts.HelveticaBold),f=snapshot||captureFinancialSnapshot();
 fit(p,font,72,708,195,7.2,cardValue(),false);fit(p,font,286,703,34,7.2,cardExpiryValue(),true);
 fit(p,font,72,680,280,8,val('customer_name'),false);fit(p,font,92,660,92,7.4,val('driving_license'),false);fit(p,font,252,660,58,7.4,disp(val('license_issue')),true);fit(p,font,92,638,92,7.4,val('license_issued_by'),false);fit(p,font,252,638,58,7.4,disp(val('license_expiry')),true);fit(p,font,92,616,92,7.4,val('customer_nationality'),false);fit(p,font,252,616,58,7.4,disp(val('customer_birth_date')),true);fit(p,font,92,596,92,7.4,val('customer_document'),false);fit(p,font,74,562,218,7,val('customer_address'),false);fit(p,font,94,544,90,7,val('customer_phone'),false);fit(p,font,74,522,158,7,val('customer_email'),false);
 fit(p,font,96,483,112,7.0,val('additional_name'),true);fit(p,font,252,483,64,7.0,disp(val('additional_birth_date')),true);fit(p,font,96,460,112,7.0,val('additional_driving_license'),true);fit(p,font,252,460,64,7.0,disp(val('additional_license_issue')),true);fit(p,font,96,437,112,7.0,val('additional_license_issued_by'),true);fit(p,font,252,437,64,7.0,disp(val('additional_license_expiry')),true);
@@ -69,13 +81,49 @@ fit(p,bold,504,306,42,6.6,money(f.total),true);fit(p,bold,504,252,42,6.6,money(f
 fit(p,font,350,204,68,6.8,f.paymentMethod,true);fit(p,font,382,190,68,7.5,money(f.deposit),true);fit(p,font,498,190,48,7.5,money(f.franchise),true);
 p.drawRectangle({x:476,y:698,width:80,height:20,color:PDFLib.rgb(1,1,1)});fit(p,bold,479,704,76,9.2,contractNo(record),true);
 const fuelKind=String(val('fuel_type')||'').trim().toUpperCase();if(fuelKind.includes('GASOL'))p.drawText('X',{x:323,y:667,size:12,font:bold});if(fuelKind.includes('DIESEL'))p.drawText('X',{x:482,y:667,size:12,font:bold});
-const sig=$('signatureCanvas');if(sig){try{const img=await doc.embedPng(sig.toDataURL('image/png'));p.drawImage(img,{x:462,y:41,width:84,height:51})}catch(_){}}
+if(!signature)throw new Error('Falta la firma del arrendatario.');
+try{const img=await doc.embedPng(signature);p.drawImage(img,{x:462,y:41,width:84,height:51})}catch(_){throw new Error('No se pudo incluir la firma en el PDF. Vuelve a firmar e inténtalo de nuevo.')}
 const bytes=await doc.save();return{blob:new Blob([bytes],{type:'application/pdf'}),name:contractNo(record)+'.pdf'}
 }
-async function store(record,blob){const path=record.id+'/'+contractNo(record)+'.pdf';const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/contracts/'+path,{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/pdf','x-upsert':'true'},body:blob});if(!r.ok)throw new Error('No se pudo guardar el PDF');await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(record.id),{method:'PATCH',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({pdf_path:path})});return path}
+async function store(record,blob){const path=record.id+'/'+contractNo(record)+'.pdf';const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/contracts/'+path,{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/pdf','x-upsert':'true'},body:blob});if(!r.ok)throw new Error('No se pudo guardar el PDF');const linked=await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(record.id),{method:'PATCH',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({pdf_path:path})});if(!linked.ok)throw new Error('PDF guardado pero no enlazado al contrato');return path}
 function download(blob,name){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000)}
-async function mail(record){if(!val('customer_email'))return;try{const body=JSON.stringify({contract_id:record.id});const r=await fetch(cfg.supabaseUrl+'/functions/v1/send-contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||`Error correo ${r.status}`)}catch(e){if(/Load failed|Failed to fetch|Network request failed|network connection was lost/i.test(String(e?.message||e))){console.warn('Safari no pudo leer la confirmación del envío; no se reintenta para evitar duplicados');return}throw e}}
-async function finalize(){const id=currentContractId();if(!id)return alert('No se ha podido identificar la reserva abierta. Vuelve a la agenda y ábrela de nuevo.');setContractId(id);if(!validateTypedDates()||!prepareRequiredFields())return;const snapshot=captureFinancialSnapshot();if(!snapshot.rent&&!snapshot.insurance&&!snapshot.young&&!snapshot.extras&&!snapshot.park)return alert('La liquidación está a 0. Revisa el grupo, la tarifa y los importes antes de generar el contrato.');if(window.LariosBusinessRules?.validateBeforeGenerate&&!window.LariosBusinessRules.validateBeforeGenerate())return;restoreFinancialSnapshot(snapshot);const b=[...document.querySelectorAll('button')].find(x=>/Generar contrato/i.test(x.textContent||'')),old=b?.textContent;if(b){b.disabled=true;b.textContent='Generando contrato…'}try{const draft=await rpc(payload('draft',snapshot));setContractId(draft.id||id);const pdf=await buildPdf(draft,snapshot);await store(draft,pdf.blob);await rpc(payload('confirmed',snapshot));window.LariosSafeCardPersistence?.clear?.(draft.id||id);let err='';try{await mail(draft)}catch(e){err=e.message}try{window.LariosReservations?.close?.()}catch(_){}setTimeout(()=>{try{typeof changeAgendaDate==='function'&&changeAgendaDate()}catch(_){}},120);download(pdf.blob,pdf.name);setTimeout(()=>alert(err?'Contrato generado y guardado correctamente. El correo queda pendiente: '+err:'Contrato generado, guardado y enviado correctamente.'),300)}catch(e){alert('No se pudo generar el contrato: '+(e?.message||String(e)))}finally{if(b){b.disabled=false;b.textContent=old}}}
+async function mail(record){const body=JSON.stringify({contract_id:record.id});const r=await fetch(cfg.supabaseUrl+'/functions/v1/send-contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body,keepalive:true});const data=await r.json();if(!r.ok||data.ok===false)throw new Error(data.error||`Error correo ${r.status}`);if(data.sent!==true&&data.ok!==true)throw new Error('El servicio de correo no confirmó el envío')}
+function progressNotice(message,error=false){const box=document.createElement('div');box.setAttribute('role',error?'alert':'status');box.style.cssText='position:fixed;bottom:calc(18px + env(safe-area-inset-bottom));left:16px;right:16px;z-index:100000;padding:14px 38px 14px 16px;border-radius:10px;background:'+(error?'#991b1b':'#12665f')+';color:white;box-shadow:0 3px 16px #0003;font:14px system-ui;';box.textContent=message;const close=document.createElement('button');close.type='button';close.textContent='×';close.setAttribute('aria-label','Cerrar aviso');close.style.cssText='position:absolute;right:8px;top:6px;background:none;border:0;color:white;font-size:24px;';close.onclick=()=>box.remove();box.appendChild(close);document.body.appendChild(box);if(!error)setTimeout(()=>box.remove(),8000);return box}
+let generating=false;
+async function finalize(){
+ if(generating)return;
+ const id=currentContractId();if(!id)return alert('No se ha podido identificar la reserva abierta. Vuelve a la agenda y ábrela de nuevo.');
+ setContractId(id);if(!validateTypedDates()||!prepareRequiredFields())return;
+ const snapshot=captureFinancialSnapshot();if(!snapshot.rent&&!snapshot.insurance&&!snapshot.young&&!snapshot.extras&&!snapshot.park)return alert('La liquidación está a 0. Revisa el grupo, la tarifa y los importes antes de generar el contrato.');
+ if(window.LariosBusinessRules?.validateBeforeGenerate&&!window.LariosBusinessRules.validateBeforeGenerate())return;
+ let signature;try{signature=captureSignature()}catch(_){return alert('No se pudo comprobar la firma. Vuelve a firmar antes de generar el contrato.')}
+ if(!signature){const canvas=$('signatureCanvas');canvas?.scrollIntoView?.({block:'center',behavior:'smooth'});if(canvas)canvas.style.border='2px solid #dc2626';return alert('Falta la firma del arrendatario. Firma y pulsa Aceptar firma antes de generar el contrato.')}
+ if($('signatureCanvas'))$('signatureCanvas').style.border='';
+ restoreFinancialSnapshot(snapshot);
+ const savedPayload=payload('draft',snapshot),hasEmail=!!savedPayload.customer_email;
+ const b=[...document.querySelectorAll('button')].find(x=>/Generar contrato/i.test(x.textContent||'')),old=b?.textContent;
+ generating=true;if(b){b.disabled=true;b.textContent='Guardando datos…'}
+ const timing={},started=performance.now();let phase=started;
+ const measured=name=>{const now=performance.now();timing[name]=Math.round(now-phase);phase=now};
+ try{
+  const draft=await rpc(savedPayload);setContractId(draft.id||id);measured('saveDataMs');
+  if(b)b.textContent='Creando PDF…';const pdf=await buildPdf(draft,snapshot,signature);measured('buildPdfMs');
+  if(b)b.textContent='Guardando PDF…';await store(draft,pdf.blob);measured('uploadAndLinkMs');
+  await rpc({...savedPayload,id:draft.id||id,status:'confirmed'});measured('confirmMs');
+  window.LariosSafeCardPersistence?.clear?.(draft.id||id);
+  timing.totalMs=Math.round(performance.now()-started);timing.pdfBytes=pdf.blob.size;
+  if(window.LariosPdfAuthorityV3)window.LariosPdfAuthorityV3.lastTimings=timing;
+  download(pdf.blob,pdf.name);
+  try{window.LariosReservations?.close?.()}catch(_){}
+  setTimeout(()=>{try{typeof changeAgendaDate==='function'&&changeAgendaDate()}catch(_){}},120);
+  const label=contractNo(draft);
+  const notice=progressNotice(label+': contrato generado y guardado.'+(hasEmail?' Enviando correo en segundo plano…':' Sin email del cliente.'));
+  // The PDF and confirmed record are durable before releasing the form. Never
+  // retry an ambiguous mail response automatically: it could send duplicates.
+  if(hasEmail)void mail(draft).then(()=>{notice.remove();progressNotice(label+': correo enviado.')} ).catch(e=>{notice.remove();progressNotice(label+': contrato guardado. Correo sin confirmar; revisa el envío antes de reintentarlo. '+(e?.message||String(e)),true)});
+ }catch(e){alert('No se pudo generar el contrato: '+(e?.message||String(e)))}
+ finally{generating=false;if(b){b.disabled=false;b.textContent=old}}
+}
 function install(){if(!window.LariosReservations)return;loadPdfLib().catch(()=>{});loadTemplateBytes().catch(()=>{});setContractId(window.LariosCurrentContractId||editingId);const currentSave=LariosReservations.save,desc=Object.getOwnPropertyDescriptor(LariosReservations,'save');let authoritativeSave=currentSave;if(!(desc&&desc.writable===false&&!desc.set)){const oldSave=currentSave.bind(LariosReservations);authoritativeSave=function(status){if(status==='confirmed')return finalize();return oldSave(status)};authoritativeSave.__lrPdfAuthority=true;LariosReservations.save=authoritativeSave}else if(currentSave?.__lrPdfAuthority!==true){console.warn('PDF authority: save está bloqueado por stability lock; se conserva el manejador existente.')}document.addEventListener('larios:reservation-opened',e=>setContractId(e.detail?.id||''));window.LariosStripeBridge={saveDraft:()=>rpc(payload('draft')),currentPayload:()=>payload('draft'),payload:()=>payload('draft'),contractId:()=>currentContractId()};window.LariosPdfAuthorityV3={finalize,currentContractId,captureFinancialSnapshot,prepareRequiredFields,saveHandler:authoritativeSave};console.log('PDF authority v3 installed')}
 setTimeout(install,350);
 })();
