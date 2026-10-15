@@ -39,7 +39,29 @@ function decorate(){for(const card of document.querySelectorAll('.agendaCol .age
 let timer=null;const schedule=()=>{if(!timer)timer=setTimeout(()=>{timer=null;decorate()},0)};
 window.addEventListener('larios:agenda-controls-ready',refreshAll);document.addEventListener('change',e=>{if(['deposit_cash_selected','preauth_selected'].includes(e.target?.id)){dirty=true;syncForm()}if(['vehicle_group','vehicle_quantity'].includes(e.target?.id))syncForm()});new MutationObserver(rs=>{if(rs.some(r=>[...r.addedNodes].some(n=>n.nodeType===1&&(n.matches?.('.agendaCol,.lrCpRow')||n.querySelector?.('.agendaCol,.lrCpRow')))))schedule()}).observe(document.body,{childList:true,subtree:true});
 function serialize(p){if(!hydrated)throw Error('Espera a que cargue la garantia antes de guardar.');if(!dirty&&legacy.get(id)&&!$('deposit_cash_selected')?.checked&&!$('preauth_selected')?.checked){for(const k of ['deposit_method','deposit_cash','preauthorization','guarantee_flow_version'])delete p[k];p.deposit=Number(legacy.get(id)).toFixed(2);return}p.guarantee_flow_version=1;}
-async function completeReturn(target){try{const data=await update(target);if(data.holds.some(active)){await open(target);message('Anula o liquida la preautorizacion antes de confirmar la devolucion.');return}if(!data.holds.length)throw Error('No se encuentra la preautorizacion. Revisa la garantia antes de confirmar.');if(confirm('La preautorizacion ya esta finalizada. Confirmar la devolucion del vehiculo?'))await window.LariosLifecycle.confirmDeposit(target)}catch(e){alert(e.message)}}
+const returning=new Set();
+async function completeReturn(target){
+ if(!target||returning.has(target))return;
+ returning.add(target);
+ try{
+  const data=await update(target);
+  if(!Array.isArray(data.holds))throw Error('No se pudo comprobar la garantía. Vuelve a consultar su estado.');
+  if(data.holds.some(active)){await open(target);message('Anula o liquida la preautorizacion antes de confirmar la devolucion.');return}
+  let question='La preautorizacion ya esta finalizada. Confirmar la devolucion del vehiculo?';
+  if(!data.holds.length){
+   const record=await request(cfg.supabaseUrl+'/rest/v1/rpc/app_contract_record',{method:'POST',body:JSON.stringify({p_contract_id:target})});
+   const p=record?.app_payload||record||{};
+   const method=record?.deposit_method??p.deposit_method;
+   const flow=record?.guarantee_flow_version??p.guarantee_flow_version;
+   const amount=Number(record?.deposit??p.deposit);
+   const providerReference=['preauthorization_id','preauthorization_hold_id','preauthorization_payment_intent_id','guarantee_hold_id','guarantee_payment_intent_id','guarantee_session_id'].some(k=>record?.[k]||p[k]);
+   const legacy=record?.id===target&&['confirmed','active','signed'].includes(record.status)&&method==='preauthorization'&&(flow==null||flow==='')&&amount>0&&!providerReference;
+   if(!legacy)throw Error('No se encuentra la preautorizacion. Revisa la garantia antes de confirmar.');
+   question='Garantía antigua de '+money(amount*100)+' EUR, sin retención registrada en este módulo.\n\nComprueba la garantía en el banco o sistema donde se hizo. ¿Confirmas que ya has gestionado su devolución o liquidación y que el vehículo está recogido?\n\nEsta acción solo registra la recogida; no anula ni cobra ninguna preautorización.';
+  }
+  if(confirm(question))await window.LariosLifecycle.confirmDeposit(target);
+ }catch(e){alert(e.message)}finally{returning.delete(target)}
+}
 window.LariosGuarantees={syncForm,open,refreshAll,serialize,completeReturn,version:'real-guarantees1-20260913'};const section=$('reservation');if(section)new MutationObserver(()=>{if(!section.classList.contains('hidden'))syncForm()}).observe(section,{attributes:true,attributeFilter:['class']});
 const q=new URLSearchParams(location.search);if(q.has('hold_return')){const target=q.get('contract_id');q.delete('hold_return');q.delete('hold_canceled');q.delete('contract_id');history.replaceState({},'',location.pathname+(q.size?'?'+q:'')+location.hash);if(target){sessionStorage.setItem('lr_resume_contract',target);setTimeout(()=>window.LariosWorkflow?.resumeContract?.(target),500);window.addEventListener('larios:agenda-controls-ready',()=>open(target),{once:true})}}
 style();syncForm();
