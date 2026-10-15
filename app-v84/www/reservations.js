@@ -171,6 +171,21 @@ function fill(x){
   ensureFuelLevelControl(x);
 }
 function emitReservationOpened(x){try{document.dispatchEvent(new CustomEvent('larios:reservation-opened',{detail:{id:x.id,record:x}}))}catch(e){console.warn('Reservation opened event',e)}}
+function openEditorAtTop(id){
+ const reset=()=>{
+  if(window.LariosCurrentContractId!==id)return;
+  const section=$('reservation');if(!section||section.classList.contains('hidden'))return;
+  // The agenda and editor share the page scroll position. Reset the editor and
+  // its scrollable ancestors, including iOS's document scrolling element.
+  for(let el=section;el;el=el.parentElement){el.scrollTop=0;el.scrollLeft=0}
+  if(document.scrollingElement)document.scrollingElement.scrollTop=0;
+  window.scrollTo({top:0,left:0,behavior:'instant'});
+ };
+ reset();
+ // Hydration can rebuild sections in the next frame. This runs only on Edit,
+ // never on tablet refreshes, validations or while filling in the contract.
+ if(window.requestAnimationFrame)window.requestAnimationFrame(()=>window.requestAnimationFrame(reset));
+}
 document.addEventListener('larios:client-tablet-completed',async function(){
   const id=window.LariosCurrentContractId||editId;
   if(!id)return;
@@ -188,7 +203,7 @@ async function edit(id){
   if(editFlight&&editFlightId===id)return editFlight;
   const seq=++editOpenSeq;editFlightId=id;setEditingId(id);
   const cached=cache.find(v=>v.id===id)||null;
-  if(cached)fill(cached);
+  if(cached){fill(cached);openEditorAtTop(id)}
   editFlight=(async()=>{
     let record=null;
     try{record=await rpc('app_contract_record',{p_contract_id:id})}catch(e){console.warn('No se pudo refrescar la reserva',e)}
@@ -200,7 +215,7 @@ async function edit(id){
       alert('Este contrato ya está generado. Solo los administradores pueden editarlo.');
       return;
     }
-    upsertCache(chosen);fill(chosen);emitReservationOpened(chosen);
+    upsertCache(chosen);fill(chosen);emitReservationOpened(chosen);openEditorAtTop(id);
   })().finally(()=>{if(seq===editOpenSeq){editFlight=null;editFlightId=''}});
   return editFlight;
 }

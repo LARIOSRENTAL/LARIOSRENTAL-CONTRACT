@@ -23,7 +23,18 @@ return {open,close,choose,selected,upload,apply,recognize};
 
 window.LariosContractUX=(function(){
 const $=id=>document.getElementById(id);let pricing=[],currentId=null,wrapped=false,damageCanvas=null,signCanvas=null;
-function val(id){return ($(''+id)?.value||'').trim()}function num(id){return Number($(''+id)?.value||0)||0}function chk(id){return !!$(''+id)?.checked}function set(id,v){if($(id))$(id).value=v??''}function money(v){return Number(v||0).toFixed(2)}
+function val(id){return ($(''+id)?.value||'').trim()}function num(id){return Number($(''+id)?.value||0)||0}function chk(id){return !!$(''+id)?.checked}
+function set(id,v){
+ const el=$(id);if(!el)return;
+ if(id==='vehicle_group'&&el.tagName==='SELECT'){
+  const normalize=value=>{const code=String(value??'').trim().toUpperCase().replace(/^GRUPO\s+/,'').replace(/\s+/g,'');return({M1:'50CC',M2:'125CC',B1:'BICICLETA',B2:'E-BIKE','50':'50CC','125':'125CC'})[code]||code};
+  const code=normalize(v),option=[...el.options].find(o=>normalize(o.value)===code);
+  // SELECT values are case-sensitive: the saved 125CC must select the actual
+  // 125cc option before pricing runs, rather than clearing the selection.
+  el.value=option?option.value:(v??'');
+ }else el.value=v??'';
+}
+function money(v){return Number(v||0).toFixed(2)}
 function fuelButtons(id,selected){return `<select id="${id}">${Array.from({length:9},(_,i)=>`<option value="${i}/8" ${i===selected?'selected':''}>${i}/8</option>`).join('')}</select>`}
 function categories(){return ['','A','B','C','D','F','G','H','I','J','K','L','Q','50cc','125cc','BICICLETA','E-BIKE'].map(v=>`<option value="${v}">${v?(['50cc','125cc','BICICLETA','E-BIKE'].includes(v)?v:'Grupo '+v):'Seleccionar grupo'}</option>`).join('')}
 function formHtml(){return `<div class="contractStep"><h3><span>01</span> Reserva</h3><div class="formGrid"><label>Grupo<select id="vehicle_group">${categories()}</select></label><label>Cantidad<input id="vehicle_quantity" type="number" min="1" value="1"></label><label>Recogida<input id="pickup_date" type="date"></label><label>Hora<input id="pickup_time" type="time"></label><label>Días<input id="rental_days" type="number" min="1" value="1"></label><label>Lugar de entrega<input id="pickup_location" placeholder="Hotel, oficina, aeropuerto…"></label><label>Habitación / referencia<input id="reservation_detail" placeholder="Hab. 308 / teléfono / referencia"></label><label>Colaborador / agencia<input id="agency" placeholder="Agencia o colaborador"></label><label>Devolución<input id="return_date" type="date"></label><label>Hora devolución<input id="return_time" type="time"></label><label>Lugar devolución<input id="return_location"></label></div></div>
@@ -59,7 +70,7 @@ function extrasDescription(){const out=[];[['child_seat','Sillita'],['gps','GPS'
 async function uploadPdf(record,blob){const name=record.id+'/'+String(record.contract_number||'contrato').replace(/[^A-Za-z0-9_-]/g,'')+'.pdf';const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/contracts/'+name,{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/pdf','x-upsert':'true'},body:blob});if(!r.ok)throw Error('No se pudo guardar el PDF: '+await r.text());const p=await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(record.id),{method:'PATCH',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({pdf_path:name})});if(!p.ok)throw Error('PDF guardado pero no enlazado al contrato');return name}
 async function sendEmail(record){if(!val('customer_email'))return 'El cliente no tiene email; no se envió correo.';const r=await fetch(cfg.supabaseUrl+'/functions/v1/send-contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({contract_id:record.id})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Error al enviar correo');return 'Correo enviado al cliente.'}
 async function generate(){if(!currentId)return alert('Abre una reserva desde la agenda para generar el contrato.');if(!val('customer_name'))return alert('Falta el nombre del cliente.');try{recalculate();let record=await rpcSave(payload('confirmed'));currentId=record.id;const blob=await pdf(record);await uploadPdf(record,blob);let msg='PDF descargado y almacenado.';try{msg+=' '+await sendEmail(record)}catch(e){msg+=' No se pudo enviar el correo: '+e.message}alert('Contrato generado. '+msg);LariosReservations.close();setTimeout(()=>{if(typeof changeAgendaDate==='function')changeAgendaDate()},100)}catch(e){alert('No se pudo generar el contrato: '+e.message)}}
-function wrap(){if(wrapped||!window.LariosReservations)return;wrapped=true;document.addEventListener('larios:reservation-opened',e=>{const x=e.detail?.record;if(!x)return;currentId=x.id;window.LariosCurrentContractId=x.id;setupForm();hydrate(x)});}
+function wrap(){if(wrapped||!window.LariosReservations)return;wrapped=true;document.addEventListener('larios:reservation-opened',e=>{const x=e.detail?.record;if(!x)return;currentId=x.id;window.LariosCurrentContractId=x.id;setupForm();hydrate({...x,vehicle_group:x.vehicle_group||x.category||x.app_payload?.vehicle_group||''})});}
 function init(){setupForm();loadPricing();wrap()}
 return {init,recalculate,clearDamage,clearSignature};
 })();
