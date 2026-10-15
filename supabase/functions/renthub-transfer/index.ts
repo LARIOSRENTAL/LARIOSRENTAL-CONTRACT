@@ -76,7 +76,8 @@ let userTokenCache = "";
 let userTokenSource = "";
 async function loginUserToken() {
   const email = env("RENTHUB_USER_API_EMAIL");
-  const password = env("RENTHUB_USER_API_PASSWORD");
+  // The user API key is the login credential; X-UserAuthToken requires the exchanged session token.
+  const password = env("RENTHUB_USER_API_KEY") || env("RENTHUB_USER_API_PASSWORD");
   if (!email || !password) {
     throw new Error("Renthub User API login no configurado.");
   }
@@ -96,7 +97,8 @@ async function loginUserToken() {
     response.headers.get("X-UserAuthToken") ||
     response.headers.get("X-Auth-Token") ||
     response.headers.get("Authorization") || "";
-  const token = String(data?.result?.token || data?.token || headerToken).replace(/^Bearer\s+/i, "");
+  const tokenValue = data?.result?.token?.key || data?.result?.token || data?.token?.key || data?.token || headerToken;
+  const token = typeof tokenValue === "string" ? tokenValue.replace(/^Bearer\s+/i, "").trim() : "";
   if (!response.ok || !token) {
     const detail = String(data?.message || data?.error || raw || "sin detalle")
       .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 350);
@@ -109,13 +111,6 @@ async function loginUserToken() {
 
 async function userToken(forceLogin = false) {
   if (!forceLogin && userTokenCache) return userTokenCache;
-
-  const configuredApiKey = env("RENTHUB_USER_API_KEY");
-  if (!forceLogin && configuredApiKey) {
-    userTokenCache = configuredApiKey;
-    userTokenSource = "configured_token";
-    return configuredApiKey;
-  }
 
   return loginUserToken();
 }
@@ -131,20 +126,11 @@ async function userApiFetch(path: string, init: RequestInit = {}, retry = true):
     },
   });
 
-  // Si el token configurado ha caducado/no es válido, probar una sola vez el login documentado.
-  if ([401, 403, 422].includes(response.status) && retry && userTokenSource === "configured_token") {
+  // A rejected session token can be refreshed once; never send the API key directly.
+  if (response.status === 401 && retry) {
     userTokenCache = "";
-    userTokenSource = "";
-    try {
-      await userToken(true);
-      return userApiFetch(path, init, false);
-    } catch (loginError) {
-      const raw = await response.text().catch(() => "");
-      const original = String(raw || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 250);
-      throw new Error(
-        `Renthub User API rechazó el token configurado (${response.status}) y el login alternativo también falló: ${loginError instanceof Error ? loginError.message : String(loginError)}${original ? ` | Respuesta token: ${original}` : ""}`
-      );
-    }
+    await userToken(true);
+    return userApiFetch(path, init, false);
   }
 
   const raw = await response.text();
