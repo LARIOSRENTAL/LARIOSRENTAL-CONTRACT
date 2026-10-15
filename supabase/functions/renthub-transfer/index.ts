@@ -215,7 +215,7 @@ function paymentLookupId(data: any, bookingId: number, method: string, paymentAm
   const rows = userApiRows(data);
   if (rows.some((row: any) =>
     Math.round(amount(row?.amount ?? row?.rp_importo) * 100) === Math.round(paymentAmount * 100) &&
-    String(row?.method ?? row?.rp_method ?? "") === method &&
+    String(row?.method?.key ?? row?.method ?? row?.rp_method ?? "") === method &&
     (!Number(row?.refers_to?.id ?? row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0) ||
       !String(row?.refers_to?.model ?? row?.refers_to_model ?? row?.reference_model ?? "")))) {
     throw new Error("Hay un pago del mismo importe sin una referencia inequívoca; no se insertará otro.");
@@ -223,7 +223,7 @@ function paymentLookupId(data: any, bookingId: number, method: string, paymentAm
   const matches = rows.filter((row: any) =>
     String(row?.refers_to?.model ?? row?.refers_to_model ?? row?.reference_model ?? "") === "rental_reservation" &&
     Number(row?.refers_to?.id ?? row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0) === bookingId &&
-    String(row?.method ?? row?.rp_method ?? "") === method &&
+    String(row?.method?.key ?? row?.method ?? row?.rp_method ?? "") === method &&
     Math.round(amount(row?.amount ?? row?.rp_importo) * 100) === Math.round(paymentAmount * 100)
   );
   if (matches.length > 1) throw new Error("Hay varios pagos equivalentes vinculados a esta reserva; no se insertará otro.");
@@ -246,7 +246,7 @@ function assertAccountingPaymentReceipt(data: any, paymentId: number, bookingId:
   const prepaid = row?.prepaid;
   const verified = Number(row?.id) === paymentId &&
     String(row?.refers_to?.model || row?.refers_to_model || "") === "rental_reservation" && Number(row?.refers_to?.id ?? row?.refers_to_id) === bookingId &&
-    row?.method === method && row?.direction === "inflow" && row?.type === "final_payment" &&
+    (row?.method?.key ?? row?.method) === method && row?.direction === "inflow" && row?.type === "final_payment" &&
     Math.round(amount(row?.amount) * 100) === Math.round(paymentAmount * 100) &&
     [false, 0, "0"].includes(prepaid) && !!String(row?.payment_date || "").trim();
   if (!verified) throw new Error("El ID existe, pero no se ha verificado un cobro contable pagado, no prepago, de esta reserva.");
