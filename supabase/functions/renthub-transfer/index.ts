@@ -12,6 +12,8 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const normalize = (value: unknown) => String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const installationUrl = () => (env("RENTHUB_INSTALLATION_URL") || "https://lariosrental.renthubsoftware.com").replace(/\/$/, "");
 let partnerSecret = env("RENTHUB_SECRET_TOKEN");
+// Verified in this installation at /archive-manager/license_type on 2026-10-14.
+const RENTHUB_LICENSE_TYPE_B_ID = "6";
 
 function parseMap(name: string): Record<string, string> {
   try {
@@ -71,16 +73,13 @@ async function renthubFetch(path: string, init: RequestInit = {}, retry = true):
 
 
 let userTokenCache = "";
-async function userToken(force = false) {
-  const configuredApiKey = env("RENTHUB_USER_API_KEY");
+let userTokenSource = "";
+async function loginUserToken() {
   const email = env("RENTHUB_USER_API_EMAIL");
-  const password = env("RENTHUB_USER_API_PASSWORD");
-  if (!force && configuredApiKey) return configuredApiKey;
-  if (!force && userTokenCache) return userTokenCache;
-  if (force && (!email || !password) && configuredApiKey) return configuredApiKey;
-
+  // The user API key is the login credential; X-UserAuthToken requires the exchanged session token.
+  const password = env("RENTHUB_USER_API_KEY") || env("RENTHUB_USER_API_PASSWORD");
   if (!email || !password) {
-    throw new Error("Renthub User API no está configurada. Falta RENHUB_USER_API_KEY o las credenciales User API.");
+    throw new Error("Renthub User API login no configurado.");
   }
 
   const form = new FormData();
@@ -94,32 +93,46 @@ async function userToken(force = false) {
   const raw = await response.text();
   let data: any = {};
   try { data = raw ? JSON.parse(raw) : {}; } catch { data = {}; }
-  const headerToken = response.headers.get("X-UserAuthToken") ||
+  const headerToken =
+    response.headers.get("X-UserAuthToken") ||
     response.headers.get("X-Auth-Token") ||
     response.headers.get("Authorization") || "";
-  userTokenCache = String(data?.result?.token || data?.token || headerToken).replace(/^Bearer\s+/i, "");
-  if (!response.ok || !userTokenCache) {
+  const tokenValue = data?.result?.token?.key || data?.result?.token || data?.token?.key || data?.token || headerToken;
+  const token = typeof tokenValue === "string" ? tokenValue.replace(/^Bearer\s+/i, "").trim() : "";
+  if (!response.ok || !token) {
     const detail = String(data?.message || data?.error || raw || "sin detalle")
       .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 350);
     throw new Error(`Renthub User API authentication failed (${response.status}): ${detail}`);
   }
-  return userTokenCache;
+  userTokenCache = token;
+  userTokenSource = "login";
+  return token;
+}
+
+async function userToken(forceLogin = false) {
+  if (!forceLogin && userTokenCache) return userTokenCache;
+
+  return loginUserToken();
 }
 
 async function userApiFetch(path: string, init: RequestInit = {}, retry = true): Promise<any> {
+  const token = await userToken(false);
   const response = await fetch(`${installationUrl()}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
-      "X-UserAuthToken": await userToken(),
+      "X-UserAuthToken": token,
       ...(init.headers || {}),
     },
   });
+
+  // A rejected session token can be refreshed once; never send the API key directly.
   if (response.status === 401 && retry) {
     userTokenCache = "";
     await userToken(true);
     return userApiFetch(path, init, false);
   }
+
   const raw = await response.text();
   let data: any = {};
   try { data = raw ? JSON.parse(raw) : {}; } catch { data = raw; }
@@ -198,60 +211,218 @@ function paymentInvoiceId(detail: any) {
   return 0;
 }
 
-async function findCreatedPaymentId(bookingId: number, method: string, paymentAmount: number, date: string) {
-  const query = new URLSearchParams({
-    created_from: `${date} 00:00`,
-    created_to: `${date} 23:59`,
-    method,
-    payment_date_from: date,
-    payment_date_to: date,
-    direction: "inflow",
-    type: "final_payment",
-    payment_status: "all",
-  });
-  const data = await userApiFetch(`/module/payment/api/v1/payment?${query.toString()}`);
-  const matches = userApiRows(data).filter((row: any) => {
-    const rowAmount = amount(row?.amount ?? row?.rp_importo);
-    const rowMethod = String(row?.method ?? row?.rp_method ?? "");
-    const refId = Number(row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0);
-    return Math.abs(rowAmount - paymentAmount) <= 0.02 &&
-      (!rowMethod || rowMethod === method) &&
-      (!refId || refId === bookingId);
-  });
-  matches.sort((a: any, b: any) => Number(b?.id ?? b?.rp_id ?? 0) - Number(a?.id ?? a?.rp_id ?? 0));
-  return Number(matches[0]?.id ?? matches[0]?.rp_id ?? 0) || 0;
+function paymentLookupId(data: any, bookingId: number, method: string, paymentAmount: number) {
+  const rows = userApiRows(data);
+  if (rows.some((row: any) =>
+    Math.round(amount(row?.amount ?? row?.rp_importo) * 100) === Math.round(paymentAmount * 100) &&
+    String(row?.method?.key ?? row?.method ?? row?.rp_method ?? "") === method &&
+    (!Number(row?.refers_to?.id ?? row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0) ||
+      !String(row?.refers_to?.model ?? row?.refers_to_model ?? row?.reference_model ?? "")))) {
+    throw new Error("Hay un pago del mismo importe sin una referencia inequívoca; no se insertará otro.");
+  }
+  const matches = rows.filter((row: any) =>
+    String(row?.refers_to?.model ?? row?.refers_to_model ?? row?.reference_model ?? "") === "rental_reservation" &&
+    Number(row?.refers_to?.id ?? row?.refers_to_id ?? row?.reference_id ?? row?.rp_pm_id ?? row?.reservation_id ?? 0) === bookingId &&
+    String(row?.method?.key ?? row?.method ?? row?.rp_method ?? "") === method &&
+    Math.round(amount(row?.amount ?? row?.rp_importo) * 100) === Math.round(paymentAmount * 100)
+  );
+  if (matches.length > 1) throw new Error("Hay varios pagos equivalentes vinculados a esta reserva; no se insertará otro.");
+  if (matches.length === 1) {
+    const id = Number(matches[0]?.id ?? matches[0]?.rp_id ?? 0);
+    if (Number.isInteger(id) && id > 0) return id;
+    throw new Error("El pago equivalente no tiene ID verificable; no se insertará otro.");
+  }
+  const total = data?.result?.meta?.total ?? data?.meta?.total ?? data?.result?.total ?? data?.total;
+  const next = data?.result?.next_page_url ?? data?.next_page_url ?? data?.links?.next;
+  if (total === undefined || Number(total) !== rows.length || next) {
+    throw new Error("No se pudo demostrar que la lectura de pagos esté completa; no se insertará el pago.");
+  }
+  return 0;
+}
+
+function assertAccountingPaymentReceipt(data: any, paymentId: number, bookingId: number, method: string, paymentAmount: number) {
+  const root = data?.result ?? data;
+  const row = root?.payment ?? root;
+  const prepaid = row?.prepaid;
+  const verified = Number(row?.id) === paymentId &&
+    String(row?.refers_to?.model || row?.refers_to_model || "") === "rental_reservation" && Number(row?.refers_to?.id ?? row?.refers_to_id) === bookingId &&
+    (row?.method?.key ?? row?.method) === method && row?.direction === "inflow" && row?.type === "final_payment" &&
+    Math.round(amount(row?.amount) * 100) === Math.round(paymentAmount * 100) &&
+    [false, 0, "0"].includes(prepaid) && !!String(row?.payment_date || "").trim();
+  if (!verified) throw new Error("El ID existe, pero no se ha verificado un cobro contable pagado, no prepago, de esta reserva.");
+}
+
+async function findCreatedPaymentId(bookingId: number, method: string, paymentAmount: number, _date: string) {
+  // The reservation contains its own payment collection; do not scan a paginated global ledger.
+  const data = await userApiFetch(`/module/rental/api/v1/reservation/${bookingId}?rental_reservation_expand=payments`);
+  const reservation = data?.result;
+  if (Number(reservation?.id) !== bookingId || !Array.isArray(reservation?.payments)) {
+    throw new Error("No se pudo verificar la colección de pagos de esta reserva.");
+  }
+  if (!reservation.payments.length) {
+    if (reservation.total_paid === undefined || reservation.prepaid_amount === undefined ||
+        amount(reservation.total_paid) !== 0 || amount(reservation.prepaid_amount) !== 0) {
+      throw new Error("La reserva tiene importes cobrados sin pagos verificables; no se insertará otro.");
+    }
+    return 0;
+  }
+  const rows = [];
+  for (const entry of reservation.payments) {
+    const id = Number(typeof entry === "object" ? entry?.id : entry);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Pago asociado sin ID verificable.");
+    const receipt = await userApiFetch(`/module/payment/api/v1/payment/${id}?payment_expand=all`);
+    rows.push(receipt?.result?.payment ?? receipt?.result);
+  }
+  const existingId = paymentLookupId({ result: rows, meta: { total: rows.length } }, bookingId, method, paymentAmount);
+  if (!existingId) {
+    throw new Error("La reserva ya tiene otros pagos asociados. Revisar los cobros antes de insertar otro.");
+  }
+  return existingId;
 }
 
 async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, method: string, paymentAmount: number) {
   if (!method || !Number.isFinite(paymentAmount) || paymentAmount <= 0) {
     return { skipped: true, reason: "payment_not_configured" };
   }
-  const booking = bookingDetail?.result?.booking || {};
-  const bookingId = renthubBookingNumericId(bookingDetail, contract) || null;
-  const remaining = booking?.to_be_paid;
-  const verified = remaining !== undefined && remaining !== null
-    ? Math.abs(amount(remaining)) <= 0.03
-    : false;
 
-  console.log(JSON.stringify({
-    event: "renthub_partner_payment_verify",
-    contract_number: contract?.contract_number,
-    booking_id: bookingId,
-    method,
-    amount: paymentAmount,
-    to_be_paid: remaining ?? null,
-    verified,
-  }));
+  const bookingId = renthubBookingNumericId(bookingDetail, contract) || 0;
+  if (!bookingId) {
+    return { pending: true, reason: "booking_id_not_available", method, amount: paymentAmount };
+  }
 
-  return {
-    partner_api: true,
-    booking_id: bookingId,
-    method,
-    amount: paymentAmount,
-    verified,
-    pending: !verified,
-    reason: verified ? "partner_payment_verified" : "partner_payment_not_confirmed",
-  };
+  const date = madridDate();
+
+  // Idempotencia: si ya existe un pago equivalente para la reserva, reutilizarlo.
+  try {
+    const existingId = await findCreatedPaymentId(bookingId, method, paymentAmount, date);
+    if (existingId) {
+      const receipt = await userApiFetch(`/module/payment/api/v1/payment/${existingId}?payment_expand=all`);
+      assertAccountingPaymentReceipt(receipt, existingId, bookingId, method, paymentAmount);
+      console.log(JSON.stringify({
+        event: "renthub_user_payment_existing",
+        contract_number: contract?.contract_number,
+        booking_id: bookingId,
+        payment_id: existingId,
+        method,
+        amount: paymentAmount,
+      }));
+      return {
+        user_api: true,
+        booking_id: bookingId,
+        payment_id: existingId,
+        method,
+        amount: paymentAmount,
+        verified: true,
+        pending: false,
+        reason: "existing_payment_found",
+      };
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({
+      event: "renthub_user_payment_lookup_warning",
+      contract_number: contract?.contract_number,
+      booking_id: bookingId,
+      detail: error instanceof Error ? error.message : String(error),
+    }));
+    return {
+      pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
+      reason: "payment_lookup_failed",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  // A durable atomic claim prevents concurrent inserts and prevents a retry after an ambiguous POST.
+  if (contract?.app_payload?.renthub_payment_attempted_at) {
+    return { pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
+      reason: "previous_payment_attempt_requires_verification",
+      error: "Existe un intento previo sin confirmar. Revisar el pago antes de permitir otra inserción." };
+  }
+  const attemptedAt = new Date().toISOString();
+  const claimedPayload = { ...(contract.app_payload || {}), renthub_payment_attempted_at: attemptedAt };
+  const paymentService = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: claimed, error: claimError } = await paymentService.from("contracts")
+    .update({ app_payload: claimedPayload }).eq("id", contract.id)
+    .is("app_payload->renthub_payment_attempted_at", null)
+    .eq("app_payload", JSON.stringify(contract.app_payload || {})).select("id").maybeSingle();
+  if (claimError || !claimed) {
+    return { pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
+      reason: "payment_attempt_not_claimed", error: "No se pudo reservar un intento único de pago." };
+  }
+  contract.app_payload = claimedPayload;
+
+  const form = new FormData();
+  form.set("method", method);
+  form.set("type", "final_payment");
+  form.set("amount", paymentAmount.toFixed(2));
+  form.set("direction", "inflow");
+  form.set("refers_to_model", "rental_reservation");
+  form.set("refers_to_id", String(bookingId));
+  form.set("date", date);
+  form.set("payment_date", date);
+  form.set("inserted_from", "object");
+  form.set("prepaid", "0");
+  form.set("note", `Larios Rental contrato ${contract?.contract_number || ""}`);
+
+  let createdPaymentId = 0;
+  try {
+    const created = await userApiFetch("/module/payment/api/v1/payment/upsert", {
+      method: "POST",
+      body: form,
+    });
+    let paymentId = paymentIdFromResponse(created);
+    if (!paymentId) {
+      paymentId = await findCreatedPaymentId(bookingId, method, paymentAmount, date);
+    }
+    if (!paymentId) {
+      throw new Error("Renthub aceptó la petición de pago, pero no devolvió ni permitió localizar un ID de pago.");
+    }
+
+    createdPaymentId = paymentId;
+    const receipt = await userApiFetch(`/module/payment/api/v1/payment/${paymentId}?payment_expand=all`);
+    assertAccountingPaymentReceipt(receipt, paymentId, bookingId, method, paymentAmount);
+
+    console.log(JSON.stringify({
+      event: "renthub_user_payment_created",
+      contract_number: contract?.contract_number,
+      booking_id: bookingId,
+      payment_id: paymentId,
+      method,
+      amount: paymentAmount,
+    }));
+
+    return {
+      user_api: true,
+      booking_id: bookingId,
+      payment_id: paymentId,
+      method,
+      amount: paymentAmount,
+      verified: true,
+      pending: false,
+      reason: "user_api_payment_created",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({
+      event: "renthub_user_payment_error",
+      contract_number: contract?.contract_number,
+      booking_id: bookingId,
+      method,
+      amount: paymentAmount,
+      detail: message,
+    }));
+    return {
+      user_api: true,
+      booking_id: bookingId,
+      method,
+      amount: paymentAmount,
+      verified: false,
+      pending: true,
+      reason: "user_api_payment_failed",
+      payment_id: createdPaymentId || null,
+      error: message,
+    };
+  }
 }
 
 function paymentSyncStatus(payment: any) {
@@ -259,9 +430,10 @@ function paymentSyncStatus(payment: any) {
 }
 
 function paymentSyncError(payment: any) {
-  return payment?.pending
-    ? "Reserva verificada en Renthub. El pago no ha quedado confirmado por la API Partner."
-    : null;
+  if (!payment?.pending) return null;
+  return payment?.error
+    ? `Reserva verificada en Renthub, pero la User API no pudo completar el pago: ${payment.error}`
+    : "Reserva verificada en Renthub, pero el pago no ha quedado confirmado por la User API.";
 }
 
 function paymentSyncPayload(base: any, payment: any) {
@@ -274,8 +446,8 @@ function paymentSyncPayload(base: any, payment: any) {
       renthub_payment_amount: payment.amount,
       renthub_payment_invoice_requested: payment.invoice_requested,
       renthub_payment_invoice_id: payment.invoice_id,
-      renthub_payment_pending: false,
-      renthub_payment_error: null,
+      renthub_payment_pending: !!payment.pending,
+      renthub_payment_error: payment.pending ? (payment.error || payment.reason) : null,
     };
   }
   if (payment?.pending) {
@@ -373,7 +545,7 @@ function sameAmount(actualValue: unknown, expectedValue: unknown, vatValue: unkn
 function partnerPaymentMethod(value: unknown) {
   const key = String(value || "").trim().toLowerCase();
   if (key === "efectivo" || key === "cash") return "cash";
-  if (key === "tarjeta" || key === "credit_card" || key === "credit card") return "credit_card";
+  if (key === "tarjeta" || key === "stripe" || key === "tarjeta / stripe" || key === "credit_card" || key === "credit card") return "credit_card";
   if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer" || key === "bonifico") return "bank_transfer";
   return "";
 }
@@ -471,6 +643,10 @@ function renthubCountryCode(value: unknown) {
   if (/^[a-z]{2}$/i.test(String(value || "").trim())) return String(value).trim().toUpperCase();
   return map[key] || "";
 }
+function customerNationalityCountry(customer: any, payload: any) {
+  // Nationality must not be inferred from the address or the licence issuing country.
+  return renthubCountryCode(customer?.nationality || payload?.customer_nationality || customer?.country);
+}
 function canonicalDate(value: unknown) {
   const raw=String(value||"").trim();
   if(!raw)return "";
@@ -488,6 +664,23 @@ function canonicalRenthubCountry(value: unknown) {
   const prefixed = raw.match(/^([A-Za-z]{2})\s*-/);
   if (prefixed) return prefixed[1].toUpperCase();
   return mapped || raw.toUpperCase();
+}
+function customerAddressForRenthub(customer: any, payload: any) {
+  const parts = payload?.customer_address_parts;
+  if (!parts || typeof parts !== "object" || Array.isArray(parts)) {
+    return { ...splitCustomerAddress(customer?.address || payload?.customer_address || ""), structured: false };
+  }
+  let city = String(parts.city_postal || "").trim(), zip = "";
+  const postalFirst = city.match(/^(\d{4,6}(?:-\d{3,4})?)\s+(.+)$/);
+  const postalLast = city.match(/^(.+?)[,\s]+(\d{4,6}(?:-\d{3,4})?)$/);
+  if (postalFirst) { zip = postalFirst[1]; city = postalFirst[2]; }
+  else if (postalLast) { city = postalLast[1].replace(/,\s*$/, ""); zip = postalLast[2]; }
+  return {
+    address: String(parts.street || "").trim(),
+    streetNumber: String(parts.number || "").trim(), city, zip,
+    country: renthubCountryCode(customer?.country || payload?.customer_nationality || ""),
+    structured: true,
+  };
 }
 function splitCustomerAddress(rawValue: unknown) {
   let raw = String(rawValue || "").trim().replace(/\s+/g, " ").replace(/,+$/, "");
@@ -611,7 +804,84 @@ function detailHasContactValue(detail: any, kind: "email" | "phone", wanted: str
   return visit(detail, [], 0);
 }
 
-async function syncPartnerCustomer(customerCode: string, contract: any, customer: any, driver: any) {
+async function syncUserRegistryCustomer(bookingDetail: any, contract: any, customer: any, driver: any) {
+  const payload = contract?.app_payload || {};
+  const registryId = Number(
+    bookingDetail?.result?.customer?.id ??
+    bookingDetail?.customer?.id ??
+    bookingDetail?.result?.registry?.id ??
+    bookingDetail?.registry?.id ??
+    0
+  );
+  if (!Number.isInteger(registryId) || registryId <= 0) {
+    return { skipped: true, reason: "registry_id_not_available" };
+  }
+
+  const identityDocument = String(customer?.document_number || payload.customer_document || "").trim();
+  const licenceNumber = String(driver?.licence_number || payload.driving_license || "").trim();
+  const licenceIssuedBy = String(driver?.licence_country || payload.license_issued_by || "").trim();
+  const licenceCountryCode = renthubCountryCode(licenceIssuedBy);
+  const licenceIssueDate = String(driver?.issue_date || payload.license_issue || "").trim();
+  const licenceExpiry = String(driver?.expiry_date || payload.license_expiry || "").trim();
+  const customerCountryCode = customerNationalityCountry(customer, payload);
+
+  const form = new FormData();
+  if (identityDocument) {
+    form.set("id_number", identityDocument);
+    const documentType = normalize(customer?.document_type || payload.customer_document_type || "");
+    if (documentType.includes("passport") || documentType.includes("pasaporte")) form.set("id_type", "2");
+    else if (documentType.includes("residence") || documentType.includes("residencia")) form.set("id_type", "3");
+    else if (documentType) form.set("id_type", "1");
+  }
+  if (customerCountryCode) {
+    form.set("citizenship", customerCountryCode);
+    form.set("birth_country", customerCountryCode);
+    form.set("id_issue_country", customerCountryCode);
+  }
+  form.set("license_type", RENTHUB_LICENSE_TYPE_B_ID);
+  if (licenceNumber) form.set("license_number", licenceNumber);
+  if (licenceIssuedBy) form.set("license_issued_by", licenceIssuedBy);
+  if (licenceCountryCode) form.set("license_issue_country", licenceCountryCode);
+  if (licenceIssueDate) form.set("license_issue_date", licenceIssueDate);
+  if (licenceExpiry) form.set("license_expiration", licenceExpiry);
+
+  if ([...form.keys()].length <= 1 && !licenceNumber && !identityDocument) {
+    return { skipped: true, reason: "no_registry_fields" };
+  }
+
+  try {
+    const response = await userApiFetch(`/module/registry/api/v1/registry/${registryId}`, {
+      method: "POST",
+      body: form,
+    });
+    console.log(JSON.stringify({
+      event: "renthub_user_registry_sync",
+      contract_number: contract?.contract_number,
+      registry_id: registryId,
+      id_number_sent: !!identityDocument,
+      license_number_sent: !!licenceNumber,
+      citizenship_sent: customerCountryCode || null,
+      birth_country_sent: customerCountryCode || null,
+      id_issue_country_sent: customerCountryCode || null,
+      license_issue_country_sent: licenceCountryCode || null,
+      license_issue_date_sent: licenceIssueDate || null,
+      license_expiration_sent: licenceExpiry || null,
+      success: true,
+    }));
+    return { registry_id: registryId, updated: true, response };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({
+      event: "renthub_user_registry_sync_error",
+      contract_number: contract?.contract_number,
+      registry_id: registryId,
+      detail: message,
+    }));
+    return { registry_id: registryId, updated: false, error: message };
+  }
+}
+
+async function syncPartnerCustomer(customerCode: string, contract: any, customer: any, driver: any, bookingDetail: any = null) {
   if (!customerCode || !customer) return null;
   const payload = contract?.app_payload || {};
   const names = splitName(customer.full_name || payload.customer_name);
@@ -646,34 +916,45 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     body.mobile = phone.mobile;
   }
 
-  const parsedAddress = splitCustomerAddress(customer.address || payload.customer_address || "");
+  const parsedAddress = customerAddressForRenthub(customer, payload);
   const customerCountry = String(parsedAddress.country || renthubCountryCode(customer.country || payload.customer_nationality || licenceIssuedBy) || "").trim();
   const address = String(parsedAddress.address || "").trim();
   const streetNumber = String(parsedAddress.streetNumber || "").trim();
-  const city = String(customer.city || parsedAddress.city || "").trim();
-  const zip = String(customer.postal_code || parsedAddress.zip || "").trim();
+  const city = String(parsedAddress.structured ? parsedAddress.city : (customer.city || parsedAddress.city || "")).trim();
+  const zip = String(parsedAddress.structured ? parsedAddress.zip : (customer.postal_code || parsedAddress.zip || "")).trim();
   if (address) body.address = address;
   if (streetNumber) body.street_number = streetNumber;
   if (city) body.city = city;
   if (zip) body.zip = zip;
-  if (customerCountry) body.country = customerCountry;
+  if (customerCountry) {
+    body.country = customerCountry;
+  }
+  const nationalityCountry = customerNationalityCountry(customer, payload);
+  if (nationalityCountry) {
+    body.citizenship = nationalityCountry;
+    body.birth_country = nationalityCountry;
+    body.id_issue_country = nationalityCountry;
+  }
   if (birthDate) body.birth_date = birthDate;
 
-  // Ficha anagráfica de Renthub:
-  // - tax_code -> DNI/NIE
-  // - id_number -> Número de documento de identidad
+  // Partner Customer API v2: usar nombres canónicos.
+  // tax_code mantiene el DNI/NIE fiscal y id_number rellena el número de documento específico.
   if (identityDocument) {
     body.tax_code = identityDocument;
     body.id_number = identityDocument;
+    const documentType = normalize(customer?.document_type || payload.customer_document_type || "");
+    if (documentType.includes("passport") || documentType.includes("pasaporte")) body.id_type = "2";
+    else if (documentType.includes("residence") || documentType.includes("residencia")) body.id_type = "3";
+    else if (documentType) body.id_type = "1";
   }
 
-  // Datos del permiso. "driving_license_issued_by" mantiene el texto visible
-  // y "license_issue_country" alimenta el desplegable Estado de emisión.
-  if (licenceNumber) body.driving_license_number = licenceNumber;
-  if (licenceIssuedBy) body.driving_license_issued_by = licenceIssuedBy;
+  // Partner Customer API v2: verified by update + GET on registry 11236 (2026-10-14).
+  if (licenceNumber) body.license_number = licenceNumber;
+  body.license_type = RENTHUB_LICENSE_TYPE_B_ID;
   if (licenceCountryCode) body.license_issue_country = licenceCountryCode;
-  if (licenceIssueDate) body.driving_license_issued_at = licenceIssueDate;
-  if (licenceExpiry) body.driving_license_exp = licenceExpiry;
+  if (licenceIssuedBy) body.license_issued_by = licenceIssuedBy;
+  if (licenceIssueDate) body.license_issue_date = licenceIssueDate;
+  if (licenceExpiry) body.license_expiration = licenceExpiry;
 
   const response = await renthubFetch(`/api/partner/customer/update/${encodeURIComponent(customerCode)}`, {
     method: "POST",
@@ -706,9 +987,12 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     email_present: !email || detailHasContactValue(detail, "email", email),
     phone_present: !phone.mobile || detailHasContactValue(detail, "phone", fullPhone),
     tax_code: !identityDocument || !returnedTaxCode || normalize(returnedTaxCode) === normalize(identityDocument),
-    id_number: !identityDocument || !returnedIdentity || normalize(returnedIdentity) === normalize(identityDocument),
-    license_issue_country: !licenceCountryCode || !returnedLicenceCountry ||
-      canonicalRenthubCountry(returnedLicenceCountry) === canonicalRenthubCountry(licenceCountryCode),
+    id_number: !identityDocument || normalize(returnedIdentity) === normalize(identityDocument),
+    license_issue_country: !licenceCountryCode || canonicalRenthubCountry(returnedLicenceCountry) === licenceCountryCode,
+    license_type: normalize(detailValue("license_type")) === "b",
+    citizenship: !nationalityCountry || canonicalRenthubCountry(detail.citizenship) === nationalityCountry,
+    birth_country: !nationalityCountry || canonicalRenthubCountry(detail.birth_country) === nationalityCountry,
+    id_issue_country: !nationalityCountry || canonicalRenthubCountry(detail.id_issue_country) === nationalityCountry,
   };
 
   if (!Object.values(customerChecks).every(Boolean)) {
@@ -728,7 +1012,12 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     skipped_existing_phone: phoneAlreadyPresent,
   }));
 
-  return { update: response, detail: detailResponse, checks: customerChecks };
+  const userRegistry = {
+    registry_id: Number(detail.id || bookingDetail?.result?.customer?.id || 0),
+    updated: true, verified: true, source: "partner_customer_v2",
+  };
+
+  return { update: response, detail: detailResponse, checks: customerChecks, user_registry: userRegistry };
 }
 
 
@@ -769,12 +1058,12 @@ async function syncPartnerCustomerMissingOnly(customerCode:string,contract:any,c
   const licenceIssueDate=String(driver?.issue_date||payload.license_issue||"").trim();
   const licenceExpiry=String(driver?.expiry_date||payload.license_expiry||"").trim();
   const birthDate=String(customer.birth_date||driver?.birth_date||payload.customer_birth_date||"").trim();
-  const parsedAddress=splitCustomerAddress(customer.address||payload.customer_address||"");
+  const parsedAddress=customerAddressForRenthub(customer,payload);
   const customerCountry=String(parsedAddress.country||renthubCountryCode(customer.country||payload.customer_nationality||licenceIssuedBy)||"").trim();
   const address=String(parsedAddress.address||"").trim();
   const streetNumber=String(parsedAddress.streetNumber||"").trim();
-  const city=String(customer.city||parsedAddress.city||"").trim();
-  const zip=String(customer.postal_code||parsedAddress.zip||"").trim();
+  const city=String(parsedAddress.structured ? parsedAddress.city : (customer.city||parsedAddress.city||"")).trim();
+  const zip=String(parsedAddress.structured ? parsedAddress.zip : (customer.postal_code||parsedAddress.zip||"")).trim();
 
   const beforeResponse=await renthubFetch(`/api/partner/customer/details/${encodeURIComponent(customerCode)}`);
   const before=beforeResponse?.result||{};
@@ -1051,14 +1340,14 @@ async function handler(req: Request) {
   const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, total_gross: expectedTotal, total_net: renthubRentalRate, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
   const replacementStart = renthubReplacementStart(contract, latestPartnerStart);
-  // TEMPORARILY DISABLED:
-  // Renthub Partner API payment sync is not reliable yet. Keep all booking/data sync active,
-  // but never send payment_method/payment_amount and never create/verify an accounting payment.
-  const RENTHUB_PAYMENT_SYNC_ENABLED = false;
-  const paymentMethod = RENTHUB_PAYMENT_SYNC_ENABLED
+  // Partner API payment fields remain disabled. Accounting payment is handled separately
+  // through User API /module/payment/api/v1/payment/upsert so this block can be reverted independently.
+  const RENTHUB_PARTNER_PAYMENT_FIELDS_ENABLED = false;
+  const RENTHUB_USER_PAYMENT_SYNC_ENABLED = true;
+  const paymentMethod = RENTHUB_USER_PAYMENT_SYNC_ENABLED
     ? partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method)
     : "";
-  const paymentAmount = RENTHUB_PAYMENT_SYNC_ENABLED
+  const paymentAmount = RENTHUB_USER_PAYMENT_SYNC_ENABLED
     ? amount(contract.total || contract.app_payload?.total)
     : 0;
   const desiredFranchise = Math.max(0, amount(contract.app_payload?.franchise ?? contract.franchise ?? 0));
@@ -1131,7 +1420,7 @@ async function handler(req: Request) {
       checks.vehicle = actualVehicleIds.length > 0 && actualVehicleIds.includes(String(fleetMatch.vehicle));
     }
     if (options.checkStart) checks.start = minute(booking.start_datetime) === minute(options.expectedStart || start);
-    if (options.checkPayment && paymentMethod && paymentAmount > 0 && booking?.to_be_paid !== undefined && booking?.to_be_paid !== null) {
+    if (options.checkPayment && RENTHUB_PARTNER_PAYMENT_FIELDS_ENABLED && paymentMethod && paymentAmount > 0 && booking?.to_be_paid !== undefined && booking?.to_be_paid !== null) {
       checks.payment = Math.abs(amount(booking.to_be_paid)) <= 0.03;
     }
     console.log(JSON.stringify({
@@ -1171,7 +1460,7 @@ async function handler(req: Request) {
     return time>latest ? `${date} ${latest}` : realEnd;
   }
 
-  const lariosFuelLabel = String(contract.app_payload?.fuel_out || contract.app_payload?.delivery_fuel || contract.fuel_out || "").trim();
+  const lariosFuelLabel = String(contract.app_payload?.fuel_out || contract.delivery_fuel || contract.app_payload?.delivery_fuel || contract.fuel_out || "").trim();
   const renthubFuelLevel = (() => {
     const match = lariosFuelLabel.match(/^([0-8])\s*\/\s*8$/);
     return match ? match[1] : "";
@@ -1191,12 +1480,12 @@ async function handler(req: Request) {
       form.set("mobile_prefix", phone.prefix);
       form.set("mobile", phone.mobile);
       form.set("email", String(customer?.email || contract.app_payload?.customer_email || "").trim());
-      const parsedAddress = splitCustomerAddress(customer?.address || contract.app_payload?.customer_address || "");
+      const parsedAddress = customerAddressForRenthub(customer, contract.app_payload);
       const customerCountry = String(parsedAddress.country || renthubCountryCode(customer?.country || contract.app_payload?.customer_nationality || driver?.licence_country || contract.app_payload?.license_issued_by) || "").trim();
       if (parsedAddress.address) form.set("address", parsedAddress.address);
       if (parsedAddress.streetNumber) form.set("street_number", parsedAddress.streetNumber);
-      if (customer?.city || parsedAddress.city) form.set("city", String(customer?.city || parsedAddress.city));
-      if (customer?.postal_code || parsedAddress.zip) form.set("zip", String(customer?.postal_code || parsedAddress.zip));
+      if (parsedAddress.city || (!parsedAddress.structured && customer?.city)) form.set("city", String(parsedAddress.structured ? parsedAddress.city : (customer?.city || parsedAddress.city)));
+      if (parsedAddress.zip || (!parsedAddress.structured && customer?.postal_code)) form.set("zip", String(parsedAddress.structured ? parsedAddress.zip : (customer?.postal_code || parsedAddress.zip)));
       if (customerCountry) form.set("country", customerCountry);
     }
     form.set("model", String(model));
@@ -1233,7 +1522,7 @@ async function handler(req: Request) {
     form.set("overwrite_deposit", Number(contract.deposit || 0).toFixed(2));
     if (desiredFranchise > 0) form.set("overwrite_damage_franchise", desiredFranchise.toFixed(2));
     // Pago desactivado temporalmente hasta que Renthub confirme un flujo contable fiable.
-    if (RENTHUB_PAYMENT_SYNC_ENABLED && paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0) {
+    if (RENTHUB_PARTNER_PAYMENT_FIELDS_ENABLED && paymentMethod && Number.isFinite(paymentAmount) && paymentAmount > 0) {
       form.set("payment_method", paymentMethod);
       form.set("payment_amount", paymentAmount.toFixed(2));
     }
@@ -1306,7 +1595,7 @@ async function handler(req: Request) {
       pm_actual_end_time: "",
       pm_data_fine: renthubPanelDate(String(contract.return_date || "").slice(0,10)),
       pm_ora_fine: String(contract.return_time || "").slice(0,5),
-      pm_benzina_ritiro: renthubFuelLevel || "4",
+      ...(renthubFuelLevel !== "" ? { pm_benzina_ritiro: renthubFuelLevel } : {}),
       pm_benzina_consegna: "",
       pm_km_included: String(booking?.kms?.included || 0),
       pm_extra_km_price: String(booking?.kms?.extra_km_price?.without_tax || 0),
@@ -1577,7 +1866,7 @@ async function handler(req: Request) {
         let createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
         const newCustomerCode = String(createdChecked.detail?.result?.customer?.code || "");
         if (newCustomerCode && customer) {
-          updated = await syncPartnerCustomer(newCustomerCode, contract, customer, driver);
+          updated = await syncPartnerCustomer(newCustomerCode, contract, customer, driver, createdChecked.detail);
           createdChecked = await verify(code, { expectedStart: created.actualStart, checkStart: true, checkPayment: true });
         }
         if (!createdChecked.verified) {
@@ -1609,6 +1898,38 @@ async function handler(req: Request) {
       }
 
       let checked = await verify(code, { checkStart: false, checkPayment: false });
+
+      // Seguridad: si la reserva ya está vinculada y lo único pendiente es el pago,
+      // nunca crear/cancelar/sustituir otra reserva Renthub. Reutilizar siempre la misma referencia.
+      if (contract.renthub_sync_status === "payment_pending" && code) {
+        const customerCodePending = String(checked.detail?.result?.customer?.code || "");
+        if (customerCodePending && customer) {
+          updated = await syncPartnerCustomer(customerCodePending, contract, customer, driver, checked.detail);
+          checked = await verify(code, { checkStart: false, checkPayment: false });
+        }
+        payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
+        const pendingPayload = paymentSyncPayload(contract.app_payload || {}, payment);
+        await requireWrite(actor.from("contracts").update({
+          renthub_sync_status: paymentSyncStatus(payment),
+          renthub_last_sync_at: new Date().toISOString(),
+          renthub_sync_error: paymentSyncError(payment),
+          app_payload: pendingPayload,
+        }).eq("id", contract.id), "No se pudo guardar el reintento del pago de Renthub");
+        return json({
+          // La reserva ya estaba vinculada/verificada; este flujo solo reintenta datos de cliente y pago.
+          // No convertir una incidencia de User API/pago en un falso fallo de verificación de la reserva.
+          verified: true,
+          booking_verified: checked.verified,
+          payment_pending: !!payment?.pending,
+          payment_retry_only: true,
+          external_reference: code,
+          checks: checked.checks,
+          updated,
+          payment,
+          payment_error: payment?.error || null,
+          message: paymentSyncError(payment),
+        });
+      }
 
       // Si Renthub ya tiene la reserva en curso, se considera gestionada manualmente allí.
       // No enviamos más cambios por API, no creamos pagos y no intentamos cancelar/sustituir la reserva.
@@ -1654,7 +1975,7 @@ async function handler(req: Request) {
 
       const customerCode = String(checked.detail?.result?.customer?.code || "");
       if (customerCode && customer) {
-        updated = await syncPartnerCustomer(customerCode, contract, customer, driver);
+        updated = await syncPartnerCustomer(customerCode, contract, customer, driver, checked.detail);
         if (customer?.id && String(customer.renthub_customer_id || "") !== customerCode) {
           await requireWrite(actor.from("customers").update({ renthub_customer_id: customerCode }).eq("id", customer.id), "No se pudo guardar el cliente Partner de Renthub");
         }
@@ -1717,7 +2038,7 @@ async function handler(req: Request) {
             checked = await verify(code, { checkStart: false, checkPayment: false });
             const refreshedCustomerCode = String(checked.detail?.result?.customer?.code || customerCode || "");
             if (refreshedCustomerCode && customer) {
-              await syncPartnerCustomer(refreshedCustomerCode, contract, customer, driver);
+              await syncPartnerCustomer(refreshedCustomerCode, contract, customer, driver, checked.detail);
               checked = await verify(code, { checkStart: false, checkPayment: false });
             }
             if (checked.verified) {
@@ -1785,7 +2106,7 @@ async function handler(req: Request) {
       });
       const replacementCustomerCode = String(replacementChecked.detail?.result?.customer?.code || customerCode || "");
       if (replacementCustomerCode && customer) {
-        updated = await syncPartnerCustomer(replacementCustomerCode, contract, customer, driver);
+        updated = await syncPartnerCustomer(replacementCustomerCode, contract, customer, driver, replacementChecked.detail);
         replacementChecked = await verify(replacement.code, {
           expectedStart: replacement.actualStart,
           checkStart: true,
