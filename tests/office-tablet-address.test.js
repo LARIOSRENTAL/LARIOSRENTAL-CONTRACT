@@ -4,7 +4,8 @@ for(const name of ['cliente.html','cliente-v2.html','cliente-v3.html','cliente-v
  const html=fs.readFileSync(path.join(root,name),'utf8');
  const dom=new JSDOM(html,{url:'https://example.invalid/'+name,runScripts:'outside-only'}),w=dom.window,d=w.document;
  let submitted=null,alerts=[];
- w.scrollTo=()=>{};w.alert=x=>alerts.push(x);w.setInterval=()=>1;w.clearInterval=()=>{};
+ let poll;
+ w.scrollTo=()=>{};w.alert=x=>alerts.push(x);w.setInterval=fn=>{poll=fn;return 1};w.clearInterval=()=>{};
  w.HTMLCanvasElement.prototype.getContext=()=>({scale(){},clearRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){}});
  w.HTMLCanvasElement.prototype.toDataURL=()=> 'data:image/png;base64,test';
  w.LARIOS_CONFIG={supabaseUrl:'https://test.invalid',supabasePublishableKey:'test-only'};
@@ -17,8 +18,12 @@ for(const name of ['cliente.html','cliente-v2.html','cliente-v3.html','cliente-v
    this.status=200;this.readyState=4;this.responseText=JSON.stringify(data);this.onreadystatechange();
   }
  };
- w.eval(fs.readFileSync(path.join(root,'customer-address-v1.js'),'utf8'));
+ const helper=html.match(/<script src="([^"?]+address[^"?]+\.js)/)[1];
+ w.eval(fs.readFileSync(path.join(root,helper),'utf8'));
+ const setParts=w.LariosAddress.setParts;let failOnce=true;
+ w.LariosAddress.setParts=p=>{if(failOnce){failOnce=false;throw new Error('simulated temporary screen failure')}return setParts(p)};
  const inline=[...d.querySelectorAll('script:not([src])')].map(s=>s.textContent).join('\n');w.eval(inline);
+ assert.match(d.getElementById('pairStatus').textContent,/Could not open details/);poll();
  const $=id=>d.getElementById(id),input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('input',{bubbles:true}))};
  assert.equal($('customer_address_line').value,'Rue Test 10');assert.equal($('customer_address_city_postal').value,'Paris 75001');
  assert.equal(d.querySelectorAll('#lrCustomerAddress input').length,2);assert.equal($('customer_address').hidden,true);
