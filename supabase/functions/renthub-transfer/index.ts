@@ -252,13 +252,6 @@ function assertAccountingPaymentReceipt(data: any, paymentId: number, bookingId:
   if (!verified) throw new Error("El ID existe, pero no se ha verificado un cobro contable pagado, no prepago, de esta reserva.");
 }
 
-function paymentTrialTarget(contract: any, bookingId: number, method: string, paymentAmount: number) {
-  return Number(contract?.contract_number) === 63290 &&
-    String(contract?.renthub_contract_id || "") === "FBFOD-LHWY0" &&
-    bookingId === 10502 && method === "credit_card" &&
-    Number.isFinite(paymentAmount) && Math.round(paymentAmount * 100) === 100;
-}
-
 async function findCreatedPaymentId(bookingId: number, method: string, paymentAmount: number, _date: string) {
   // The reservation contains its own payment collection; do not scan a paginated global ledger.
   const data = await userApiFetch(`/module/rental/api/v1/reservation/${bookingId}?rental_reservation_expand=payments`);
@@ -280,7 +273,11 @@ async function findCreatedPaymentId(bookingId: number, method: string, paymentAm
     const receipt = await userApiFetch(`/module/payment/api/v1/payment/${id}?payment_expand=all`);
     rows.push(receipt?.result?.payment ?? receipt?.result);
   }
-  return paymentLookupId({ result: rows, meta: { total: rows.length } }, bookingId, method, paymentAmount);
+  const existingId = paymentLookupId({ result: rows, meta: { total: rows.length } }, bookingId, method, paymentAmount);
+  if (!existingId) {
+    throw new Error("La reserva ya tiene otros pagos asociados. Revisar los cobros antes de insertar otro.");
+  }
+  return existingId;
 }
 
 async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, method: string, paymentAmount: number) {
@@ -293,9 +290,6 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
     return { pending: true, reason: "booking_id_not_available", method, amount: paymentAmount };
   }
 
-  if (!paymentTrialTarget(contract, bookingId, method, paymentAmount)) {
-    return { skipped: true, reason: "payment_trial_only", booking_id: bookingId };
-  }
   const date = madridDate();
 
   // Idempotencia: si ya existe un pago equivalente para la reserva, reutilizarlo.
@@ -551,7 +545,7 @@ function sameAmount(actualValue: unknown, expectedValue: unknown, vatValue: unkn
 function partnerPaymentMethod(value: unknown) {
   const key = String(value || "").trim().toLowerCase();
   if (key === "efectivo" || key === "cash") return "cash";
-  if (key === "tarjeta" || key === "credit_card" || key === "credit card") return "credit_card";
+  if (key === "tarjeta" || key === "stripe" || key === "tarjeta / stripe" || key === "credit_card" || key === "credit card") return "credit_card";
   if (key === "transferencia" || key === "bank_transfer" || key === "bank transfer" || key === "bonifico") return "bank_transfer";
   return "";
 }
@@ -670,6 +664,23 @@ function canonicalRenthubCountry(value: unknown) {
   const prefixed = raw.match(/^([A-Za-z]{2})\s*-/);
   if (prefixed) return prefixed[1].toUpperCase();
   return mapped || raw.toUpperCase();
+}
+function customerAddressForRenthub(customer: any, payload: any) {
+  const parts = payload?.customer_address_parts;
+  if (!parts || typeof parts !== "object" || Array.isArray(parts)) {
+    return { ...splitCustomerAddress(customer?.address || payload?.customer_address || ""), structured: false };
+  }
+  let city = String(parts.city_postal || "").trim(), zip = "";
+  const postalFirst = city.match(/^(\d{4,6}(?:-\d{3,4})?)\s+(.+)$/);
+  const postalLast = city.match(/^(.+?)[,\s]+(\d{4,6}(?:-\d{3,4})?)$/);
+  if (postalFirst) { zip = postalFirst[1]; city = postalFirst[2]; }
+  else if (postalLast) { city = postalLast[1].replace(/,\s*$/, ""); zip = postalLast[2]; }
+  return {
+    address: String(parts.street || "").trim(),
+    streetNumber: String(parts.number || "").trim(), city, zip,
+    country: renthubCountryCode(customer?.country || payload?.customer_nationality || ""),
+    structured: true,
+  };
 }
 function splitCustomerAddress(rawValue: unknown) {
   let raw = String(rawValue || "").trim().replace(/\s+/g, " ").replace(/,+$/, "");
@@ -905,12 +916,12 @@ async function syncPartnerCustomer(customerCode: string, contract: any, customer
     body.mobile = phone.mobile;
   }
 
-  const parsedAddress = splitCustomerAddress(customer.address || payload.customer_address || "");
+  const parsedAddress = customerAddressForRenthub(customer, payload);
   const customerCountry = String(parsedAddress.country || renthubCountryCode(customer.country || payload.customer_nationality || licenceIssuedBy) || "").trim();
   const address = String(parsedAddress.address || "").trim();
   const streetNumber = String(parsedAddress.streetNumber || "").trim();
-  const city = String(customer.city || parsedAddress.city || "").trim();
-  const zip = String(customer.postal_code || parsedAddress.zip || "").trim();
+  const city = String(parsedAddress.structured ? parsedAddress.city : (customer.city || parsedAddress.city || "")).trim();
+  const zip = String(parsedAddress.structured ? parsedAddress.zip : (customer.postal_code || parsedAddress.zip || "")).trim();
   if (address) body.address = address;
   if (streetNumber) body.street_number = streetNumber;
   if (city) body.city = city;
@@ -1047,12 +1058,12 @@ async function syncPartnerCustomerMissingOnly(customerCode:string,contract:any,c
   const licenceIssueDate=String(driver?.issue_date||payload.license_issue||"").trim();
   const licenceExpiry=String(driver?.expiry_date||payload.license_expiry||"").trim();
   const birthDate=String(customer.birth_date||driver?.birth_date||payload.customer_birth_date||"").trim();
-  const parsedAddress=splitCustomerAddress(customer.address||payload.customer_address||"");
+  const parsedAddress=customerAddressForRenthub(customer,payload);
   const customerCountry=String(parsedAddress.country||renthubCountryCode(customer.country||payload.customer_nationality||licenceIssuedBy)||"").trim();
   const address=String(parsedAddress.address||"").trim();
   const streetNumber=String(parsedAddress.streetNumber||"").trim();
-  const city=String(customer.city||parsedAddress.city||"").trim();
-  const zip=String(customer.postal_code||parsedAddress.zip||"").trim();
+  const city=String(parsedAddress.structured ? parsedAddress.city : (customer.city||parsedAddress.city||"")).trim();
+  const zip=String(parsedAddress.structured ? parsedAddress.zip : (customer.postal_code||parsedAddress.zip||"")).trim();
 
   const beforeResponse=await renthubFetch(`/api/partner/customer/details/${encodeURIComponent(customerCode)}`);
   const before=beforeResponse?.result||{};
@@ -1332,8 +1343,7 @@ async function handler(req: Request) {
   // Partner API payment fields remain disabled. Accounting payment is handled separately
   // through User API /module/payment/api/v1/payment/upsert so this block can be reverted independently.
   const RENTHUB_PARTNER_PAYMENT_FIELDS_ENABLED = false;
-  const RENTHUB_USER_PAYMENT_SYNC_ENABLED = Number(contract.contract_number) === 63290 &&
-    String(contract.renthub_contract_id || "") === "FBFOD-LHWY0";
+  const RENTHUB_USER_PAYMENT_SYNC_ENABLED = true;
   const paymentMethod = RENTHUB_USER_PAYMENT_SYNC_ENABLED
     ? partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method)
     : "";
@@ -1450,7 +1460,7 @@ async function handler(req: Request) {
     return time>latest ? `${date} ${latest}` : realEnd;
   }
 
-  const lariosFuelLabel = String(contract.app_payload?.fuel_out || contract.app_payload?.delivery_fuel || contract.fuel_out || "").trim();
+  const lariosFuelLabel = String(contract.app_payload?.fuel_out || contract.delivery_fuel || contract.app_payload?.delivery_fuel || contract.fuel_out || "").trim();
   const renthubFuelLevel = (() => {
     const match = lariosFuelLabel.match(/^([0-8])\s*\/\s*8$/);
     return match ? match[1] : "";
@@ -1470,12 +1480,12 @@ async function handler(req: Request) {
       form.set("mobile_prefix", phone.prefix);
       form.set("mobile", phone.mobile);
       form.set("email", String(customer?.email || contract.app_payload?.customer_email || "").trim());
-      const parsedAddress = splitCustomerAddress(customer?.address || contract.app_payload?.customer_address || "");
+      const parsedAddress = customerAddressForRenthub(customer, contract.app_payload);
       const customerCountry = String(parsedAddress.country || renthubCountryCode(customer?.country || contract.app_payload?.customer_nationality || driver?.licence_country || contract.app_payload?.license_issued_by) || "").trim();
       if (parsedAddress.address) form.set("address", parsedAddress.address);
       if (parsedAddress.streetNumber) form.set("street_number", parsedAddress.streetNumber);
-      if (customer?.city || parsedAddress.city) form.set("city", String(customer?.city || parsedAddress.city));
-      if (customer?.postal_code || parsedAddress.zip) form.set("zip", String(customer?.postal_code || parsedAddress.zip));
+      if (parsedAddress.city || (!parsedAddress.structured && customer?.city)) form.set("city", String(parsedAddress.structured ? parsedAddress.city : (customer?.city || parsedAddress.city)));
+      if (parsedAddress.zip || (!parsedAddress.structured && customer?.postal_code)) form.set("zip", String(parsedAddress.structured ? parsedAddress.zip : (customer?.postal_code || parsedAddress.zip)));
       if (customerCountry) form.set("country", customerCountry);
     }
     form.set("model", String(model));
@@ -1585,7 +1595,7 @@ async function handler(req: Request) {
       pm_actual_end_time: "",
       pm_data_fine: renthubPanelDate(String(contract.return_date || "").slice(0,10)),
       pm_ora_fine: String(contract.return_time || "").slice(0,5),
-      pm_benzina_ritiro: renthubFuelLevel || "4",
+      ...(renthubFuelLevel !== "" ? { pm_benzina_ritiro: renthubFuelLevel } : {}),
       pm_benzina_consegna: "",
       pm_km_included: String(booking?.kms?.included || 0),
       pm_extra_km_price: String(booking?.kms?.extra_km_price?.without_tax || 0),
@@ -2204,4 +2214,3 @@ async function handler(req: Request) {
 }
 
 Deno.serve((req) => handler(req).catch((error) => json({ error: error instanceof Error ? error.message : String(error) }, 500)));
-
