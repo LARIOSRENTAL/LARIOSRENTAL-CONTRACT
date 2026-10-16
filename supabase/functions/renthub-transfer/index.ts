@@ -1236,6 +1236,15 @@ async function handler(req: Request) {
     cache: await cacheStatus(service), role, can_manage: role === "admin",
   });
   if (role !== "admin") return json({ error: "ADMIN_REQUIRED", message: "Solo una cuenta administradora puede realizar acciones de Renthub." }, 403);
+  if (action === "check_user_api") {
+    const configuredEmail = env("RENTHUB_USER_API_EMAIL");
+    const result: any = { configured_email: configuredEmail, api_key_configured: !!env("RENTHUB_USER_API_KEY"), configured_read_ok: false };
+    try {
+      await userApiFetch("/module/vehicle/api/v1/model?per_page=1");
+      result.configured_read_ok = true;
+    } catch (error) { result.configured_error = error instanceof Error ? error.message : String(error); }
+    return json(result);
+  }
   if (!config.enabled || !config.ready || !apiConnected) return json({ error: "RENTHUB_NOT_CONFIGURED", message: apiError || "Renthub no está configurado", activation_pending: true, missing: config.missing }, 503);
 
   if (action === "refresh_cache") return json({ refreshed: await refreshCatalogueCache(service, userData.user.id), cache: await cacheStatus(service) });
@@ -1243,6 +1252,41 @@ async function handler(req: Request) {
   if (!/^[0-9a-f-]{36}$/i.test(contractId)) return json({ error: "Invalid contract" }, 400);
   const { data: contract, error: contractError } = await service.from("contracts").select("*").eq("id", contractId).single();
   if (contractError || !contract) return json({ error: "Contract not found" }, 404);
+  // Dedicated payment-only route: no customer update, booking replacement or cancellation.
+  if (action === "retry_payment" || action === "verify_payment") {
+    const code = String(contract.renthub_contract_id || "").trim();
+    if (!code || !contract.pdf_path || ["draft", "cancelled"].includes(contract.status)) {
+      return json({ error: "El pago requiere un contrato generado y una reserva vinculada activa." }, 409);
+    }
+    if (action === "retry_payment" && contract.renthub_sync_status !== "payment_pending") {
+      return json({ error: "Este contrato no tiene un pago pendiente. No se ha modificado nada." }, 409);
+    }
+    const method = partnerPaymentMethod(contract.payment_method || contract.app_payload?.payment_method);
+    const paymentAmount = amount(contract.total || contract.app_payload?.total);
+    if (!method || paymentAmount <= 0) return json({ error: "Importe o método de pago no válido." }, 409);
+    const detail = await renthubFetch(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
+    if (action === "verify_payment") {
+      const bookingId = renthubBookingNumericId(detail, contract);
+      if (!bookingId) return json({ error: "No se pudo identificar la reserva." }, 409);
+      const paymentId = await findCreatedPaymentId(bookingId, method, paymentAmount, madridDate());
+      if (!paymentId) return json({ verified: false, external_reference: code, payment_id: null });
+      const receipt = await userApiFetch(`/module/payment/api/v1/payment/${paymentId}?payment_expand=all`);
+      assertAccountingPaymentReceipt(receipt, paymentId, bookingId, method, paymentAmount);
+      const row = receipt?.result?.payment ?? receipt?.result;
+      const reservation = await userApiFetch(`/module/rental/api/v1/reservation/${bookingId}?rental_reservation_expand=payments`);
+      return json({ verified: true, external_reference: code, booking_id: bookingId,
+        payment_id: paymentId, amount: paymentAmount, method, prepaid: row.prepaid,
+        payment_date: row.payment_date, total_paid: reservation?.result?.total_paid,
+        prepaid_amount: reservation?.result?.prepaid_amount, payments: reservation?.result?.payments });
+    }
+    const payment = await syncRenthubAccountingPayment(contract, detail, method, paymentAmount);
+    await requireWrite(service.from("contracts").update({
+      renthub_sync_status: paymentSyncStatus(payment), renthub_sync_error: paymentSyncError(payment),
+      renthub_last_sync_at: new Date().toISOString(),
+      app_payload: paymentSyncPayload(contract.app_payload || {}, payment),
+    }).eq("id", contract.id), "No se pudo guardar el resultado del pago");
+    return json({ external_reference: code, payment_pending: !!payment.pending, payment });
+  }
   if (action === "cancel") {
     const code = String(contract.renthub_contract_id || contract.app_payload?.renthub_cancel_pending_code || "").trim();
     const alreadyCancelledLocal = contract.status === "cancelled";
@@ -2218,3 +2262,4 @@ async function handler(req: Request) {
 }
 
 Deno.serve((req) => handler(req).catch((error) => json({ error: error instanceof Error ? error.message : String(error) }, 500)));
+
