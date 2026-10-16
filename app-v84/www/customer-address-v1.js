@@ -61,6 +61,6 @@ document.addEventListener('larios:reservation-opened',event=>{
   fill(p&&typeof p==='object'?p:{street:record.customer_address||record.app_payload?.customer_address||'',number:'',city_postal:''});
 });
 function boot(){ensure();new MutationObserver(ensure).observe(document.body,{childList:true,subtree:true})}
-window.LariosAddress={payload,compose,read,splitStreet,splitCity};
+window.LariosAddress={payload,compose,read,splitStreet,splitCity,setParts:function(parts){ensure();if($('lrCustomerAddress'))fill(parts||{})}};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
