@@ -1,21 +1,28 @@
 (function(){
 'use strict';
 const $=id=>document.getElementById(id);
-const keys=['street','number','city_postal'];
+const keys=['street','number','city','postal_code'];
 let writing=false;
 function clean(v){return String(v??'').trim()}
-function compose(p){return [clean([p.street,p.number].filter(Boolean).join(' ')),clean(p.city_postal)].filter(Boolean).join(', ')}
+function compose(p){return [clean([p.street,p.number].filter(Boolean).join(' ')),clean([p.city,p.postal_code].filter(Boolean).join(' '))||clean(p.city_postal)].filter(Boolean).join(', ')}
 function read(){return Object.fromEntries(keys.map(k=>[k,clean($('customer_address_'+k)?.value)]))}
 function sync(){const legacy=$('customer_address');if(!legacy||writing)return;writing=true;legacy.value=compose(read());legacy.dispatchEvent(new Event('input',{bubbles:true}));writing=false}
-function fill(parts){for(const k of keys){const el=$('customer_address_'+k);if(el)el.value=clean(parts[k])}sync()}
+function fill(parts){parts={...parts,city:parts.city??parts.city_postal??''};for(const k of keys){const el=$('customer_address_'+k);if(el)el.value=clean(parts[k])}sync()}
 function ensure(){
  const legacy=$('customer_address');if(!legacy||$('lrCustomerAddress'))return;
  const box=document.createElement('fieldset');box.id='lrCustomerAddress';box.className='wide';box.style.cssText='border:0;padding:0;margin:0;min-width:0;grid-column:1/-1';
  const legend=document.createElement('legend');legend.textContent='Domicilio del cliente';box.appendChild(legend);
  const grid=document.createElement('div');grid.className='formGrid';
- for(const [key,label,auto] of [['street','Calle','address-line1'],['number','Número','address-line2'],['city_postal','Ciudad / código postal','off']]){
+ for(const [key,label,auto] of [['street','Calle','address-line1'],['number','Número','address-line2']]){
   const l=document.createElement('label');l.textContent=label;const i=document.createElement('input');i.id='customer_address_'+key;i.placeholder=label;i.autocomplete=auto;i.addEventListener('input',sync);l.appendChild(i);grid.appendChild(l);
  }
+ const location=document.createElement('fieldset');location.style.cssText='border:0;padding:0;margin:0;grid-column:1/-1;min-width:0';
+ const locationLegend=document.createElement('legend');locationLegend.textContent='Ciudad / código postal';location.appendChild(locationLegend);
+ const locationGrid=document.createElement('div');locationGrid.className='formGrid';
+ for(const [key,label,auto] of [['city','Ciudad','address-level2'],['postal_code','Código postal','postal-code']]){
+  const l=document.createElement('label');l.textContent=label;const i=document.createElement('input');i.id='customer_address_'+key;i.placeholder=label;i.autocomplete=auto;i.addEventListener('input',sync);l.appendChild(i);locationGrid.appendChild(l);
+ }
+ location.appendChild(locationGrid);grid.appendChild(location);
  box.appendChild(grid);legacy.insertAdjacentElement('afterend',box);legacy.hidden=true;legacy.style.display='none';
  // Existing free-form addresses are preserved verbatim until the user separates them.
  fill({street:legacy.value,number:'',city_postal:''});
