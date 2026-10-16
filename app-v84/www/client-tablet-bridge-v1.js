@@ -126,6 +126,7 @@ function applyResponse(r){
   setField('customer_phone',r.customer_phone);
   setField('customer_email',r.customer_email);
   setField('customer_address',r.customer_address);
+  if(r.customer_address_parts&&window.LariosAddress?.setParts)window.LariosAddress.setParts(r.customer_address_parts);
   if(typeof r.full_insurance!=='undefined'){
     var fi=$('full_insurance');
     if(fi){fi.checked=!!r.full_insurance;fi.dispatchEvent(new Event('change',{bubbles:true}));}
