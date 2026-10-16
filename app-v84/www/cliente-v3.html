@@ -124,11 +124,10 @@ textarea{min-height:86px}
     <div id="step1" class="card hidden">
       <h2>1. Complete sus datos <span class="en">Complete your details</span></h2>
       <label>Teléfono <span class="en">Phone</span></label>
-      <input id="phone" type="tel">
+      <input id="phone" type="tel" autocomplete="tel">
       <label>Email <span class="en">Email</span></label>
-      <input id="email" type="email">
-      <label>Domicilio <span class="en">Address</span></label>
-      <textarea id="address"></textarea>
+      <input id="email" type="email" autocomplete="email">
+      <textarea id="customer_address" hidden aria-hidden="true"></textarea>
       <button class="btn primary" onclick="goStep(2)">Siguiente · Next</button>
     </div>
 
@@ -186,6 +185,7 @@ textarea{min-height:86px}
 </div>
 
 <script src="config.js"></script>
+<script src="customer-address-v1.js?v=office-address-20261016-1"></script>
 <script>
 (function(){
 var cfg=window.LARIOS_CONFIG||{},BASE=cfg.supabaseUrl+"/rest/v1/rpc/",KEY=cfg.supabasePublishableKey||"";
@@ -254,7 +254,7 @@ function load(s){
   checkedData=false;ink=false;
   $("phone").value=snap.customer_phone||"";
   $("email").value=snap.customer_email||"";
-  $("address").value=snap.customer_address||"";
+  $("customer_address").value=snap.customer_address||"";window.LariosAddress.setParts(snap.customer_address_parts||{street:snap.customer_address||"",number:"",city:"",postal_code:""});
   $("terms").checked=false;
   $("termsLink").href=snap.conditions_url||"https://www.lariosrental.com/condiciones-generales/";
   $("termsLinkEn").href=snap.conditions_url||"https://www.lariosrental.com/condiciones-generales/";
@@ -292,7 +292,7 @@ function review(){
     row("Caducidad · Expiry",snap.license_expiry)+
     row("Teléfono · Phone",$("phone").value)+
     row("Email",$("email").value)+
-    row("Domicilio · Address",$("address").value);
+    row("Calle y número · Street and number",window.LariosAddress.read().street_number)+row("Ciudad / código postal · City / postal code",window.LariosAddress.read().city_postal);
 }
 function summary(){
   var f=Number(snap.franchise||0);
@@ -305,7 +305,7 @@ function summary(){
 }
 window.goStep=function(n){
   if(n===2){
-    if(!$("phone").value||!$("email").value||!$("address").value){
+    if(!$("phone").value||!$("email").value||!window.LariosAddress.read().street_number||!window.LariosAddress.read().city_postal){
       alert("Completa teléfono, email y domicilio. / Complete phone, email and address.");return;
     }
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($("email").value)){
@@ -345,7 +345,7 @@ window.submitAll=function(){
   var resp={
     customer_phone:$("phone").value,
     customer_email:$("email").value,
-    customer_address:$("address").value,
+    customer_address:$("customer_address").value,customer_address_parts:window.LariosAddress.read(),
     data_checked:true,
     accepted_terms:true,
     accepted_terms_at:new Date().toISOString(),
