@@ -1,0 +1,21 @@
+const fs=require('fs'),assert=require('assert/strict'),{JSDOM}=require('jsdom');
+(async()=>{
+ const dom=new JSDOM('<main id="home"></main>',{runScripts:'outside-only'}),w=dom.window;
+ const id='f858de9c-1924-44ac-a6d4-448e78e7af4b',calls=[];
+ w.LariosAccess={isAdmin:()=>true};w.cfg={supabaseUrl:'https://example.invalid'};w.hdr=()=>({});
+ w.fetch=async(url,o)=>{const body=JSON.parse(o.body);calls.push({url,body});return{ok:true,status:200,json:async()=>body.p_contract_id?{id,contract_number:63340,total:352,payment_method:'Tarjeta',renthub_contract_id:'IIHOH-DVBP9',renthub_sync_status:'payment_pending'}:body.action==='retry_payment'?{payment_pending:false,payment:{verified:true,payment_id:99}}:{verified:true,payment_id:99}}};
+ w.eval(fs.readFileSync('app-v84/www/renthub-auth-check-v1.js','utf8'));
+ w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+ const $=x=>w.document.getElementById(x),flush=()=>new Promise(r=>setImmediate(r));
+ assert.equal($('lrRenthubPaymentRetry').disabled,true);
+ $('lrRenthubPaymentId').value=id;
+ [...w.document.querySelectorAll('button')].find(b=>b.textContent==='Consultar contrato para pago').click();await flush();
+ assert.equal(calls.length,1);assert.equal($('lrRenthubPaymentRetry').disabled,false);
+ $('lrRenthubPaymentRetry').click();await flush();
+ assert.deepEqual(calls[1].body,{action:'retry_payment',contract_id:id});
+ assert.equal($('lrRenthubPaymentRetry').disabled,true);
+ $('lrRenthubPaymentVerify').click();await flush();
+ assert.deepEqual(calls[2].body,{action:'verify_payment',contract_id:id});
+ assert(!calls.some(c=>c.body.action==='send'));
+ dom.window.close();console.log('PASS explicit load/retry/read-only receipt verification; successful retry disabled; no general send');
+})().catch(e=>{console.error(e);process.exitCode=1});
