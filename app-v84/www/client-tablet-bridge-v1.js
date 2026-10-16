@@ -71,13 +71,13 @@ async function showTabletPicker(){
   try{
     setBody('<div class="lrTabletState">Buscando tablets…</div>');
     var d=await rpc('app_tablet_list_devices',{});
-    devices=Array.isArray(d)?d:[];
+    devices=(Array.isArray(d)?d:[]).filter(function(x){return fresh(x.last_seen_at)});
     var html='<div class="lrTabletHint">Selecciona la tablet a la que quieres enviar este contrato:</div>';
     if(!devices.length){
       html+='<div class="lrTabletState">No hay ninguna tablet conectada ahora mismo.</div><div class="lrTabletHint">Abre <b>cliente.html</b> en el iPad y espera unos segundos.</div>';
     }else{
       devices.forEach(function(x){
-        html+='<button type="button" class="lrTabletDevice" data-id="'+esc(x.id)+'"><b>'+(x.label?esc(x.label):'Tablet · '+esc(x.pair_code||''))+'</b><span>'+(fresh(x.last_seen_at)?'Disponible':'Conectada')+'</span></button>';
+        html+='<button type="button" class="lrTabletDevice" data-id="'+esc(x.id)+'"><b>'+esc((x.label||'Tablet')+' · '+(x.pair_code||''))+'</b><span>'+(fresh(x.last_seen_at)?'Disponible':'Conectada')+'</span></button>';
       });
     }
     setBody(html);
