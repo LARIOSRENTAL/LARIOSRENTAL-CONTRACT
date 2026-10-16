@@ -4,11 +4,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{JSDOM}=require
  w.cfg={supabaseUrl:'https://test.invalid',supabasePublishableKey:'test-only'};w.token='test-only';w.LariosCurrentContractId='test-contract';w.setInterval=()=>1;w.clearInterval=()=>{};
  const observers=[],Observer=w.MutationObserver;w.MutationObserver=class extends Observer{constructor(cb){super(cb);observers.push(this)}};
  const response={customer_phone:'600123123',customer_email:'test@example.invalid',customer_address:'12 High Street, London SW1A 1AA',customer_address_parts:{street:'High Street',number:'12',city:'London',postal_code:'SW1A 1AA',street_number:'12 High Street',city_postal:'London SW1A 1AA'}};
- w.fetch=async url=>({ok:true,json:async()=>url.includes('/pricing')?[]:url.endsWith('app_tablet_list_devices')?[{id:'test-device',label:'Test tablet'}]:url.endsWith('app_tablet_assign')?'test-job':url.endsWith('app_tablet_job')?{status:'completed',response}:true});
+ w.fetch=async url=>({ok:true,json:async()=>url.includes('/pricing')?[]:url.endsWith('app_tablet_list_devices')?[{id:'test-device',label:'Test tablet',pair_code:'046710',last_seen_at:new Date().toISOString()},{id:'stale-device',label:'Old tablet',pair_code:'028898',last_seen_at:new Date(Date.now()-180000).toISOString()}]:url.endsWith('app_tablet_assign')?'test-job':url.endsWith('app_tablet_job')?{status:'completed',response}:true});
  w.eval(fs.readFileSync('app-v84/www/customer-address-v1.js','utf8'));d.dispatchEvent(new w.Event('DOMContentLoaded'));
  w.LariosAddress.setParts({street:'OLD STREET',number:'99',city:'Old city',postal_code:'99999'});
  w.eval(fs.readFileSync('app-v84/www/client-tablet-bridge-v1.js','utf8'));
- await w.LariosClientTablet.open();d.querySelector('.lrTabletDevice').click();
+ await w.LariosClientTablet.open();assert.equal(d.querySelectorAll('.lrTabletDevice').length,1);assert.match(d.querySelector('.lrTabletDevice').textContent,/046710/);d.querySelector('.lrTabletDevice').click();
  for(let i=0;i<5;i++)await new Promise(r=>setImmediate(r));
  assert.equal(d.getElementById('customer_phone').value,response.customer_phone);
  assert.equal(d.getElementById('customer_email').value,response.customer_email);
