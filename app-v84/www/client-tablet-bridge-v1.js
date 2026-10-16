@@ -38,7 +38,7 @@ async function snapshot(){
     customer_birth_date:val('customer_birth_date'),
     customer_phone:val('customer_phone'),
     customer_email:val('customer_email'),
-    customer_address:val('customer_address'),
+    customer_address:val('customer_address'),...(window.LariosAddress?.payload?.()||{}),
     driving_license:val('driving_license'),
     license_issued_by:val('license_issued_by'),
     license_issue:val('license_issue'),
