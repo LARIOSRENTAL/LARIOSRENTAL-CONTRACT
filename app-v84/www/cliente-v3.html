@@ -56,9 +56,9 @@ textarea{min-height:86px}
 .idle .wrap{max-width:none;width:100vw;height:100vh;background:var(--larios)}
 .idle .head{display:none}
 .idle .main{padding:0;height:100vh;background:var(--larios)}
-.idleScreen{position:fixed;inset:0;background:var(--larios);display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}
+.idleScreen{position:fixed;top:0;right:0;bottom:0;left:0;background:var(--larios);display:flex;align-items:center;justify-content:center;z-index:20;overflow:hidden}
 .idleScreen.hidden{display:none!important}
-.idleBrand{display:block;width:82%;max-width:1000px;height:auto;max-height:82vh;object-fit:contain}
+.idleBrand{position:absolute;left:50%;top:50%;-webkit-transform:translate(-50%,-50%);transform:translate(-50%,-50%);display:block;width:82%;max-width:1000px;height:auto;max-height:82vh;object-fit:contain;margin:0}
 
 /* Step 2: same visual hierarchy as steps 1 and 3, but fits without scrolling */
 .priceMode{background:var(--larios)}
