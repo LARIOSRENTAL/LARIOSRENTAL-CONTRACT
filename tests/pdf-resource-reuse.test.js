@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync(require.resolve('../app-v84/www/pdf-authority-v3.js'),'utf8');
+let templates=0,libraries=0;
+const scripts=[];
+const ctx=vm.createContext({console,URL,location:{href:'https://example.invalid/'},setTimeout:fn=>fn(),document:{scripts,getElementById:()=>null,addEventListener(){},createElement:()=>({}),head:{appendChild(s){libraries++;scripts.push(s)}}},fetch:async()=>{templates++;return{ok:true,arrayBuffer:async()=>new ArrayBuffer(2)}}});
+ctx.window=ctx;ctx.LariosReservations={save(){}};
+vm.runInContext(source,ctx);const resources=ctx.LariosPdfResourcesV1,template=resources.template,library=resources.library;
+vm.runInContext(source,ctx);
+assert.equal(ctx.LariosPdfResourcesV1,resources);assert.equal(resources.template,template);assert.equal(resources.library,library);
+assert.equal(templates,1);assert.equal(libraries,1);
+assert.match(source,/Promise\.all\(\[loadPdfLib\(\),loadTemplateBytes\(\)\]\)/);
+console.log('PASS authoritative module reload reuses one template request and one library request');
