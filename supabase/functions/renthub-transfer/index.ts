@@ -675,6 +675,10 @@ function customerAddressForRenthub(customer: any, payload: any) {
   const postalLast = city.match(/^(.+?)[,\s]+(\d{4,6}(?:-\d{3,4})?)$/);
   if (postalFirst) { zip = postalFirst[1]; city = postalFirst[2]; }
   else if (postalLast) { city = postalLast[1].replace(/,\s*$/, ""); zip = postalLast[2]; }
+  if (parts.city !== undefined || parts.postal_code !== undefined) {
+    city = String(parts.city || "").trim();
+    zip = String(parts.postal_code || "").trim();
+  }
   return {
     address: String(parts.street || "").trim(),
     streetNumber: String(parts.number || "").trim(), city, zip,
