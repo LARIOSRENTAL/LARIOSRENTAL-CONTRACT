@@ -185,7 +185,7 @@ textarea{min-height:86px}
 </div>
 
 <script src="config.js"></script>
-<script src="customer-address-v1.js?v=office-address-20261016-1"></script>
+<script src="tablet-address-legacy-v1.js?v=20261016-1"></script>
 <script>
 (function(){
 var cfg=window.LARIOS_CONFIG||{},BASE=cfg.supabaseUrl+"/rest/v1/rpc/",KEY=cfg.supabasePublishableKey||"";
@@ -245,7 +245,7 @@ function poll(){
     var j=Array.isArray(d)?d[0]:d;
     if(!j||!j.job_id){if(!jobId||lastDone===jobId)show("waiting");return}
     if(j.job_id===lastDone)return;
-    if(j.job_id!==jobId){jobId=j.job_id;load(j.payload||{})}
+    if(j.job_id!==jobId){try{load(j.payload||{});jobId=j.job_id}catch(e){show("pair");$("pairStatus").className="status err";$("pairStatus").textContent="No se pudieron abrir los datos. Recarga esta página. / Could not open details. Reload this page."}}
   });
 }
 function load(s){
