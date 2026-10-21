@@ -31,6 +31,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
  fs.writeFileSync(manifest,s);
  const dir='android/app/src/main/java/com/lariosrental/management';fs.mkdirSync(dir,{recursive:true});
  fs.writeFileSync(path.join(dir,'LariosApplication.java'),'package com.lariosrental.management;\nimport android.app.Application;\nimport com.stripe.stripeterminal.TerminalApplicationDelegate;\npublic class LariosApplication extends Application { @Override public void onCreate() { super.onCreate(); TerminalApplicationDelegate.onCreate(this); } }\n');
+ const gradle='android/app/build.gradle';s=fs.readFileSync(gradle,'utf8');if(!s.includes('com.stripe:stripeterminal-core:5.8.0'))s=s.replace('dependencies {','dependencies {\n    implementation \"com.stripe:stripeterminal-core:5.8.0\"');fs.writeFileSync(gradle,s);
  const vars='android/variables.gradle';s=fs.readFileSync(vars,'utf8').replace(/minSdkVersion\s*=\s*\d+/,'minSdkVersion = 26');fs.writeFileSync(vars,s);
 }
 console.log('Stripe Terminal 5.8.0: initialization, consent and permission patches applied.');
