@@ -80,10 +80,41 @@ export default async function handleExternalPayment(req: Request) {
     if (!/^(sk|rk)_(live|test)_/.test(key) || (live && env("STRIPE_ENABLED").toLowerCase() !== "true")) return json({ error: "Stripe no está activado." }, 503);
     const body = await req.json();
     body.action = String(body.action || "").replace(/^external_/, "");
-    if (!["preview", "link", "setup_create", "card_status"].includes(body.action) || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(body.contract_id || ""))) throw new LinkError("Solicitud no válida", 400);
-    if (["preview", "link"].includes(body.action) && auth.user.app_metadata?.role !== "admin") return json({ error: "Solo los administradores pueden vincular pagos externos de Stripe." }, 403);
+    if (!["recent", "preview", "link", "setup_create", "card_status"].includes(body.action) || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(body.contract_id || ""))) throw new LinkError("Solicitud no válida", 400);
+    if (["recent", "preview", "link"].includes(body.action) && auth.user.app_metadata?.role !== "admin") return json({ error: "Solo los administradores pueden vincular pagos externos de Stripe." }, 403);
     const { data: contract, error: contractError } = await db.from("contracts").select("id,contract_number,total,app_payload,customer_id").eq("id", body.contract_id).single();
     if (contractError || !contract) throw new LinkError("No se encontró el contrato.", 404);
+    if (body.action === "recent") {
+      const cents = Math.round(Number(contract.total) * 100);
+      if (!Number.isSafeInteger(cents) || cents <= 0) throw new LinkError("El contrato necesita un importe mayor que cero.");
+      const hours = body.hours === 24 ? 24 : 1;
+      const since = Math.floor(Date.now() / 1000) - hours * 3600;
+      const candidates: any[] = [];
+      let cursor = "";
+      // List (rather than Search) avoids search-index delay immediately after a payment.
+      for (let page = 0; page < 3; page++) {
+        const params = new URLSearchParams({ limit: "100", "created[gte]": String(since), "expand[]": "data.latest_charge" });
+        if (cursor) params.set("starting_after", cursor);
+        const payments = await stripe("payment_intents?" + params.toString());
+        for (const pi of payments.data || []) {
+          const ch = pi.latest_charge;
+          if (pi.status !== "succeeded" || pi.currency !== "eur" || pi.livemode !== live || ch?.livemode !== live || pi.amount !== cents || pi.amount_received !== cents || !ch?.paid || !ch?.captured || ch.status !== "succeeded" || ch.refunded || Number(ch.amount_refunded || 0) > 0 || ch.disputed || ch.currency !== "eur" || ch.amount_captured !== cents) continue;
+          if ([pi, ch].some(x => (x.metadata?.contract_id && x.metadata.contract_id !== contract.id) || (x.metadata?.purpose && x.metadata.purpose !== "rental"))) continue;
+          const card = ch.payment_method_details?.card_present || ch.payment_method_details?.card;
+          if (!card) continue;
+          candidates.push({ payment_intent_id: pi.id, amount_cents: cents, currency: "eur", paid_at: new Date(ch.created * 1000).toISOString(), brand: card.brand || null, last4: /^\d{4}$/.test(card.last4 || "") ? card.last4 : null, livemode: live, created: ch.created });
+        }
+        if (!payments.has_more || !(payments.data || []).length) break;
+        cursor = payments.data.at(-1).id;
+      }
+      if (!candidates.length) return json({ candidates: [], hours, contract_number: contract.contract_number });
+      const { data: linked, error } = await db.from("stripe_payments").select("payment_intent_id,contract_id,checkout_session_id").in("payment_intent_id", candidates.map(x => x.payment_intent_id));
+      if (error) throw new Error("No se pudieron comprobar los pagos ya vinculados.");
+      // Never propose a payment already used for another contract or managed by Checkout/Terminal.
+      const eligible = candidates.filter(x => !(linked || []).some((p: any) => p.payment_intent_id === x.payment_intent_id && (p.contract_id !== contract.id || p.checkout_session_id !== "external:" + x.payment_intent_id)));
+      eligible.sort((a,b) => b.created - a.created);
+      return json({ candidates: eligible.slice(0, 5).map(({created, ...rest}) => rest), hours, contract_number: contract.contract_number });
+    }
     if (body.action === "card_status") return json(await completeSetup(db, contract, auth.user.id));
     if (body.action === "setup_create") {
       const existing = await completeSetup(db, contract, auth.user.id);

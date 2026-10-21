@@ -114,13 +114,20 @@ async function finalize(){
   await rpc({...savedPayload,id:draft.id||id,status:'confirmed'});measured('confirmMs');
   window.LariosSafeCardPersistence?.clear?.(draft.id||id);
   const label=contractNo(draft);
-  let emailError=null;
-  if(hasEmail){if(b)b.textContent='Enviando contrato…';try{await mail(draft)}catch(e){emailError=e}}
+  // Confirmation already enqueues email on the server. Start the idempotent fallback
+  // before opening the PDF, but never make preview/download wait for Gmail.
+  if(hasEmail){const emailStarted=performance.now();void mail(draft).then(()=>{
+    timing.emailMs=Math.round(performance.now()-emailStarted);
+    progressNotice(label+': correo enviado.');
+  }).catch(e=>{
+    timing.emailMs=Math.round(performance.now()-emailStarted);
+    progressNotice(label+': contrato guardado. Correo sin confirmar; revisa el envío antes de reintentarlo. '+(e?.message||String(e)),true);
+  })}
   timing.totalMs=Math.round(performance.now()-started);timing.pdfBytes=pdf.blob.size;
   if(window.LariosPdfAuthorityV3)window.LariosPdfAuthorityV3.lastTimings=timing;
   try{window.LariosReservations?.close?.()}catch(_){}
   setTimeout(()=>{try{typeof changeAgendaDate==='function'&&changeAgendaDate()}catch(_){}},120);
-  progressNotice(emailError?label+': contrato guardado. Correo sin confirmar; revisa el envío antes de reintentarlo. '+(emailError?.message||String(emailError)):label+': contrato generado, guardado y '+(hasEmail?'correo enviado.':'disponible en la aplicación, sin email de cliente.'),!!emailError);
+  progressNotice(label+': contrato generado y disponible en la aplicación. '+(hasEmail?'Envío del correo en curso.':'Sin email de cliente.'));
   download(pdf.blob,pdf.name);
  }catch(e){alert('No se pudo generar el contrato: '+(e?.message||String(e)))}
  finally{generating=false;if(b){b.disabled=false;b.textContent=old}}
