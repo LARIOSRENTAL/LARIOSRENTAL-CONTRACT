@@ -14,9 +14,9 @@ function read(id=currentId()){
 }
 function paintMasked(last4,expiry=''){
   const card=$('card_number'),exp=$('card_expiry');
-  if(card){card.value='•••• '+last4;card.readOnly=true;card.dataset.stripeMasked='1'}
+  if(card){card.value='•••• '+last4;card.disabled=false;card.readOnly=false;card.dataset.stripeMasked='1';if(card.dataset.lrUnlockMaskedCard!=='1'){card.dataset.lrUnlockMaskedCard='1';card.addEventListener('focus',()=>{if(card.dataset.stripeMasked==='1'){card.value='';delete card.dataset.stripeMasked}})}}
   if(expiry&&exp)exp.value=expiry;
-  if(exp)exp.readOnly=true;
+  if(exp){exp.disabled=false;exp.readOnly=false}
 }
 function setStripeCard(id,cardInfo={}){
   id=String(id||currentId());const last4=String(cardInfo.last4||cardInfo.card_last4||'').replace(/\D/g,'').slice(-4);
@@ -28,10 +28,9 @@ function setStripeCard(id,cardInfo={}){
 }
 function remember(id=currentId()){
   if(!id)return;
-  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry||card.dataset.stripeMasked==='1')return;
-  const digits=normalizeCard(card.value);
-  if(digits.length<12)return;
-  sessionStorage.setItem(key(id),JSON.stringify({card:card.value,expiry:expiry.value||'',savedAt:Date.now()}));
+  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry)return;
+  const saved=read(id);
+  if(saved?.masked)sessionStorage.setItem(key(id),JSON.stringify({...saved,expiry:expiry.value||saved.expiry||'',savedAt:Date.now()}));
 }
 function clear(id=currentId()){
   if(!id)return;
@@ -57,12 +56,9 @@ function enrichSaveRequest(input,init){
     const id=String(body.p_payload.id||currentId());
     remember(id);
     const saved=read(id);
-    if(saved?.masked){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
-    else if(saved){body.p_payload.card_number=saved.card;body.p_payload.card_expiry=saved.expiry}
-    else {
-      const digits=normalizeCard(body.p_payload.card_number);
-      if(digits.length<12){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
-    }
+    delete body.p_payload.card_number;
+    const expiry=$('card_expiry')?.value||body.p_payload.card_expiry||saved?.expiry||'';
+    if(expiry)body.p_payload.card_expiry=expiry;else delete body.p_payload.card_expiry;
     return {...init,body:JSON.stringify(body)};
   }catch(_){return init}
 }
