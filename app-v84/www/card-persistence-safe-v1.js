@@ -10,7 +10,7 @@ function normalizeExpiry(v){return String(v||'').trim()}
 function currentId(){return String(window.LariosCurrentContractId||'')}
 function read(id=currentId()){
   if(!id)return null;
-  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');if(x?.masked===true&&/^\d{4}$/.test(String(x.last4||'')))return x;return x&&normalizeCard(x.card).length>=12?x:null}catch(_){return null}
+  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');if(x?.masked===true&&/^\d{4}$/.test(String(x.last4||'')))return x;if(x?.card)sessionStorage.removeItem(key(id));return null}catch(_){return null}
 }
 function paintMasked(last4,expiry=''){
   const card=$('card_number'),exp=$('card_expiry');
@@ -40,12 +40,8 @@ function clear(id=currentId()){
   if(expiry){expiry.value='';expiry.readOnly=false}
 }
 function applySaved(id=currentId()){
-  const x=read(id);if(!x)return false;
-  const card=$('card_number'),expiry=$('card_expiry');
-  if(x.masked){paintMasked(x.last4,x.expiry);return true}
-  if(card){card.value=x.card||'';card.readOnly=false;delete card.dataset.stripeMasked}
-  if(expiry){expiry.value=x.expiry||'';expiry.readOnly=false}
-  return true;
+  const x=read(id);if(!x?.masked)return false;
+  paintMasked(x.last4,x.expiry);return true;
 }
 function enrichSaveRequest(input,init){
   try{
@@ -76,8 +72,8 @@ async function hydrate(id){
   if(applySaved(id))return;
   if(record.card_last4){setStripeCard(id,{last4:record.card_last4,exp_month:record.card_expiry_month,exp_year:record.card_expiry_year});return}
   const card=$('card_number'),expiry=$('card_expiry');
-  if(card){card.value=record.card_number||'';card.readOnly=false;delete card.dataset.stripeMasked}
-  if(expiry){expiry.value=record.card_expiry||'';expiry.readOnly=false}
+  if(card){card.value='';card.disabled=false;card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value=record.card_expiry||'';expiry.disabled=false;expiry.readOnly=false}
 }
 function bindInputs(){
   for(const id of ['card_number','card_expiry']){
