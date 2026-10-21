@@ -16,7 +16,7 @@ patch(file,'val logLevel = LogLevel.VERBOSE','val logLevel = LogLevel.ERROR');
 patch(file,'this.tokenProvider = TokenProvider(','if (this.tokenProvider == null) this.tokenProvider = TokenProvider(');
 patch(file,'        Terminal.getInstance()\n    }','        Terminal.getInstance()\n        notifyListeners(TerminalEnumEvent.Loaded.webEventName, emptyObject)\n        call.resolve()\n    }');
 patch(file,'Log.d(logTag, readers[0].serialNumber.toString())','if (readers.isEmpty()) return');
-patch(file,'CollectPaymentIntentConfiguration.Builder().updatePaymentIntent(true).build()','CollectPaymentIntentConfiguration.Builder().updatePaymentIntent(true).allowRedisplay(com.stripe.stripeterminal.external.models.AllowRedisplay.LIMITED).build()');
+patch(file,'CollectPaymentIntentConfiguration.Builder().updatePaymentIntent(true).build()','CollectPaymentIntentConfiguration.Builder().updatePaymentIntent(true).setAllowRedisplay(com.stripe.stripeterminal.external.models.AllowRedisplay.LIMITED).build()');
 patch(kotlin+'StripeTerminalPlugin.kt','        } else {\n            requestPermissionForAlias("location", call, "locationPermsCallback")\n        }','        } else {\n            call.reject("Permite el acceso a la ubicación en Ajustes para usar Tap to Pay.")\n        }');
 const swift=root+'/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift';
 patch(swift,'                self.collectCancelable = Terminal.shared.collectPaymentMethod(paymentIntent) { collectResult, collectError in','                guard let config = try? CollectPaymentIntentConfigurationBuilder().setAllowRedisplay(.limited).setUpdatePaymentIntent(true).build() else { call.reject("Invalid card consent configuration"); return }\n                self.collectCancelable = Terminal.shared.collectPaymentMethod(paymentIntent, collectConfig: config) { collectResult, collectError in');
@@ -27,7 +27,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
  const manifest='android/app/src/main/AndroidManifest.xml';
  s=fs.readFileSync(manifest,'utf8');
  if(!s.includes('android:name=".LariosApplication"'))s=s.replace('<application','<application android:name=".LariosApplication"');
- if(!s.includes('android.permission.ACCESS_FINE_LOCATION'))s=s.replace('<application','<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/><uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-permission android:name="android.permission.NFC"/><uses-feature android:name="android.hardware.nfc" android:required="false"/><application');
+ if(!s.includes('android.permission.ACCESS_FINE_LOCATION'))s=s.replace('<application','<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/><uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/><uses-permission android:name="android.permission.NFC"/><uses-feature android:name="android.hardware.nfc" android:required="false"/><application');
  fs.writeFileSync(manifest,s);
  const dir='android/app/src/main/java/com/lariosrental/management';fs.mkdirSync(dir,{recursive:true});
  fs.writeFileSync(path.join(dir,'LariosApplication.java'),'package com.lariosrental.management;\nimport android.app.Application;\nimport com.stripe.stripeterminal.TerminalApplicationDelegate;\npublic class LariosApplication extends Application { @Override public void onCreate() { super.onCreate(); TerminalApplicationDelegate.onCreate(this); } }\n');

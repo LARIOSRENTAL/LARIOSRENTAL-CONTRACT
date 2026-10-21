@@ -3,14 +3,14 @@ import { Device } from '@capacitor/device';
 import { StripeTerminal, TerminalEventsEnum, TerminalConnectTypes } from '@capacitor-community/stripe-terminal';
 // Installed only in native builds. A browser keeps the existing external-payment flow.
 if(Capacitor.isNativePlatform()&&Capacitor.isPluginAvailable('StripeTerminal')){
- let initialized=false,initializing=null,activeContract='',connected=false,working=false;
+ let initialized=false,listening=false,initializing=null,activeContract='',connected=false,working=false;
  const pendingKey='lr_native_tap_pending';
  const context=()=>window.LariosPayments?.nativeContext?.();
  async function call(action,extra={}){const c=context();if(!c?.token)throw Error('Inicia sesión en Larios Rental.');const response=await fetch(c.url+'/functions/v1/stripe-checkout',{method:'POST',headers:{apikey:c.key,Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:JSON.stringify({action,contract_id:activeContract,...extra})});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'No se pudo completar el cobro');return data}
  const message=text=>window.LariosPayments?.nativeStatus?.(text);
  async function initialize(mode){if(initialized)return;if(initializing)return initializing;initializing=(async()=>{
-  await StripeTerminal.addListener(TerminalEventsEnum.RequestedConnectionToken,async()=>{try{const d=await call('native_connection_token');await StripeTerminal.setConnectionToken({token:d.secret})}catch(error){await StripeTerminal.setConnectionToken({token:''}).catch(()=>{});message(error.message)}});
-  await StripeTerminal.addListener(TerminalEventsEnum.UnexpectedReaderDisconnect,()=>{connected=false});
+  if(!listening){await StripeTerminal.addListener(TerminalEventsEnum.RequestedConnectionToken,async()=>{try{const d=await call('native_connection_token');await StripeTerminal.setConnectionToken({token:d.secret})}catch(error){await StripeTerminal.setConnectionToken({token:''}).catch(()=>{});message(error.message)}});
+  await StripeTerminal.addListener(TerminalEventsEnum.UnexpectedReaderDisconnect,()=>{connected=false});listening=true;}
   await StripeTerminal.initialize({isTest:mode==='test'});initialized=true;
  })().finally(()=>{initializing=null});return initializing}
  async function connect(config){if(connected)return;message('Comprobando el lector contactless del dispositivo…');const info=await Device.getInfo();if(info.platform==='android'&&Number(info.osVersion.split('.')[0])<13)throw Error('Tap to Pay necesita Android 13 o posterior y un dispositivo NFC compatible.');await initialize(config.mode);

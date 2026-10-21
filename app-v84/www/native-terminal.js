@@ -1287,7 +1287,7 @@
         d.showModal();
       });
     };
-    let initialized = false, initializing = null, activeContract = "", connected = false, working = false;
+    let initialized = false, listening = false, initializing = null, activeContract = "", connected = false, working = false;
     const pendingKey = "lr_native_tap_pending";
     const context = () => window.LariosPayments?.nativeContext?.();
     async function call(action, extra = {}) {
@@ -1303,19 +1303,22 @@
       if (initialized) return;
       if (initializing) return initializing;
       initializing = (async () => {
-        await StripeTerminal.addListener(TerminalEventsEnum.RequestedConnectionToken, async () => {
-          try {
-            const d = await call("native_connection_token");
-            await StripeTerminal.setConnectionToken({ token: d.secret });
-          } catch (error) {
-            await StripeTerminal.setConnectionToken({ token: "" }).catch(() => {
-            });
-            message(error.message);
-          }
-        });
-        await StripeTerminal.addListener(TerminalEventsEnum.UnexpectedReaderDisconnect, () => {
-          connected = false;
-        });
+        if (!listening) {
+          await StripeTerminal.addListener(TerminalEventsEnum.RequestedConnectionToken, async () => {
+            try {
+              const d = await call("native_connection_token");
+              await StripeTerminal.setConnectionToken({ token: d.secret });
+            } catch (error) {
+              await StripeTerminal.setConnectionToken({ token: "" }).catch(() => {
+              });
+              message(error.message);
+            }
+          });
+          await StripeTerminal.addListener(TerminalEventsEnum.UnexpectedReaderDisconnect, () => {
+            connected = false;
+          });
+          listening = true;
+        }
         await StripeTerminal.initialize({ isTest: mode === "test" });
         initialized = true;
       })().finally(() => {
