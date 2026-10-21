@@ -10,11 +10,25 @@ function normalizeExpiry(v){return String(v||'').trim()}
 function currentId(){return String(window.LariosCurrentContractId||'')}
 function read(id=currentId()){
   if(!id)return null;
-  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');return x&&normalizeCard(x.card).length>=12?x:null}catch(_){return null}
+  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');if(x?.masked===true&&/^\d{4}$/.test(String(x.last4||'')))return x;return x&&normalizeCard(x.card).length>=12?x:null}catch(_){return null}
+}
+function paintMasked(last4,expiry=''){
+  const card=$('card_number'),exp=$('card_expiry');
+  if(card){card.value='•••• '+last4;card.readOnly=true;card.dataset.stripeMasked='1'}
+  if(expiry&&exp)exp.value=expiry;
+  if(exp)exp.readOnly=true;
+}
+function setStripeCard(id,cardInfo={}){
+  id=String(id||currentId());const last4=String(cardInfo.last4||cardInfo.card_last4||'').replace(/\D/g,'').slice(-4);
+  if(!id||!/^\d{4}$/.test(last4))return false;
+  const month=String(cardInfo.exp_month||cardInfo.card_expiry_month||'').padStart(2,'0');
+  const year=String(cardInfo.exp_year||cardInfo.card_expiry_year||'');
+  const expiry=month!=='00'&&/^\d{4}$/.test(year)?`${month}/${year}`:'';
+  sessionStorage.setItem(key(id),JSON.stringify({masked:true,last4,expiry,savedAt:Date.now()}));paintMasked(last4,expiry);return true;
 }
 function remember(id=currentId()){
   if(!id)return;
-  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry)return;
+  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry||card.dataset.stripeMasked==='1')return;
   const digits=normalizeCard(card.value);
   if(digits.length<12)return;
   sessionStorage.setItem(key(id),JSON.stringify({card:card.value,expiry:expiry.value||'',savedAt:Date.now()}));
@@ -23,14 +37,15 @@ function clear(id=currentId()){
   if(!id)return;
   sessionStorage.removeItem(key(id));
   const card=$('card_number'),expiry=$('card_expiry');
-  if(card)card.value='';
-  if(expiry)expiry.value='';
+  if(card){card.value='';card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value='';expiry.readOnly=false}
 }
 function applySaved(id=currentId()){
   const x=read(id);if(!x)return false;
   const card=$('card_number'),expiry=$('card_expiry');
-  if(card)card.value=x.card||'';
-  if(expiry)expiry.value=x.expiry||'';
+  if(x.masked){paintMasked(x.last4,x.expiry);return true}
+  if(card){card.value=x.card||'';card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value=x.expiry||'';expiry.readOnly=false}
   return true;
 }
 function enrichSaveRequest(input,init){
@@ -42,7 +57,8 @@ function enrichSaveRequest(input,init){
     const id=String(body.p_payload.id||currentId());
     remember(id);
     const saved=read(id);
-    if(saved){body.p_payload.card_number=saved.card;body.p_payload.card_expiry=saved.expiry}
+    if(saved?.masked){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
+    else if(saved){body.p_payload.card_number=saved.card;body.p_payload.card_expiry=saved.expiry}
     else {
       const digits=normalizeCard(body.p_payload.card_number);
       if(digits.length<12){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
@@ -62,9 +78,10 @@ async function hydrate(id){
   const record=await loadRecord(id);if(!record)return;
   if(record.pdf_path){sessionStorage.removeItem(key(id));return}
   if(applySaved(id))return;
+  if(record.card_last4){setStripeCard(id,{last4:record.card_last4,exp_month:record.card_expiry_month,exp_year:record.card_expiry_year});return}
   const card=$('card_number'),expiry=$('card_expiry');
-  if(card)card.value=record.card_number||'';
-  if(expiry)expiry.value=record.card_expiry||'';
+  if(card){card.value=record.card_number||'';card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value=record.card_expiry||'';expiry.readOnly=false}
 }
 function bindInputs(){
   for(const id of ['card_number','card_expiry']){
@@ -79,7 +96,7 @@ function hookEdit(){
   const api=window.LariosReservations,fn=api&&api.edit;
   if(!api||typeof fn!=='function'||fn===hookedEdit||fn.__lrSafeCardHook)return;
   const original=fn.bind(api);
-  const wrapped=async function(id){const out=await original(id);setTimeout(()=>hydrate(id),80);return out};
+  const wrapped=async function(id){const out=await original(id);await hydrate(id);return out};
   wrapped.__lrSafeCardHook=true;hookedEdit=wrapped;api.edit=wrapped;
 }
 let lastVisibleId='';
@@ -90,5 +107,5 @@ function watchForm(){
   if(panel&&panel.classList.contains('hidden'))lastVisibleId='';
 }
 setInterval(watchForm,500);watchForm();
-window.LariosSafeCardPersistence={hydrate,remember,read,applySaved,clear};
+window.LariosSafeCardPersistence={hydrate,remember,read,applySaved,clear,setStripeCard};
 })();

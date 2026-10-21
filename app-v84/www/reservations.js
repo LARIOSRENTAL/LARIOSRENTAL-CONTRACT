@@ -61,7 +61,7 @@ id:editId||window.LariosCurrentContractId||'',status:status||'draft',
 customer_name:val('customer_name'),customer_document:val('customer_document'),customer_email:val('customer_email')||'',customer_phone:val('customer_phone'),customer_nationality:val('customer_nationality'),customer_address:val('customer_address'),...(window.LariosAddress?.payload?.()||{}),customer_birth_date:val('customer_birth_date'),
 driving_license:val('driving_license'),license_issued_by:val('license_issued_by'),license_issue:val('license_issue'),license_expiry:val('license_expiry'),
 additional_name:val('additional_name'),additional_driving_license:val('additional_driving_license'),additional_license_issued_by:val('additional_license_issued_by'),additional_birth_date:val('additional_birth_date'),additional_license_issue:val('additional_license_issue'),additional_license_expiry:val('additional_license_expiry'),
-vehicle_group:val('vehicle_group'),assigned_vehicle_group:val('assigned_vehicle_group'),vehicle_quantity:val('vehicle_quantity')||'1',vehicle_plate:val('vehicle_plate'),vehicle_model:val('vehicle_model'),vehicle_color:val('vehicle_color'),fuel_type:val('fuel_type'),km_out:val('km_out'),km_in:val('km_in'),fuel_out:val('fuel_out'),fuel_in:val('fuel_in'),
+vehicle_group:val('vehicle_group'),assigned_vehicle_group:val('assigned_vehicle_group'),vehicle_quantity:val('vehicle_quantity')||'1',vehicle_plate:val('vehicle_plate'),vehicle_model:val('vehicle_model'),vehicle_color:val('vehicle_color'),fuel_type:val('fuel_type'),km_out:val('km_out'),km_in:val('km_in'),fuel_out:val('fuel_out'),fuel_out_selected_at:/^[0-8]\/8$/.test(val('fuel_out'))&&$('fuel_out')?.dataset.userSelected==='1'?new Date().toISOString():null,fuel_in:val('fuel_in'),
 pickup_date:val('pickup_date')||reservationDate(val('pickup_time')),pickup_time:val('pickup_time'),pickup_location:val('pickup_location'),return_date:val('return_date'),return_time:val('return_time'),return_location:val('return_location'),rental_days:val('rental_days')||'1',
 tariff94:checked('tariff94'),tariff_name:$('tariff94')?.dataset.tariffName||'',tariff_markup_percent:$('tariff94')?.dataset.markup||'',
 rental_price:val('rental_price')||'0',full_insurance:checked('full_insurance'),insurance_total:val('insurance_total')||'0',young_driver:checked('young_driver'),young_driver_amount:val('young_driver_amount')||'0',
@@ -145,19 +145,24 @@ function ensureFuelLevelControl(x){
     return
   }
   box.style.display='';
-  const explicitlySelected=!!x?.app_payload?.fuel_out_selected_at;
-  const saved=explicitlySelected?String(x?.fuel_out||x?.delivery_fuel||x?.app_payload?.fuel_out||'').trim():'';
+  const rawSaved=String(x?.fuel_out||x?.delivery_fuel||x?.app_payload?.fuel_out||'').trim();
+  const explicitlySelected=!!x?.app_payload?.fuel_out_selected_at||/^[0-8]\/8$/.test(rawSaved);
+  const saved=explicitlySelected?rawSaved:'';
   input.value=saved;
   input.dataset.userSelected=explicitlySelected?'1':'0';
   box.querySelectorAll('.lrFuelOutGrid button').forEach(b=>b.classList.toggle('on',b.dataset.value===saved));
 }
 function fill(x){
   setEditingId(x.id);
+  window.LariosCurrentContract=x;
   window.LariosWebBooking?.open(x);
   const generated=x.status!=='draft',form=$('reservationForm');if(form)form.dataset.contractStatus=x.status||'draft';
   if($('reservationTitle'))$('reservationTitle').textContent=generated?'Editar contrato '+(x.contract_number||''):'Editar reserva';
   const plain=['customer_name','customer_document','customer_email','customer_phone','customer_nationality','customer_address','driving_license','license_issued_by','additional_name','additional_driving_license','additional_license_issued_by','vehicle_group','assigned_vehicle_group','vehicle_quantity','vehicle_plate','vehicle_model','vehicle_color','fuel_type','km_out','km_in','fuel_out','fuel_in','pickup_location','return_location','rental_days','rental_price','insurance_total','young_driver_amount','discount_percent','vat_percent','deposit','franchise','payment_method','billing_notes','accessories_notes','agency','card_number','card_expiry'];
-  plain.forEach(k=>{const el=$(k);if(!el||x[k]===undefined||x[k]===null)return;if(k==='vehicle_group')ensureVehicleGroupValue(x[k]);else el.value=x[k]});
+  plain.forEach(k=>{const el=$(k);if(!el||x[k]===undefined||x[k]===null)return;if(k==='vehicle_group')ensureVehicleGroupValue(x[k]);else{if(k==='payment_method'&&el.tagName==='SELECT'&&!Array.from(el.options||[]).some(o=>String(o.value)===String(x[k]))){const option=document.createElement('option');option.value=x[k];option.textContent=x[k];el.appendChild(option)}el.value=x[k]}});
+  const cardField=$('card_number'),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4);
+  if(cardField&&/^\d{4}$/.test(last4)){cardField.value='•••• '+last4;cardField.readOnly=true;cardField.dataset.stripeMasked='1'}
+  else if(cardField){cardField.readOnly=false;delete cardField.dataset.stripeMasked}
   if(String(x.vehicle_group||'').toUpperCase().replace(/\s+/g,'')==='125CC'&&Number(x.rental_price||0)>0){const rp=$('rental_price');if(rp){rp.value=x.rental_price;rp.dataset.manualPrice='1';rp.dataset.priceReady='1'}if($('contract_total')&&Number(x.total||0)>0)$('contract_total').value=x.total}
   if($('contract_total')&&x.total!==undefined&&x.total!==null)$('contract_total').value=x.total;
   for(const k of ['customer_birth_date','license_issue','license_expiry','additional_birth_date','additional_license_issue','additional_license_expiry']){if($(k)&&x[k])$(k).value=displayDateValue(x[k])}
@@ -225,3 +230,4 @@ async function collected(id){const x=cache.find(v=>v.id===id);if(!x)return;editI
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 return {openNew,closeQuick,example,createQuick,close,save,loadAgenda,edit,printContract,cancelReservation,collected,reservationDate,getAgendaSnapshot:agendaSnapshot,returnLocationNeedsAttention,__coreEdit:edit,__coreVersion:'20260918-stable1'};
 })();
+

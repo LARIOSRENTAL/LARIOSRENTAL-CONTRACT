@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261003-1400-readonly-fix';
+const CACHE = 'larios-rental-pro-20261021-contract-stripe-pdf';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
@@ -26,3 +26,4 @@ self.addEventListener('fetch', event => {
     return response;
   }).catch(() => caches.match(request).then(cached => cached || (request.mode === 'navigate' ? caches.match('./index.html') : Response.error()))));
 });
+
