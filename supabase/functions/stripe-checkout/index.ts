@@ -1,3 +1,4 @@
+import handleExternalPayment from "./external-payment.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
@@ -26,6 +27,7 @@ async function saveCheckoutCard(service:any,contract:any,session:any,actorId:str
 async function saveTerminalCard(service:any,contract:any,pi:any,actorId:string|null){const cp=pi?.latest_charge?.payment_method_details?.card_present;const generated=String(cp?.generated_card||"");const cus=typeof pi.customer==="string"?pi.customer:String(pi.customer?.id||"");if(!generated)return null;return saveMethod(service,contract.id,contract.customer_id,cus,generated,actorId);}
 
 Deno.serve(async(req:Request)=>{
+ if(req.method==="POST"){const probe=await req.clone().json().catch(()=>({}));if(String(probe.action||"").startsWith("external_"))return handleExternalPayment(req);}
  if(req.method==="OPTIONS")return new Response("ok",{headers:cors});if(req.method!=="POST")return json({error:"Method not allowed"},405);
  const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");if(!jwt)return json({error:"Authentication required"},401);
  const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});const {data:auth,error:authError}=await service.auth.getUser(jwt);const role=auth.user?.app_metadata?.role;if(authError||!auth.user||!["employee","admin"].includes(role))return json({error:"Not authorized"},403);

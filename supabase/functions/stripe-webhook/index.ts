@@ -49,6 +49,25 @@ Deno.serve(async (req: Request) => {
   const service = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: payment, error } = await service.from("stripe_payments").select("*").eq("checkout_session_id", String(session.id || "")).maybeSingle();
   if (error) return json({ error: error.message }, 500);
+  if (!payment && session.mode === "setup") {
+    const { data: setup, error: setupError } = await service.from("stripe_card_setups").select("*").eq("checkout_session_id", String(session.id || "")).maybeSingle();
+    if (setupError) return json({ error: "Could not load card setup" }, 500);
+    if (!setup) return json({ received: true, unmatched: true });
+    if (setup.status === "complete") return json({ received: true, card_registered: true });
+    if (event.type === "checkout.session.expired") {
+      const { error } = await service.from("stripe_card_setups").update({ status: "expired" }).eq("id", setup.id);
+      return error ? json({ error: "Could not expire card setup" }, 500) : json({ received: true });
+    }
+    try {
+      const checked = await stripe(`/v1/checkout/sessions/${encodeURIComponent(session.id)}?expand[]=setup_intent.payment_method`);
+      const intent = checked.setup_intent, method = intent?.payment_method;
+      if (checked.mode !== "setup" || checked.status !== "complete" || checked.client_reference_id !== setup.contract_id || checked.metadata?.contract_id !== setup.contract_id || checked.customer !== setup.stripe_customer_id || intent?.status !== "succeeded" || intent?.usage !== "off_session" || method?.type !== "card" || method.customer !== setup.stripe_customer_id || !/^pm_[A-Za-z0-9]+$/.test(method.id || "") || !/^\d{4}$/.test(method.card?.last4 || "")) return json({ error: "Card setup reconciliation mismatch" }, 409);
+      const { error: saveError } = await service.rpc("save_external_stripe_card", { p_contract_id: setup.contract_id, p_actor_id: setup.created_by, p_stripe_customer_id: setup.stripe_customer_id, p_payment_method_id: method.id, p_brand: method.card.brand || "card", p_last4: method.card.last4, p_exp_month: method.card.exp_month, p_exp_year: method.card.exp_year });
+      if (saveError) return json({ error: "Could not save reusable card" }, 500);
+      const { error: finishError } = await service.from("stripe_card_setups").update({ status: "complete", completed_at: new Date().toISOString() }).eq("id", setup.id);
+      return finishError ? json({ error: "Could not finish card setup" }, 500) : json({ received: true, card_registered: true });
+    } catch { return json({ error: "Could not verify card setup" }, 500); }
+  }
   if (!payment) return json({ received: true, unmatched: true });
   const now = new Date().toISOString(), amountMatches = Number(session.amount_total || 0) === Number(payment.amount_cents), referenceMatches = String(session.client_reference_id || "") === String(payment.contract_id) && String(session.metadata?.contract_id || "") === String(payment.contract_id);
   if (!amountMatches || !referenceMatches) {

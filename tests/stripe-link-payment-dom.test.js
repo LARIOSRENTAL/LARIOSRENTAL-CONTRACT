@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {JSDOM}=require('jsdom');
+const source=fs.readFileSync(require.resolve('../app-v84/www/payment-methods-v1.js'),'utf8');
+const wait=()=>new Promise(resolve=>setTimeout(resolve,20));
+async function run(admin){
+ const dom=new JSDOM('<body><section id="reservation"><label><select id="payment_method"><option>Stripe</option></select></label><input id="contract_total" value="78"><input id="fuel_out" value="1/2"><input id="signature" value="signature-unchanged"></section></body>',{url:'https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/',runScripts:'outside-only'});
+ const w=dom.window,calls=[];w.cfg={supabaseUrl:'https://example.supabase.co',supabasePublishableKey:'public'};w.token='user';w.LariosCurrentContractId='contract-1';w.LariosCurrentContract={id:'contract-1'};w.LariosAccess={isAdmin:()=>admin};w.LariosWorkflow={saveOpenReservation:async()=>({id:w.LariosCurrentContractId})};w.LariosSignaturePersistence={save(){}};w.alert=()=>{};
+ w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'))};
+ w.fetch=async(url,init)=>{const body=JSON.parse(init.body);body.action=body.action.replace(/^external_/, '');calls.push(body);const data=body.action==='preview'?{verified:true,contract_number:63200,amount_cents:7800,paid_at:new Date().toISOString(),brand:'visa',last4:'4242',payment_intent_id:'pi_test123',livemode:true}:body.action==='link'?{linked:true,paid:true,reusable:false,metadata_synced:true,amount_cents:7800,payment_intent_id:'pi_test123'}:body.action==='setup_create'?{setup_url:'https://checkout.stripe.com/c/pay/test'}:{reusable:false};return{ok:true,json:async()=>data}};
+ const observers=[];const Observer=w.MutationObserver;w.MutationObserver=class extends Observer{constructor(cb){super(cb);observers.push(this)}};
+ w.eval(source);w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await wait();
+ const button=w.document.getElementById('lrLinkStripeBtn');assert.equal(button.hidden,!admin);assert.ok(w.document.getElementById('lrRegisterStripeCardBtn'));
+ if(admin){button.click();w.document.getElementById('lrExternalReference').value='pi_test123';w.document.getElementById('lrExternalVerify').click();await wait();assert.match(w.document.getElementById('lrExternalResult').textContent,/78,00/);assert.equal(w.document.getElementById('lrExternalConfirm').hidden,false);w.document.getElementById('lrExternalConfirm').click();await wait();assert.match(w.document.getElementById('lrExternalResult').textContent,/no está disponible para cargos posteriores/);assert.equal(w.document.getElementById('signature').value,'signature-unchanged');assert.equal(w.document.getElementById('fuel_out').value,'1/2');assert.equal(calls.filter(c=>c.action==='link').length,1);w.document.getElementById('lrExternalClose').click();w.document.getElementById('lrRegisterStripeCardBtn').click();w.document.getElementById('lrCardSetupPrepare').click();await wait();assert.equal(w.document.getElementById('lrCardSetupLink').href,'https://checkout.stripe.com/c/pay/test');assert.equal(w.document.getElementById('signature').value,'signature-unchanged');}
+ for(const observer of observers)observer.disconnect();dom.window.close();
+}
+(async()=>{await run(true);await run(false);console.log('Stripe linking and card setup dialogs, admin visibility and editor preservation: ok')})().catch(e=>{console.error(e);process.exit(1)});
