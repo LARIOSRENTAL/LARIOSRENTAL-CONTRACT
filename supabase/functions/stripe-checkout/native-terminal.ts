@@ -6,6 +6,22 @@ async function stripe(path: string, body?: URLSearchParams, key?: string) {
  const r=await fetch('https://api.stripe.com/v1/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+env('STRIPE_SECRET_KEY'),'Stripe-Version':env('STRIPE_API_VERSION')||'2026-08-26.dahlia',...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{}),...(key?{'Idempotency-Key':key}:{})},body});
  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||'Stripe no pudo completar la operación');return d;
 }
+// Keep background reconciliation subscribed even when the app closes during confirmation.
+// The URL is server-owned; callers cannot change the endpoint or its existing events.
+let webhookReady: Promise<void>|null=null;
+async function ensureNativeWebhook(){
+ if(webhookReady)return webhookReady;
+ webhookReady=(async()=>{
+  const target=env('SUPABASE_URL').replace(/\/$/,'')+'/functions/v1/stripe-webhook';
+  const endpoints=await stripe('webhook_endpoints?limit=100');
+  const matches=(endpoints.data||[]).filter((e:any)=>String(e.url||'').replace(/\/$/,'')===target&&e.status==='enabled');
+  if(!matches.length)throw Error('No se encontró el webhook activo de Larios Rental en Stripe. Revisa la configuración antes de cobrar.');
+  for(const endpoint of matches){const events=endpoint.enabled_events||[];if(events.includes('*')||events.includes('payment_intent.succeeded'))continue;
+   const params=new URLSearchParams();[...events,'payment_intent.succeeded'].forEach((event:string,index:number)=>params.set('enabled_events['+index+']',event));
+   await stripe('webhook_endpoints/'+encodeURIComponent(endpoint.id),params);
+  }
+ })().catch(error=>{webhookReady=null;throw error});return webhookReady;
+}
 const objectId=(value: any)=>typeof value==='string'?value:value?.id;
 export async function reconcileNativePayment(db: any, intentId: string) {
  const {data:payment,error}=await db.from('stripe_payments').select('*').eq('payment_intent_id',intentId).maybeSingle();
@@ -44,7 +60,7 @@ export default async function nativeTerminal(req: Request) {
   if(!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(body.contract_id||''))return json({error:'Contrato no válido'},400);
   const {data:c,error:contractError}=await db.from('contracts').select('id,contract_number,total,app_payload').eq('id',body.contract_id).single();
   if(contractError||!c)return json({error:'Contrato no encontrado'},404);
-  if(action==='native_config')return json({location_id:location,mode:live?'live':'test',configured:true});
+  if(action==='native_config'){await ensureNativeWebhook();return json({location_id:location,mode:live?'live':'test',configured:true})}
   if(action==='native_connection_token'){const token=await stripe('terminal/connection_tokens',new URLSearchParams({location}));return json({secret:token.secret})}
   const {data:rows,error:rowsError}=await db.from('stripe_payments').select('*').eq('contract_id',c.id).like('checkout_session_id','tap:%').order('created_at',{ascending:false});
   if(rowsError)throw Error('No se pudieron comprobar los cobros anteriores');
@@ -72,6 +88,7 @@ export default async function nativeTerminal(req: Request) {
    return json({payment_intent_id:pi.id,client_secret:pi.client_secret,amount_cents:cents,reused:true,mode:live?'live':'test'});
   }}
   if(c.app_payload?.payment_status==='paid')return json({error:'Este contrato ya figura pagado. Usa Cargo adicional si corresponde'},409);
+  await ensureNativeWebhook();
   const ref='LR-'+String(c.contract_number).padStart(6,'0');
   const customer=await stripe('customers',new URLSearchParams({'metadata[contract_id]':c.id,description:'Larios Rental · '+ref}),'lr-native-customer-'+c.id);
   const params=new URLSearchParams({amount:String(cents),currency:'eur',customer:customer.id,capture_method:'automatic',setup_future_usage:'off_session',description:'Larios Rental · '+ref,'payment_method_types[0]':'card_present','metadata[contract_id]':c.id,'metadata[contract_number]':ref,'metadata[channel]':'tap_to_pay','metadata[purpose]':'rental','metadata[created_by]':auth.user.id,'metadata[card_consent]':'rental_off_session_v1'});
