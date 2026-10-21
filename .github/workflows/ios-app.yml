@@ -1,0 +1,111 @@
+name: Build iPhone app
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: Apple profile type for signed export
+        type: choice
+        default: release-testing
+        options: [release-testing, debugging, app-store-connect]
+  push:
+    branches: [agent/mobile-v84]
+    paths:
+      - 'app-v84/www/**'
+      - 'app-v84/native/**'
+      - 'app-v84/scripts/prepare-ios.py'
+      - 'app-v84/scripts/create-ios.mjs'
+      - 'app-v84/scripts/configure-ios-signing.py'
+      - 'app-v84/scripts/prepare-terminal.mjs'
+      - 'app-v84/package*.json'
+      - '.github/workflows/ios-app.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: app-v84
+    env:
+      LR_IOS_EXPORT_METHOD: ${{ inputs.export_method || 'release-testing' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare native bundle and contract assets
+        run: |
+          npm ci
+          npm run native:prepare
+          mkdir -p www/assets www/vendor
+          cp ../static/assets/contrato-larios-normalizado.pdf ../static/assets/damage-map.png ../static/assets/icon-192.png ../static/assets/icon-512.png www/assets/
+          cp ../static/vendor/pdf-lib.min.js www/vendor/
+      - name: Create and configure the official Capacitor iOS template
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          node scripts/create-ios.mjs
+      - name: Validate iOS compilation without Apple credentials
+        run: |
+          mkdir -p build dist
+          set -o pipefail
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO build > build/ios-build.log 2>&1 || { tail -150 build/ios-build.log; exit 1; }
+          printf '%s\n' 'iOS source compilation passed. This is not an installable iPhone app. Apple-issued signing and Tap to Pay entitlements are required for installation and real-device testing.' > dist/iOS-validation.txt
+      - name: Configure Apple signing when credentials are available
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.LR_IOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.LR_IOS_CERTIFICATE_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.LR_IOS_PROVISIONING_PROFILE_BASE64 }}
+          LR_IOS_TEAM_ID: ${{ secrets.LR_IOS_TEAM_ID }}
+        run: |
+          if [[ -z "$CERTIFICATE_BASE64$PROFILE_BASE64$LR_IOS_TEAM_ID" ]]; then
+            echo 'IOS_SIGNED_BUILD=false' >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [[ -z "$CERTIFICATE_BASE64" || -z "$PROFILE_BASE64" || -z "$LR_IOS_TEAM_ID" ]]; then
+            echo 'Incomplete Apple signing credentials' >&2
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/larios-ios.keychain-db"
+          keychain_password=$(openssl rand -base64 32)
+          echo "::add-mask::$keychain_password"
+          echo "KEYCHAIN_PATH=$keychain" >> "$GITHUB_ENV"
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/larios-ios.p12"
+          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/larios-ios.mobileprovision"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/larios-ios.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain" > /dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security cms -D -i "$RUNNER_TEMP/larios-ios.mobileprovision" > build/profile.plist
+          security find-identity -v -p codesigning "$keychain" > build/identities.txt
+          LR_IOS_CERTIFICATE_SHA1=$(python3 -c "import re;from pathlib import Path;s=Path('build/identities.txt').read_text();m=re.search(r'\b([A-F0-9]{40})\b',s);assert m,'No valid Apple signing identity';print(m[1])")
+          export LR_IOS_CERTIFICATE_SHA1
+          export LR_IOS_PROFILE_PLIST=build/profile.plist
+          python3 scripts/configure-ios-signing.py
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$RUNNER_TEMP/larios-ios.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/larios-rental.mobileprovision"
+          echo 'IOS_SIGNED_BUILD=true' >> "$GITHUB_ENV"
+      - name: Archive and export signed iPhone app
+        if: env.IOS_SIGNED_BUILD == 'true'
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath build/Larios-Rental.xcarchive archive > build/ios-archive.log 2>&1 || { tail -100 build/ios-archive.log; exit 1; }
+          xcodebuild -exportArchive -archivePath build/Larios-Rental.xcarchive -exportOptionsPlist build/ExportOptions.plist -exportPath dist > build/ios-export.log 2>&1 || { tail -100 build/ios-export.log; exit 1; }
+          test -s dist/*.ipa
+          codesign --verify --deep --strict build/Larios-Rental.xcarchive/Products/Applications/App.app
+          rm dist/iOS-validation.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: larios-rental-iphone-${{ env.IOS_SIGNED_BUILD == 'true' && 'firmado' || 'validacion-sin-firma' }}
+          path: app-v84/dist/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove Apple signing material
+        if: always()
+        run: |
+          if [[ -n "$KEYCHAIN_PATH" ]]; then security delete-keychain "$KEYCHAIN_PATH" || true; fi
+          rm -f "$RUNNER_TEMP/larios-ios.p12" "$RUNNER_TEMP/larios-ios.mobileprovision" build/profile.plist build/identities.txt "$HOME/Library/MobileDevice/Provisioning Profiles/larios-rental.mobileprovision"

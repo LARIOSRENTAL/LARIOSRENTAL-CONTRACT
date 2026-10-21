@@ -1289,6 +1289,10 @@
     };
     let initialized = false, listening = false, initializing = null, activeContract = "", connected = false, working = false;
     const pendingKey = "lr_native_tap_pending";
+    const education = registerPlugin("LariosTapEducation");
+    const showHelp = async () => {
+      await education.present({ force: true });
+    };
     const context = () => window.LariosPayments?.nativeContext?.();
     async function call(action, extra = {}) {
       const c = context();
@@ -1331,6 +1335,10 @@
       message("Comprobando el lector contactless del dispositivo\u2026");
       const info = await Device.getInfo();
       if (info.platform === "android" && Number(info.osVersion.split(".")[0]) < 13) throw Error("Tap to Pay necesita Android 13 o posterior y un dispositivo NFC compatible.");
+      if (info.platform === "ios") {
+        if (info.model?.toLowerCase().includes("ipad")) throw Error("El iPad puede gestionar contratos, pero Tap to Pay necesita un iPhone compatible.");
+        await education.present({ force: false });
+      }
       await initialize(config.mode);
       const found = await StripeTerminal.discoverReaders({ type: TerminalConnectTypes.TapToPay, locationId: config.location_id });
       const reader = found.readers?.[0];
@@ -1393,6 +1401,19 @@
         working = false;
       }
     }
+    async function checkDevice({ contract_id }) {
+      if (working) throw Error("Ya hay una operaci\xF3n Tap to Pay en curso.");
+      working = true;
+      activeContract = contract_id;
+      try {
+        const config = await call("native_config");
+        if (config.mode === "live" && window.LariosNativeBuild?.debug) throw Error("Instala el APK firmado para comprobar Tap to Pay real.");
+        await connect(config);
+        return { ready: true, mode: config.mode };
+      } finally {
+        working = false;
+      }
+    }
     async function cancel() {
       if (working) await StripeTerminal.cancelCollectPaymentMethod().catch(() => {
       });
@@ -1410,7 +1431,7 @@
       void verifyPending().catch(() => {
       });
     });
-    window.LariosNativeStripeTerminal = { tapToPay, verifyPending, cancel };
+    window.LariosNativeStripeTerminal = { tapToPay, verifyPending, cancel, checkDevice, ...Capacitor.getPlatform?.() === "ios" ? { showHelp } : {} };
   }
 })();
 /*! Bundled license information:

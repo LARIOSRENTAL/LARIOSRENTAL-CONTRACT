@@ -23,6 +23,7 @@ patch(file,'CollectPaymentIntentConfiguration.Builder().updatePaymentIntent(true
 patch(kotlin+'StripeTerminalPlugin.kt','        } else {\n            requestPermissionForAlias("location", call, "locationPermsCallback")\n        }','        } else {\n            call.reject("Permite el acceso a la ubicación en Ajustes para usar Tap to Pay.")\n        }');
 const swift=root+'/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift';
 patch(swift,'                self.collectCancelable = Terminal.shared.collectPaymentMethod(paymentIntent) { collectResult, collectError in','                guard let config = try? CollectPaymentIntentConfigurationBuilder().setAllowRedisplay(.limited).setUpdatePaymentIntent(true).build() else { call.reject("Invalid card consent configuration"); return }\n                self.collectCancelable = Terminal.shared.collectPaymentMethod(paymentIntent, collectConfig: config) { collectResult, collectError in');
+patch(root+'/CapacitorCommunityStripeTerminal.podspec', "s.dependency 'StripeTerminal', '~> 5.8.0'", "s.dependency 'StripeTerminal', '5.8.0'");
 patch(root+'/android/build.gradle',"'5.8.+'","'5.8.0'");
 // Replace all three Stripe artifacts, including after the first guarded replacement.
 s=fs.readFileSync(root+'/android/build.gradle','utf8').replaceAll("'5.8.+'","'5.8.0'").replaceAll("'19.2.+'","'19.2.1'");fs.writeFileSync(root+'/android/build.gradle',s);

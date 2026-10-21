@@ -9,9 +9,10 @@
     "sync": "npx cap sync",
     "android:add": "npx cap add android",
     "android:open": "npx cap open android",
-    "ios:add": "npx cap add ios",
+    "ios:add": "npm run native:prepare && node scripts/create-ios.mjs",
     "ios:open": "npx cap open ios",
-    "native:prepare": "node scripts/prepare-terminal.mjs && esbuild native/tap-to-pay.js --bundle --format=iife --target=es2020 --outfile=www/native-terminal.js"
+    "native:prepare": "node scripts/prepare-terminal.mjs && esbuild native/tap-to-pay.js --bundle --format=iife --target=es2020 --outfile=www/native-terminal.js",
+    "ios:prepare": "python3 scripts/prepare-ios.py && npx cap sync ios"
   },
   "dependencies": {
     "@capacitor-community/stripe-terminal": "8.3.0",
