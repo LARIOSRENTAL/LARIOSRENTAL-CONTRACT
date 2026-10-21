@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261021-contract-stripe-pdf';
+const CACHE = 'larios-rental-pro-20261021-native-terminal';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
