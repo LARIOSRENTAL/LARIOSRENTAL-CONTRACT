@@ -10,7 +10,7 @@ function normalizeExpiry(v){return String(v||'').trim()}
 function currentId(){return String(window.LariosCurrentContractId||'')}
 function read(id=currentId()){
   if(!id)return null;
-  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');if(x?.masked===true&&/^\d{4}$/.test(String(x.last4||'')))return x;return x&&normalizeCard(x.card).length>=12?x:null}catch(_){return null}
+  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');return x?.masked===true&&/^\d{4}$/.test(String(x.last4||''))?x:null}catch(_){return null}
 }
 function paintMasked(last4,expiry=''){
   const card=$('card_number'),exp=$('card_expiry');
@@ -26,13 +26,7 @@ function setStripeCard(id,cardInfo={}){
   const expiry=month!=='00'&&/^\d{4}$/.test(year)?`${month}/${year}`:'';
   sessionStorage.setItem(key(id),JSON.stringify({masked:true,last4,expiry,savedAt:Date.now()}));paintMasked(last4,expiry);return true;
 }
-function remember(id=currentId()){
-  if(!id)return;
-  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry||card.dataset.stripeMasked==='1')return;
-  const digits=normalizeCard(card.value);
-  if(digits.length<12)return;
-  sessionStorage.setItem(key(id),JSON.stringify({card:card.value,expiry:expiry.value||'',savedAt:Date.now()}));
-}
+function remember(){return false}
 function clear(id=currentId()){
   if(!id)return;
   sessionStorage.removeItem(key(id));
@@ -44,9 +38,7 @@ function applySaved(id=currentId()){
   const x=read(id);if(!x)return false;
   const card=$('card_number'),expiry=$('card_expiry');
   if(x.masked){paintMasked(x.last4,x.expiry);return true}
-  if(card){card.value=x.card||'';card.readOnly=false;delete card.dataset.stripeMasked}
-  if(expiry){expiry.value=x.expiry||'';expiry.readOnly=false}
-  return true;
+  return false;
 }
 function enrichSaveRequest(input,init){
   try{
@@ -54,15 +46,7 @@ function enrichSaveRequest(input,init){
     if(!/\/rest\/v1\/rpc\/app_save_contract(?:\?|$)/.test(url)||!init||typeof init.body!=='string')return init;
     const body=JSON.parse(init.body);
     if(!body||!body.p_payload||typeof body.p_payload!=='object')return init;
-    const id=String(body.p_payload.id||currentId());
-    remember(id);
-    const saved=read(id);
-    if(saved?.masked){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
-    else if(saved){body.p_payload.card_number=saved.card;body.p_payload.card_expiry=saved.expiry}
-    else {
-      const digits=normalizeCard(body.p_payload.card_number);
-      if(digits.length<12){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
-    }
+    delete body.p_payload.card_number;delete body.p_payload.card_expiry;
     return {...init,body:JSON.stringify(body)};
   }catch(_){return init}
 }
@@ -80,10 +64,11 @@ async function hydrate(id){
   if(applySaved(id))return;
   if(record.card_last4){setStripeCard(id,{last4:record.card_last4,exp_month:record.card_expiry_month,exp_year:record.card_expiry_year});return}
   const card=$('card_number'),expiry=$('card_expiry');
-  if(card){card.value=record.card_number||'';card.readOnly=false;delete card.dataset.stripeMasked}
-  if(expiry){expiry.value=record.card_expiry||'';expiry.readOnly=false}
+  if(card){card.value='';card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value='';expiry.readOnly=false}
 }
 function bindInputs(){
+  try{for(let i=sessionStorage.length-1;i>=0;i--){const k=sessionStorage.key(i);if(k&&k.startsWith('lr_contract_card_')){const v=JSON.parse(sessionStorage.getItem(k)||'null');if(v&&!v.masked)sessionStorage.removeItem(k)}}}catch(_){}
   for(const id of ['card_number','card_expiry']){
     const el=$(id);if(!el||el.dataset.lrCardRemember==='1')continue;
     el.dataset.lrCardRemember='1';
