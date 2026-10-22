@@ -33,9 +33,14 @@ function restoreExtras(x){
   });
 }
 function restoreCard(x){
- const card=$('card_number'),expiry=$('card_expiry'),storedDigits=String(x.card_number||'').replace(/\D/g,''),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4)||(storedDigits.length>=12?storedDigits.slice(-4):'');
- if(card){card.readOnly=false;card.disabled=false;if(/^\d{4}$/.test(last4)){card.value='•••• '+last4;card.dataset.stripeMasked='1';card.dataset.lrMaskedLast4=last4}else if(x.card_number)setValue('card_number',x.card_number)}
- if(expiry){expiry.readOnly=false;expiry.disabled=false;if(x.card_expiry)setValue('card_expiry',x.card_expiry);else if(x.card_expiry_month&&x.card_expiry_year)setValue('card_expiry',String(x.card_expiry_month).padStart(2,'0')+'/'+String(x.card_expiry_year))}
+ const card=$('card_number'),expiry=$('card_expiry'),closed=['returned','collected'].includes(String(x.status||'').toLowerCase()),storedDigits=String(x.card_number||'').replace(/\D/g,''),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4)||(storedDigits.length>=12?storedDigits.slice(-4):'');
+ if(closed){
+  if(card){card.value='';card.readOnly=true;card.disabled=true;card.placeholder='Tarjeta borrada al cerrar el alquiler';delete card.dataset.stripeMasked;delete card.dataset.lrMaskedLast4}
+  if(expiry){expiry.value='';expiry.readOnly=true;expiry.disabled=true;expiry.placeholder='No disponible tras la recogida'}
+  return;
+ }
+ if(card){card.readOnly=false;card.disabled=false;card.placeholder='TARJETA';if(/^\d{4}$/.test(last4)){card.value='•••• '+last4;card.dataset.stripeMasked='1';card.dataset.lrMaskedLast4=last4}else if(x.card_number)setValue('card_number',x.card_number)}
+ if(expiry){expiry.readOnly=false;expiry.disabled=false;expiry.placeholder='CADUCIDAD';if(x.card_expiry)setValue('card_expiry',x.card_expiry);else if(x.card_expiry_month&&x.card_expiry_year)setValue('card_expiry',String(x.card_expiry_month).padStart(2,'0')+'/'+String(x.card_expiry_year))}
 }
 function hasInk(c){try{const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;for(let i=3;i<d.length;i+=4)if(d[i]>20)return true}catch(_){}return false}
 async function restoreSignature(x){
@@ -52,6 +57,7 @@ async function persistSignature(){
 }
 function parseExpiry(raw){const m=String(raw||'').trim().match(/^(0?[1-9]|1[0-2])\s*[\/-]\s*(\d{2}|\d{4})$/);if(!m)return null;let y=Number(m[2]);if(y<100)y+=2000;return{month:Number(m[1]),year:y}}
 async function persistCard(){
+  if(['returned','collected'].includes(String(current?.status||'').toLowerCase()))return;
   const id=window.LariosCurrentContractId||current?.id;if(!id)return;const digits=String($('card_number')?.value||'').replace(/\D/g,''),exp=parseExpiry($('card_expiry')?.value||'');const body={updated_at:new Date().toISOString()};if(digits.length>=4)body.card_last4=digits.slice(-4);if(exp){body.card_expiry_month=exp.month;body.card_expiry_year=exp.year}if(Object.keys(body).length===1)return;
   try{const r=await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:headers({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text())}catch(e){console.warn('No se pudieron conservar los datos de tarjeta',e)}
 }
