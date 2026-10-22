@@ -11,7 +11,7 @@ function clearStrayOverlays(){
   const password=$('lrPasswordPanel');
   if(password&&location.hash.indexOf('access_token')<0&&!new URLSearchParams(location.search).get('auth_action'))password.remove();
   document.querySelectorAll('dialog[open]').forEach(d=>{
-    if(!d.matches('#lrHoldDialog,#lrExternalPaymentDialog,#lrCardSetupDialog,[data-lr-payment-dialog]')){try{d.close()}catch(_){d.removeAttribute('open')}}
+    if(!d.matches('#lrHoldDialog,#lrExternalPaymentDialog,#lrCardSetupDialog')){try{d.close()}catch(_){d.removeAttribute('open')}}
   });
 }
 function unlockAdminForm(){

@@ -8,7 +8,7 @@ const chk=id=>!!$(id)?.checked;
 const money=n=>Number(n||0).toFixed(2);
 function toIso(v){const s=String(v||'').trim();let m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2})$/);if(m){const yy=Number(m[3]),year=yy<=40?2000+yy:1900+yy;return `${year}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;}m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);return m?`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`:s;}
 function selectedExtras(){const out=[];document.querySelectorAll('.extrasTable input[id^="v2_"]').forEach(el=>{if(el.type==='checkbox'&&!el.checked)return;});return out;}
-function payload(){window.LariosBicycleModel?.sync?.();window.LariosMultiUnitVehicles?.syncHidden?.();return{
+function payload(){return{
   id:window.LariosCurrentContractId||'',status:window.LariosWorkflow?.currentStatus?.()||'draft',
   customer_name:val('customer_name'),customer_document:val('customer_document'),customer_email:val('customer_email'),customer_phone:val('customer_phone'),customer_nationality:val('customer_nationality'),customer_address:val('customer_address'),...(window.LariosAddress?.payload?.()||{}),customer_birth_date:toIso(val('customer_birth_date')),
   driving_license:val('driving_license'),license_issued_by:val('license_issued_by'),license_issue:toIso(val('license_issue')),license_expiry:toIso(val('license_expiry')),

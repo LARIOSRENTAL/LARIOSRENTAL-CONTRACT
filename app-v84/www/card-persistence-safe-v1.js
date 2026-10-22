@@ -10,13 +10,13 @@ function normalizeExpiry(v){return String(v||'').trim()}
 function currentId(){return String(window.LariosCurrentContractId||'')}
 function read(id=currentId()){
   if(!id)return null;
-  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');if(x?.masked===true&&/^\d{4}$/.test(String(x.last4||'')))return x;if(x?.card)sessionStorage.removeItem(key(id));return null}catch(_){return null}
+  try{const x=JSON.parse(sessionStorage.getItem(key(id))||'null');if(x?.masked===true&&/^\d{4}$/.test(String(x.last4||'')))return x;return x&&normalizeCard(x.card).length>=12?x:null}catch(_){return null}
 }
 function paintMasked(last4,expiry=''){
   const card=$('card_number'),exp=$('card_expiry');
-  if(card){card.value='•••• '+last4;card.disabled=false;card.readOnly=false;card.dataset.stripeMasked='1';if(card.dataset.lrUnlockMaskedCard!=='1'){card.dataset.lrUnlockMaskedCard='1';card.addEventListener('focus',()=>{if(card.dataset.stripeMasked==='1'){card.value='';delete card.dataset.stripeMasked}})}}
+  if(card){card.value='•••• '+last4;card.readOnly=true;card.dataset.stripeMasked='1'}
   if(expiry&&exp)exp.value=expiry;
-  if(exp){exp.disabled=false;exp.readOnly=false}
+  if(exp)exp.readOnly=true;
 }
 function setStripeCard(id,cardInfo={}){
   id=String(id||currentId());const last4=String(cardInfo.last4||cardInfo.card_last4||'').replace(/\D/g,'').slice(-4);
@@ -28,9 +28,10 @@ function setStripeCard(id,cardInfo={}){
 }
 function remember(id=currentId()){
   if(!id)return;
-  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry)return;
-  const saved=read(id);
-  if(saved?.masked)sessionStorage.setItem(key(id),JSON.stringify({...saved,expiry:expiry.value||saved.expiry||'',savedAt:Date.now()}));
+  const card=$('card_number'),expiry=$('card_expiry');if(!card||!expiry||card.dataset.stripeMasked==='1')return;
+  const digits=normalizeCard(card.value);
+  if(digits.length<12)return;
+  sessionStorage.setItem(key(id),JSON.stringify({card:card.value,expiry:expiry.value||'',savedAt:Date.now()}));
 }
 function clear(id=currentId()){
   if(!id)return;
@@ -40,8 +41,12 @@ function clear(id=currentId()){
   if(expiry){expiry.value='';expiry.readOnly=false}
 }
 function applySaved(id=currentId()){
-  const x=read(id);if(!x?.masked)return false;
-  paintMasked(x.last4,x.expiry);return true;
+  const x=read(id);if(!x)return false;
+  const card=$('card_number'),expiry=$('card_expiry');
+  if(x.masked){paintMasked(x.last4,x.expiry);return true}
+  if(card){card.value=x.card||'';card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value=x.expiry||'';expiry.readOnly=false}
+  return true;
 }
 function enrichSaveRequest(input,init){
   try{
@@ -52,9 +57,12 @@ function enrichSaveRequest(input,init){
     const id=String(body.p_payload.id||currentId());
     remember(id);
     const saved=read(id);
-    delete body.p_payload.card_number;
-    const expiry=$('card_expiry')?.value||body.p_payload.card_expiry||saved?.expiry||'';
-    if(expiry)body.p_payload.card_expiry=expiry;else delete body.p_payload.card_expiry;
+    if(saved?.masked){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
+    else if(saved){body.p_payload.card_number=saved.card;body.p_payload.card_expiry=saved.expiry}
+    else {
+      const digits=normalizeCard(body.p_payload.card_number);
+      if(digits.length<12){delete body.p_payload.card_number;delete body.p_payload.card_expiry}
+    }
     return {...init,body:JSON.stringify(body)};
   }catch(_){return init}
 }
@@ -72,8 +80,8 @@ async function hydrate(id){
   if(applySaved(id))return;
   if(record.card_last4){setStripeCard(id,{last4:record.card_last4,exp_month:record.card_expiry_month,exp_year:record.card_expiry_year});return}
   const card=$('card_number'),expiry=$('card_expiry');
-  if(card){card.value='';card.disabled=false;card.readOnly=false;delete card.dataset.stripeMasked}
-  if(expiry){expiry.value=record.card_expiry||'';expiry.disabled=false;expiry.readOnly=false}
+  if(card){card.value=record.card_number||'';card.readOnly=false;delete card.dataset.stripeMasked}
+  if(expiry){expiry.value=record.card_expiry||'';expiry.readOnly=false}
 }
 function bindInputs(){
   for(const id of ['card_number','card_expiry']){

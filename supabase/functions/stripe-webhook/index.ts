@@ -1,5 +1,4 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { reconcileNativePayment } from "../stripe-checkout/native-terminal.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
 const env = (name: string) => (Deno.env.get(name) || "").trim();
@@ -45,12 +44,7 @@ Deno.serve(async (req: Request) => {
   if (!env("STRIPE_WEBHOOK_SECRET").startsWith("whsec_")) return json({ error: "Webhook not configured" }, 503);
   const raw = await req.text();
   if (!(await verifySignature(raw, req.headers.get("Stripe-Signature") || ""))) return json({ error: "Invalid signature" }, 400);
-  const nativeEvent=JSON.parse(raw);
-  if(nativeEvent.type==='payment_intent.succeeded'&&nativeEvent.data?.object?.metadata?.channel==='tap_to_pay'){
-    const db=createClient(env('SUPABASE_URL'),env('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});
-    try{const d=await reconcileNativePayment(db,nativeEvent.data.object.id);return d.card_warning?json({error:d.card_warning},500):json({received:true,paid:d.paid});}catch{return json({error:'Could not reconcile native payment'},500)}
-  }
-  const event = nativeEvent, session = event?.data?.object || {}, relevant = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired"].includes(event?.type);
+  const event = JSON.parse(raw), session = event?.data?.object || {}, relevant = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired"].includes(event?.type);
   if (!relevant) return json({ received: true, ignored: true });
   const service = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: payment, error } = await service.from("stripe_payments").select("*").eq("checkout_session_id", String(session.id || "")).maybeSingle();
