@@ -41,7 +41,7 @@ function prepareEditableCard(){
     if(card.dataset.lrEditCardFocus!=='1'){
       card.dataset.lrEditCardFocus='1';
       card.addEventListener('focus',()=>{
-        if(card.dataset.stripeMasked==='1'||/^[•*\\s-]*\\d{4}$/.test(card.value.trim())){
+        if(card.dataset.stripeMasked==='1'||/^[•*\s-]*\d{4}$/.test(card.value.trim())){
           card.value='';delete card.dataset.stripeMasked;
         }
       });
@@ -53,20 +53,19 @@ function prepareEditableCard(){
 function restoreCard(x){
   const card=$('card_number');
   const masked=String(card?.value||'');
-  if(x.card_number&&!/^[•*\\s-]*\\d{4}$/.test(String(x.card_number).trim()))setValue('card_number',x.card_number);
+  if(x.card_number&&!/^[•*\s-]*\d{4}$/.test(String(x.card_number).trim()))setValue('card_number',x.card_number);
   else if(card&&/^\d{4}$/.test(String(x.card_last4||''))&&!masked.trim())card.value='•••• '+x.card_last4;
   if(x.card_expiry)setValue('card_expiry',x.card_expiry);
   else if(x.card_expiry_month&&x.card_expiry_year)setValue('card_expiry',String(x.card_expiry_month).padStart(2,'0')+'/'+String(x.card_expiry_year).slice(-2));
   prepareEditableCard();
 }
-function hasInk(c){try{const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;for(let i=3;i<d.length;i+=4)if(d[i]>20)return true}catch(_){}return false}
 async function restoreSignature(x,attempt=0){
   const c=$('signatureCanvas');
   if(!x?.customer_signature_path||attempt>12)return false;
   if(!c){await new Promise(resolve=>setTimeout(resolve,100));return restoreSignature(x,attempt+1)}
   if(hasInk(c))return true;
   try{
-    const path=String(x.customer_signature_path).replace(/^\\/+/, '').split('/').map(encodeURIComponent).join('/');
+    const path=String(x.customer_signature_path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
     const r=await fetch(cfg.supabaseUrl+'/storage/v1/object/authenticated/contracts/'+path,{headers:headers()});
     if(!r.ok){if(attempt<2){await new Promise(resolve=>setTimeout(resolve,300));return restoreSignature(x,attempt+1)}return false}
     const blob=await r.blob(),url=URL.createObjectURL(blob);
@@ -78,6 +77,7 @@ async function restoreSignature(x,attempt=0){
     });
   }catch(e){console.warn('No se pudo restaurar la firma',e);return false}
 }
+
 async function persistSignature(){
   if(signatureBusy)return;const id=window.LariosCurrentContractId||current?.id,c=$('signatureCanvas');if(!id||!c||!hasInk(c))return;signatureBusy=true;
   try{const blob=await new Promise(resolve=>c.toBlob(resolve,'image/png'));if(!blob)return;const path=id+'/customer-signature.png';const up=await fetch(cfg.supabaseUrl+'/storage/v1/object/contracts/'+path,{method:'POST',headers:headers({'Content-Type':'image/png','x-upsert':'true'}),body:blob});if(!up.ok)throw new Error(await up.text());const patch=await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:headers({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify({customer_signature_path:path,updated_at:new Date().toISOString()})});if(!patch.ok)throw new Error(await patch.text());if(current)current.customer_signature_path=path}catch(e){console.warn('No se pudo guardar la firma del cliente',e)}finally{signatureBusy=false}
