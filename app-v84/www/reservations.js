@@ -67,7 +67,7 @@ tariff94:checked('tariff94'),tariff_name:$('tariff94')?.dataset.tariffName||'',t
 rental_price:val('rental_price')||'0',full_insurance:checked('full_insurance'),insurance_total:val('insurance_total')||'0',young_driver:checked('young_driver'),young_driver_amount:val('young_driver_amount')||'0',
 discount_percent:val('discount_percent')||'0',vat_percent:val('vat_percent')||'21',total:val('contract_total')||'0',deposit:val('deposit')||'0',franchise:val('franchise')||'0',payment_method:val('payment_method'),
 reservation_detail:reservationReferenceValue(),
-billing_notes:val('billing_notes'),accessories_notes:selectedExtrasPayload().map(x=>x.label+' x'+x.qty).join(', ')||val('accessories_notes'),extras_detail:selectedExtrasPayload(),card_number:val('card_number'),card_expiry:val('card_expiry'),cash_without_card:checked('cash_without_card'),agency:val('agency')
+billing_notes:val('billing_notes'),accessories_notes:selectedExtrasPayload().map(x=>x.label+' x'+x.qty).join(', ')||val('accessories_notes'),extras_detail:selectedExtrasPayload(),card_expiry:val('card_expiry'),cash_without_card:checked('cash_without_card'),agency:val('agency')
 };}
 async function save(status){if(!val('customer_name'))return alert('Indica el nombre del cliente.');if(!val('pickup_time'))return alert('Indica la hora de entrega.');if(!val('customer_email')&&!confirm('El cliente no tiene email. ¿Desea continuar sin email?'))return;const current=cache.find(v=>v.id===(editId||window.LariosCurrentContractId)),generated=current&&current.status!=='draft',targetStatus=generated&&status==='draft'?current.status:status;try{const outgoing={...(current||{}),...window.LariosWebBooking?.preservePayload(payload(targetStatus)),status:targetStatus};const d=await rpc('app_save_contract',{p_payload:outgoing});upsertCache(d);setEditingId(d.id||editId);alert(generated&&status==='draft'?'Cambios guardados. El PDF anterior se conserva; pulsa «Regenerar contrato» si también necesitas actualizarlo.':status==='confirmed'?'Contrato confirmado. La reserva queda bloqueada en entregas y pasa a la agenda de devoluciones.':'Reserva guardada.');close()}catch(e){alert('No se pudo guardar: '+e.message)}}
 async function loadAgenda(date){try{currentAgendaDate=date||selectedAgendaDate();await loadCollaboratorPlaces();cache=await rpc('app_list_contracts',{});renderAgenda(currentAgendaDate)}catch(e){if($('agenda'))$('agenda').innerHTML='<div class="notice">No se pudo cargar la agenda.</div>'}}
@@ -152,6 +152,33 @@ function ensureFuelLevelControl(x){
   input.dataset.userSelected=explicitlySelected?'1':'0';
   box.querySelectorAll('.lrFuelOutGrid button').forEach(b=>b.classList.toggle('on',b.dataset.value===saved));
 }
+function stripCardPan(value){
+ if(Array.isArray(value))return value.map(stripCardPan);
+ if(!value||typeof value!=='object')return value;
+ const out={};
+ for(const [key,item] of Object.entries(value)){
+  if(/^(?:card_number|pan|primary_account_number)$/i.test(key))continue;
+  out[key]=stripCardPan(item);
+ }
+ return out;
+}
+function bindEditableMaskedCard(el){
+ if(!el||el.dataset.lrEditableMaskedCard==='1')return;
+ el.dataset.lrEditableMaskedCard='1';
+ el.addEventListener('focus',()=>{
+  if(el.dataset.stripeMasked==='1'){el.value='';el.dataset.stripeMasked='editing'}
+ });
+ el.addEventListener('input',()=>{
+  if(el.dataset.stripeMasked==='editing'&&String(el.value||'').replace(/\D/g,'').length>=5){
+   delete el.dataset.stripeMasked;delete el.dataset.lrMaskedLast4;
+  }
+ });
+ el.addEventListener('blur',()=>{
+  if(el.dataset.stripeMasked==='editing'&&!String(el.value||'').trim()){
+   el.value='•••• '+String(el.dataset.lrMaskedLast4||'');el.dataset.stripeMasked='1';
+  }
+ });
+}
 function fill(x){
   setEditingId(x.id);
   window.LariosCurrentContract=x;
@@ -160,9 +187,10 @@ function fill(x){
   if($('reservationTitle'))$('reservationTitle').textContent=generated?'Editar contrato '+(x.contract_number||''):'Editar reserva';
   const plain=['customer_name','customer_document','customer_email','customer_phone','customer_nationality','customer_address','driving_license','license_issued_by','additional_name','additional_driving_license','additional_license_issued_by','vehicle_group','assigned_vehicle_group','vehicle_quantity','vehicle_plate','vehicle_model','vehicle_color','fuel_type','km_out','km_in','fuel_out','fuel_in','pickup_location','return_location','rental_days','rental_price','insurance_total','young_driver_amount','discount_percent','vat_percent','deposit','franchise','payment_method','billing_notes','accessories_notes','agency','card_number','card_expiry'];
   plain.forEach(k=>{const el=$(k);if(!el||x[k]===undefined||x[k]===null)return;if(k==='vehicle_group')ensureVehicleGroupValue(x[k]);else{if(k==='payment_method'&&el.tagName==='SELECT'&&!Array.from(el.options||[]).some(o=>String(o.value)===String(x[k]))){const option=document.createElement('option');option.value=x[k];option.textContent=x[k];el.appendChild(option)}el.value=x[k]}});
-  const cardField=$('card_number'),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4);
-  if(cardField&&/^\d{4}$/.test(last4)){cardField.value='•••• '+last4;cardField.readOnly=true;cardField.dataset.stripeMasked='1'}
-  else if(cardField){cardField.readOnly=false;delete cardField.dataset.stripeMasked}
+  const cardField=$('card_number'),expiryField=$('card_expiry'),storedDigits=String(x.card_number||'').replace(/\D/g,''),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4)||(storedDigits.length>=12?storedDigits.slice(-4):'');
+  if(cardField){cardField.readOnly=false;cardField.disabled=false;delete cardField.dataset.stripeMasked;delete cardField.dataset.lrMaskedLast4}
+  if(expiryField){expiryField.readOnly=false;expiryField.disabled=false}
+  if(cardField&&/^\d{4}$/.test(last4)){cardField.value='•••• '+last4;cardField.readOnly=false;cardField.disabled=false;cardField.dataset.stripeMasked='1';cardField.dataset.lrMaskedLast4=last4;bindEditableMaskedCard(cardField)}
   if(String(x.vehicle_group||'').toUpperCase().replace(/\s+/g,'')==='125CC'&&Number(x.rental_price||0)>0){const rp=$('rental_price');if(rp){rp.value=x.rental_price;rp.dataset.manualPrice='1';rp.dataset.priceReady='1'}if($('contract_total')&&Number(x.total||0)>0)$('contract_total').value=x.total}
   if($('contract_total')&&x.total!==undefined&&x.total!==null)$('contract_total').value=x.total;
   for(const k of ['customer_birth_date','license_issue','license_expiry','additional_birth_date','additional_license_issue','additional_license_expiry']){if($(k)&&x[k])$(k).value=displayDateValue(x[k])}
@@ -226,7 +254,7 @@ async function edit(id){
 }
 async function printContract(id){if(window.LariosContractDownload?.print)return LariosContractDownload.print(id);alert('El módulo de impresión todavía no está disponible. Vuelve a intentarlo en unos segundos.')}
 async function cancelReservation(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden cancelar reservas.');let x=cache.find(v=>v.id===id)||null;if(!x){try{x=await rpc('app_contract_record',{p_contract_id:id})}catch(e){console.warn('No se pudo cargar la reserva para cancelar',e)}}if(!x?.id)return alert('No se encuentra la reserva. Actualiza la agenda.');const futureDraft=!!(x.renthub_id||x.renthub_contract_id)&&x.status==='draft'&&!x.pdf_path&&Date.parse(x.pickup_at||x.delivery_date||'')>Date.now();const msg=futureDraft?'Se cancelará esta reserva en Larios Rental y también su reserva homóloga en Renthub. ¿Continuar?':'Se cancelará esta reserva en Larios Rental. Renthub solo se cancela automáticamente cuando la entrega es futura y todavía no existe contrato generado. ¿Continuar?';if(!confirm(msg))return;try{const r=await fetch(cfg.supabaseUrl+'/functions/v1/renthub-transfer',{method:'POST',headers:h(),body:JSON.stringify({action:'cancel',contract_id:id})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||d.error||'No se pudo cancelar la reserva');alert(d.renthub_cancelled?'Reserva cancelada en Larios Rental y en Renthub ('+d.external_reference+').':'Reserva cancelada en Larios Rental. La reserva de Renthub no se ha tocado porque no cumplía las condiciones de cancelación automática.');await loadAgenda(selectedAgendaDate())}catch(e){alert('No se ha cancelado la reserva. '+e.message)}}
-async function collected(id){const x=cache.find(v=>v.id===id);if(!x)return;editId=id;try{await rpc('app_save_contract',{p_payload:{...x,id,status:'returned',pickup_date:x.pickup_at?localDate(new Date(x.pickup_at)):'',pickup_time:x.pickup_at?new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(x.pickup_at)):'',return_date:x.return_at?localDate(new Date(x.return_at)):'',return_time:x.return_at?new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(x.return_at)):''}});await loadAgenda(selectedAgendaDate())}catch(e){alert('No se pudo marcar la recogida: '+e.message)}finally{editId=null}}
+async function collected(id){const x=cache.find(v=>v.id===id);if(!x)return;editId=id;try{const safeRecord=stripCardPan({...x,id,status:'returned'});await rpc('app_save_contract',{p_payload:{...safeRecord,pickup_date:x.pickup_at?localDate(new Date(x.pickup_at)):'',pickup_time:x.pickup_at?new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(x.pickup_at)):'',return_date:x.return_at?localDate(new Date(x.return_at)):'',return_time:x.return_at?new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(x.return_at)):''}});await loadAgenda(selectedAgendaDate())}catch(e){alert('No se pudo marcar la recogida: '+e.message)}finally{editId=null}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 return {openNew,closeQuick,example,createQuick,close,save,loadAgenda,edit,printContract,cancelReservation,collected,reservationDate,getAgendaSnapshot:agendaSnapshot,returnLocationNeedsAttention,__coreEdit:edit,__coreVersion:'20260918-stable1'};
 })();

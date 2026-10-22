@@ -32,11 +32,19 @@ function restoreExtras(x){
     const box=$('v2_'+key),qty=$('v2_'+key+'_qty'),price=$('v2_'+key+'_price');if(box)box.checked=true;if(qty)qty.value=String(item.qty||1);if(price){price.value=money(item.unit||0);price.dataset.manualPrice='1'}
   });
 }
-function restoreCard(x){if(x.card_number)setValue('card_number',x.card_number);if(x.card_expiry)setValue('card_expiry',x.card_expiry)}
+function restoreCard(x){
+ const card=$('card_number'),expiry=$('card_expiry'),storedDigits=String(x.card_number||'').replace(/\D/g,''),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4)||(storedDigits.length>=12?storedDigits.slice(-4):'');
+ if(card){card.readOnly=false;card.disabled=false;if(/^\d{4}$/.test(last4)){card.value='•••• '+last4;card.dataset.stripeMasked='1';card.dataset.lrMaskedLast4=last4}else if(x.card_number)setValue('card_number',x.card_number)}
+ if(expiry){expiry.readOnly=false;expiry.disabled=false;if(x.card_expiry)setValue('card_expiry',x.card_expiry);else if(x.card_expiry_month&&x.card_expiry_year)setValue('card_expiry',String(x.card_expiry_month).padStart(2,'0')+'/'+String(x.card_expiry_year))}
+}
 function hasInk(c){try{const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;for(let i=3;i<d.length;i+=4)if(d[i]>20)return true}catch(_){}return false}
 async function restoreSignature(x){
-  const c=$('signatureCanvas');if(!c||hasInk(c)||!x?.customer_signature_path)return;
-  try{const path=String(x.customer_signature_path).replace(/^\/+/,''),r=await fetch(cfg.supabaseUrl+'/storage/v1/object/authenticated/contracts/'+path,{headers:headers()});if(!r.ok)return;const blob=await r.blob(),url=URL.createObjectURL(blob),img=new Image();img.onload=()=>{try{if(!hasInk(c)){const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height)}}finally{URL.revokeObjectURL(url)}};img.src=url}catch(e){console.warn('No se pudo restaurar la firma',e)}
+  const c=$('signatureCanvas');if(!c||hasInk(c))return;
+  try{await window.LariosSignaturePersistence?.restore?.()}catch(e){console.warn('No se pudo restaurar la firma de sesión',e)}
+  if(hasInk(c))return;
+  const pathValue=x?.customer_signature_path||x?.app_payload?.customer_signature_path;
+  if(!pathValue)return;
+  try{const path=String(pathValue).replace(/^\/+/,''),r=await fetch(cfg.supabaseUrl+'/storage/v1/object/authenticated/contracts/'+path,{headers:headers()});if(!r.ok)return;const blob=await r.blob(),url=URL.createObjectURL(blob),img=new Image();img.onload=()=>{try{if(!hasInk(c)){const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height)}}finally{URL.revokeObjectURL(url)}};img.src=url}catch(e){console.warn('No se pudo restaurar la firma del cliente',e)}
 }
 async function persistSignature(){
   if(signatureBusy)return;const id=window.LariosCurrentContractId||current?.id,c=$('signatureCanvas');if(!id||!c||!hasInk(c))return;signatureBusy=true;
@@ -48,7 +56,7 @@ async function persistCard(){
   try{const r=await fetch(cfg.supabaseUrl+'/rest/v1/contracts?id=eq.'+encodeURIComponent(id),{method:'PATCH',headers:headers({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text())}catch(e){console.warn('No se pudieron conservar los datos de tarjeta',e)}
 }
 function bindPersistence(){const cn=$('card_number'),ce=$('card_expiry');[cn,ce].forEach(el=>{if(el&&el.dataset.lrPersistCard!=='1'){el.dataset.lrPersistCard='1';el.addEventListener('change',persistCard);el.addEventListener('blur',persistCard)}});const c=$('signatureCanvas');if(c&&c.dataset.lrPersistSignature!=='1'){c.dataset.lrPersistSignature='1';['pointerup','mouseup','touchend'].forEach(ev=>c.addEventListener(ev,()=>setTimeout(persistSignature,80),{passive:true}))}}
-function applyGenerated(x){restoreCore(x);restoreCard(x);restoreExtras(x);preservePrices(x);window.LariosMultiUnitVehicles?.build?.();restoreSignature(x);bindPersistence()}
+function applyGenerated(x){restoreCore(x);restoreCard(x);restoreExtras(x);preservePrices(x);window.LariosMultiUnitVehicles?.build?.();restoreSignature(x);setTimeout(()=>restoreSignature(x),350);bindPersistence()}
 async function hydrate(id){
   if(!id||loading)return;loading=true;
   try{const x=await loadRecord(id);if(!x)return;current=x;if(x.status==='draft')return;applyGenerated(x);setTimeout(()=>applyGenerated(x),120)}catch(e){console.warn('No se pudo restaurar el contrato generado',e)}finally{loading=false}
@@ -59,6 +67,7 @@ function install(){
   document.addEventListener('larios:reservation-opened',e=>{const id=e.detail?.id;if(id)setTimeout(()=>hydrate(id),0)});
   document.addEventListener('click',e=>{const t=String(e.target?.textContent||'');if(/Aceptar firma/i.test(t))setTimeout(persistSignature,180);if(/Generar contrato|Regenerar contrato/i.test(t)){setTimeout(persistCard,0);setTimeout(persistSignature,0)}},true);
   bindPersistence();
+  if(window.LariosCurrentContractId)setTimeout(()=>hydrate(window.LariosCurrentContractId),0);
   console.log('Generated contract edit persistence installed');
   return true
 }
