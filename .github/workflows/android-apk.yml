@@ -27,6 +27,19 @@ jobs:
           java-version: "21"
       - name: Install dependencies
         run: npm ci
+      - name: Verify payment and guarantee recovery before building
+        run: |
+          npm install --prefix ../tests --ignore-scripts --no-audit --no-fund --package-lock=false
+          cd ..
+          node tests/stripe-native-terminal.test.js
+          node tests/stripe-native-bridge.test.js
+          node tests/stripe-tap-hold.test.js
+          node --test tests/production-preauthorization.mjs
+          node tests/stripe-link-payment.test.js
+          node tests/stripe-link-payment-dom.test.js
+          node tests/stripe-card-setup-webhook.test.js
+          node tests/stripe-terminal-v1.test.js
+          node tests/stripe-checkout-v1.test.js
       - name: Prepare native Tap to Pay bridge
         run: npm run native:prepare
       - name: Bundle contract assets for offline Android WebView
