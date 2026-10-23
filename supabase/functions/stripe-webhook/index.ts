@@ -1,4 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { reconcileNativePayment } from "../stripe-checkout/native-terminal.ts";
+import { reconcileNativeHold } from "../stripe-checkout/native-hold.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
 const env = (name: string) => (Deno.env.get(name) || "").trim();
@@ -44,7 +46,16 @@ Deno.serve(async (req: Request) => {
   if (!env("STRIPE_WEBHOOK_SECRET").startsWith("whsec_")) return json({ error: "Webhook not configured" }, 503);
   const raw = await req.text();
   if (!(await verifySignature(raw, req.headers.get("Stripe-Signature") || ""))) return json({ error: "Invalid signature" }, 400);
-  const event = JSON.parse(raw), session = event?.data?.object || {}, relevant = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired"].includes(event?.type);
+  const nativeEvent=JSON.parse(raw);
+  if(['payment_intent.amount_capturable_updated','payment_intent.succeeded','payment_intent.canceled','payment_intent.payment_failed'].includes(nativeEvent.type)&&nativeEvent.data?.object?.metadata?.purpose==='rental_guarantee'){
+    const db=createClient(env('SUPABASE_URL'),env('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});
+    try{return json({received:true,...await reconcileNativeHold(db,nativeEvent.data.object.id,stripe)})}catch{return json({error:'Could not reconcile native guarantee'},500)}
+  }
+  if(nativeEvent.type==='payment_intent.succeeded'&&nativeEvent.data?.object?.metadata?.channel==='tap_to_pay'){
+    const db=createClient(env('SUPABASE_URL'),env('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});
+    try{const d=await reconcileNativePayment(db,nativeEvent.data.object.id);return d.card_warning?json({error:d.card_warning},500):json({received:true,paid:d.paid});}catch{return json({error:'Could not reconcile native payment'},500)}
+  }
+  const event = nativeEvent, session = event?.data?.object || {}, relevant = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired"].includes(event?.type);
   if (!relevant) return json({ received: true, ignored: true });
   const service = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: payment, error } = await service.from("stripe_payments").select("*").eq("checkout_session_id", String(session.id || "")).maybeSingle();

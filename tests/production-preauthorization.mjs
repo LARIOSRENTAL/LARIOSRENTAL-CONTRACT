@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
-const source=fs.readFileSync('supabase/functions/preauthorization/index.ts','utf8').replace(/^import[^\n]+\n/,'');
+const source=fs.readFileSync('supabase/functions/preauthorization/index.ts','utf8').replace(/^import[^\n]+\n/gm,'');
 const contract='22222222-2222-4222-8222-222222222222',holdId='33333333-3333-4333-8333-333333333333';
 function sandbox(options={}){
- let hold={id:holdId,contract_id:contract,channel:'stripe_terminal',category:'C',amount_cents:60000,authorized_cents:60000,captured_cents:0,released_cents:0,status:'authorized',payment_intent_id:'pi_mock_hold',...options.hold};
+ let hold={id:holdId,contract_id:contract,created_by:contract,created_at:new Date().toISOString(),channel:'stripe_terminal',category:'C',amount_cents:60000,authorized_cents:60000,captured_cents:0,released_cents:0,status:'authorized',payment_intent_id:'pi_mock_hold',...options.hold};
  let pi={id:'pi_mock_hold',amount:60000,amount_capturable:60000,amount_received:0,capture_method:'manual',currency:'eur',livemode:true,status:'requires_capture',metadata:{hold_id:holdId,contract_id:contract,environment:'larios_production',purpose:'rental_guarantee'},...options.intent};
  const calls=[],tables=[],clone=x=>JSON.parse(JSON.stringify(x));let handler;
  const db={auth:{getUser:async()=>options.invalidToken?{error:'invalid',data:{user:null}}:{data:{user:{id:contract,app_metadata:{role:options.role||'employee'}}}}},from(name){tables.push(name);assert.ok(['contracts','preauthorizations','preauthorization_events'].includes(name));return{select(){return this},eq(){return this},single:async()=>({data:clone(name==='contracts'?{id:contract,category:'C'}:hold)})}},rpc:async(name,{p_action:a,p_data:d})=>{assert.equal(name,'preauth_command');if(a==='claim'){hold.command=d.command;hold.command_amount=d.amount_cents;hold.status=d.command==='capture'?'capturing':'canceling'}if(a==='sync')Object.assign(hold,d);if(a==='link')Object.assign(hold,d,{status:'pending'});if(a==='begin')hold={...hold,status:d.channel==='bank'?'authorized':'creating',channel:d.channel,payment_intent_id:null};return{data:clone(hold)}}};
@@ -34,4 +34,7 @@ test('unauthenticated POST denied',async()=>{const s=sandbox();assert.equal((awa
 test('expiry is read from card-present network response',()=>{const s=sandbox();const r=s.helpers.result({...s.pi,latest_charge:{payment_method_details:{card_present:{capture_before:2000000000}}}},s.hold);assert.equal(r.capture_before,new Date(2000000000000).toISOString())});
 
 test('global disable flag is respected',()=>assert.equal(sandbox({enabled:'false'}).helpers.key(),''));
-test('Tap creation blocked before external action',async()=>{const s=sandbox();const r=await s.issue('create',{channel:'stripe_tap'});assert.equal(r.status,409);assert.equal(s.calls.length,0)});
+test('Tap creation without consent blocked before external action',async()=>{const s=sandbox();const r=await s.issue('create',{channel:'stripe_tap'});assert.equal(r.status,409);assert.equal(s.calls.length,0)});
+test('native CORS preflight accepted, foreign origin rejected',async()=>{const s=sandbox();const r=await s.handler(new Request('https://example.invalid',{method:'OPTIONS',headers:{Origin:'https://localhost'}}));assert.equal(r.status,200);assert.equal(r.headers.get('Access-Control-Allow-Origin'),'https://localhost');const bad=await s.handler(new Request('https://example.invalid',{method:'OPTIONS',headers:{Origin:'https://attacker.invalid'}}));assert.equal(bad.status,403)});
+test('employee cannot obtain another employee Tap secret',async()=>{const s=sandbox({hold:{channel:'stripe_tap',created_by:holdId,status:'pending'}});const r=await s.issue('tap_secret');assert.equal(r.status,409);assert.equal(s.calls.length,0)});
+test('already authorized Tap returns state without collecting again',async()=>{const s=sandbox({hold:{channel:'stripe_tap'}});const r=await s.issue('tap_secret');assert.equal(r.status,200);assert.equal(r.data.hold.status,'authorized');assert.equal(r.data.client_secret,undefined);assert.equal(s.calls.filter(c=>c.method==='POST').length,0)});

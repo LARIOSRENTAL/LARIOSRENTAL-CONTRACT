@@ -1,9 +1,10 @@
 import {createClient} from 'npm:@supabase/supabase-js@2.95.0';
+import {ensureNativeWebhook} from '../stripe-checkout/native-terminal.ts';
 // Production guarantees only. Independent from rental payments and TEST holds.
 const env=n=>(Deno.env.get(n)||'').trim();
 const key=()=>{const k=env('STRIPE_SECRET_KEY');return env('STRIPE_ENABLED').toLowerCase()==='true'&&/^(sk|rk)_live_/.test(k)?k:''};
 const loc=()=>env('STRIPE_TERMINAL_LOCATION_ID');
-const caps=()=>({environment:'production',stripe_configured:!!key(),terminal_configured:!!key()&&/^tml_[A-Za-z0-9_]+$/.test(loc()),tap_native_required:true,tap_supported:false});
+const caps=()=>({environment:'production',stripe_configured:!!key(),terminal_configured:!!key()&&/^tml_[A-Za-z0-9_]+$/.test(loc()),tap_native_required:true,tap_supported:!!key()&&/^tml_[A-Za-z0-9_]+$/.test(loc())});
 const cors={'Access-Control-Allow-Origin':'https://lariosrental.github.io','Access-Control-Allow-Headers':'authorization,apikey,content-type','Access-Control-Allow-Methods':'GET,POST,OPTIONS','Content-Type':'application/json','Cache-Control':'no-store'};
 const reply=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:cors});
 const validId=id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id||'');
@@ -24,7 +25,12 @@ function parameters(h){const p=new URLSearchParams(),meta={contract_id:h.contrac
  const url='https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/?hold_return='+h.id+'&contract_id='+h.contract_id;p.set('success_url',url);p.set('cancel_url',url+'&hold_canceled=1');
  }else{p.set('amount',String(amount(Number(h.amount_cents))));p.set('currency','eur');p.set('payment_method_types[0]','card_present');p.set('capture_method','manual');p.set('description','Garantia - solo retencion');for(const [k,v] of Object.entries(meta))p.set(`metadata[${k}]`,v)}return p}
 Deno.serve(async req=>{
- if(req.method==='OPTIONS')return new Response('ok',{headers:cors});
+ const origin=req.headers.get('Origin')||'https://lariosrental.github.io';
+ const allowed=['https://lariosrental.github.io','https://localhost','http://localhost','capacitor://localhost'];
+ const headers={...cors,'Access-Control-Allow-Origin':allowed.includes(origin)?origin:'https://lariosrental.github.io',Vary:'Origin'};
+ const reply=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers});
+ if(!allowed.includes(origin))return reply({error:'Origen no autorizado'},403);
+ if(req.method==='OPTIONS')return new Response('ok',{headers});
  // Public configuration only. Every data read or financial action below authenticates.
  if(req.method==='GET')return reply(caps());
  if(req.method!=='POST')return reply({error:'Method not allowed'},405);
@@ -35,10 +41,25 @@ Deno.serve(async req=>{
  const ref=h=>({hold_id:h.id,contract_id:h.contract_id});
  async function command(a,d){const {data,error}=await db.rpc('preauth_command',{p_action:a,p_data:{...d,actor_id:auth.user.id}});if(error)throw Error(error.message);return data}
  async function reader(id){if(!caps().terminal_configured||!/^tmr_[A-Za-z0-9_]+$/.test(id||''))throw Error('Falta lector o ubicacion de produccion');const r=await stripe('terminal/readers/'+id);if(r.location!==loc())throw Error('Lector fuera de la ubicacion de produccion');return r}
+ async function tapCustomer(h){
+  const {data:saved,error}=await db.from('stripe_payment_methods').select('stripe_customer_id').eq('contract_id',h.contract_id).maybeSingle();if(error)throw Error('No se pudo consultar el cliente Stripe');
+  if(/^cus_[A-Za-z0-9]+$/.test(saved?.stripe_customer_id||''))return saved.stripe_customer_id;
+  const customer=await stripe('customers',new URLSearchParams({'metadata[contract_id]':h.contract_id,description:'Larios Rental · garantía '+h.id}),'lr-hold-customer-'+h.id);return customer.id;
+ }
+ async function saveTapCard(pi,h){
+  if(h.channel!=='stripe_tap'||!['requires_capture','succeeded'].includes(pi.status))return {};
+  const present=pi.latest_charge?.payment_method_details?.card_present,methodId=present?.generated_card,customer=typeof pi.customer==='string'?pi.customer:pi.customer?.id;
+  if(pi.setup_future_usage!=='off_session'||pi.metadata?.card_consent!=='rental_off_session_v1'||!/^pm_[A-Za-z0-9]+$/.test(methodId||'')||!/^cus_[A-Za-z0-9]+$/.test(customer||''))return {card_reusable:false,card_warning:'Garantía confirmada. Registra una tarjeta en la página segura de Stripe para cargos posteriores.'};
+  try{const method=await stripe('payment_methods/'+methodId);const owner=typeof method.customer==='string'?method.customer:method.customer?.id;
+   if(method.type!=='card'||owner!==customer||!/^\d{4}$/.test(method.card?.last4||''))throw Error('Tarjeta no reutilizable');
+   const {error}=await db.rpc('save_external_stripe_card',{p_contract_id:h.contract_id,p_actor_id:h.created_by,p_stripe_customer_id:customer,p_payment_method_id:method.id,p_brand:method.card.brand||'card',p_last4:method.card.last4,p_exp_month:method.card.exp_month,p_exp_year:method.card.exp_year});if(error)throw Error(error.message);
+   return {card_reusable:true,card:{brand:method.card.brand,last4:method.card.last4}};
+  }catch{return {card_reusable:false,card_warning:'La garantía está confirmada; no se ha podido verificar el registro de tarjeta. Consulta su estado antes de repetir.'}};
+ }
  async function refresh(h){
   if(h.channel==='bank'||terminalStates.includes(h.status))return h;
   if(h.session_id){const s=await stripe('checkout/sessions/'+h.session_id);if(s.livemode!==true||s.client_reference_id!==h.contract_id||s.metadata?.hold_id!==h.id)throw Error('Sesion incorrecta');if(s.payment_intent&&!h.payment_intent_id){const id=String(s.payment_intent);if(!/^pi_[A-Za-z0-9_]+$/.test(id))throw Error('Referencia Stripe no valida');h=await command('link',{...ref(h),payment_intent_id:id})}if(s.status==='expired'&&!s.payment_intent)return command('sync',{...ref(h),status:'expired',released_cents:0})}
-  if(!h.payment_intent_id)return h;const pi=await stripe('payment_intents/'+h.payment_intent_id+'?expand[]=latest_charge');return command('sync',{...ref(h),...result(pi,h)});
+  if(!h.payment_intent_id)return h;const pi=await stripe('payment_intents/'+h.payment_intent_id+'?expand[]=latest_charge');const synced=await command('sync',{...ref(h),...result(pi,h)});return {...synced,...await saveTapCard(pi,synced)};
  }
  try{
   if(b.action==='status'){
@@ -46,25 +67,26 @@ Deno.serve(async req=>{
    const {data:holds,error:e}=await db.from('preauthorizations').select('*').eq('contract_id',c.id).order('created_at',{ascending:false});if(e)throw Error(e.message);const {data:events,error:ee}=await db.from('preauthorization_events').select('event,detail,created_at').eq('contract_id',c.id).order('created_at',{ascending:false}).limit(40);if(ee)throw Error(ee.message);return reply({...caps(),category:c.category,holds,events});
   }
   if(b.action==='readers'){if(!caps().terminal_configured)throw Error('Falta la ubicacion de Terminal de produccion');const r=await stripe('terminal/readers?limit=100&location='+loc());return reply({readers:r.data.filter(x=>x.location===loc()).map(x=>({id:x.id,label:x.label,status:x.status}))})}
-  if(b.action==='connection_token'){return reply({error:'Tap to Pay no habilitado en esta version'},409); /* reserved native integration */if(!caps().terminal_configured)throw Error('Falta configuracion Terminal');return reply(await stripe('terminal/connection_tokens',new URLSearchParams({location:loc()})))}
+  if(b.action==='connection_token'){if(!validId(b.contract_id)||!caps().terminal_configured)throw Error('Falta configuracion Terminal o contrato');const {data:c,error}=await db.from('contracts').select('id').eq('id',b.contract_id).single();if(error||!c)throw Error('Contrato no encontrado');const t=await stripe('terminal/connection_tokens',new URLSearchParams({location:loc()}));return reply({secret:t.secret})}
   if(b.action==='create'){
-   if(b.channel==='stripe_tap')return reply({error:'Tap to Pay requiere integrar y validar la app nativa. Usa Terminal, Checkout o banco.'},409);
+   if(b.channel==='stripe_tap'&&b.consent_confirmed!==true)throw Error('El cliente debe autorizar la retención y el registro de tarjeta');
    if(!validId(b.contract_id)||!['stripe_checkout','stripe_terminal','stripe_tap','bank'].includes(b.channel)||b.confirmed!==true)throw Error('Confirma la preautorizacion');if(b.channel!=='bank'&&!key())throw Error('Stripe de produccion no configurado. No se ha retenido ni cobrado dinero.');
    if(b.channel==='stripe_terminal'){const r=await reader(b.reader_id);if(r.status!=='online')throw Error('Lector desconectado')}
-   if(b.channel==='stripe_tap'&&!caps().terminal_configured)throw Error('Tap to Pay de produccion no configurado');
-   let h=await command('begin',{contract_id:b.contract_id,category:b.category,channel:b.channel,bank_reference:b.bank_reference});if(h.channel==='bank'||h.status!=='creating')return reply({hold:await refresh(h),...caps()});
+   if(b.channel==='stripe_tap'){if(!caps().terminal_configured)throw Error('Tap to Pay de produccion no configurado');await ensureNativeWebhook()}
+   let h=await command('begin',{contract_id:b.contract_id,category:b.category,channel:b.channel,bank_reference:b.bank_reference});if(h.channel==='stripe_tap'&&auth.user.app_metadata.role!=='admin'&&h.created_by!==auth.user.id)throw Error('Otro empleado inició esta garantía');if(h.channel==='bank'||h.status!=='creating')return reply({hold:await refresh(h),...caps()});
    if(h.status==='creating'&&Date.now()-Date.parse(h.created_at)>23*60*60*1000)throw Error('Preparacion antigua: verificar primero en Stripe para evitar duplicados');
    if(h.channel==='stripe_checkout'){const s=await stripe('checkout/sessions',parameters(h),'lr-prod-hold-'+h.id+'-create');if(s.livemode!==true)throw Error('Sesion no reconocida como TEST');h=await command('link',{...ref(h),session_id:s.id,checkout_url:s.url})}
-   else{const pi=verify(await stripe('payment_intents',parameters(h),'lr-prod-hold-'+h.id+'-create'),h);h=await command('link',{...ref(h),payment_intent_id:pi.id,reader_id:b.reader_id||null});if(h.channel==='stripe_tap')return reply({hold:h,client_secret:pi.client_secret,...caps()})}
+   else{const p=parameters(h);if(h.channel==='stripe_tap'){p.set('customer',await tapCustomer(h));p.set('setup_future_usage','off_session');p.set('metadata[card_consent]','rental_off_session_v1');p.set('metadata[created_by]',auth.user.id)}const pi=verify(await stripe('payment_intents',p,'lr-prod-hold-'+h.id+'-create'),h);h=await command('link',{...ref(h),payment_intent_id:pi.id,reader_id:b.reader_id||null});if(h.channel==='stripe_tap')return reply({hold:h,...caps()})}
    return reply({hold:h,...caps()});
   }
   if(!validId(b.hold_id)||!validId(b.contract_id))throw Error('Referencia no valida');const {data:found,error}=await db.from('preauthorizations').select('*').eq('id',b.hold_id).eq('contract_id',b.contract_id).single();if(error||!found)throw Error('Preautorizacion de produccion no encontrada');let h=found;
+  if(h.channel==='stripe_tap'&&auth.user.app_metadata.role!=='admin'&&h.created_by!==auth.user.id)throw Error('Esta garantía la inició otro empleado');
   if(b.action==='refresh')return reply({hold:await refresh(h),...caps()});
   if(b.action==='process_terminal'){
    if(h.channel!=='stripe_terminal'||!h.payment_intent_id||b.confirmed!==true)throw Error('Retencion de Terminal no preparada');h=await refresh(h);if(h.status==='authorized')return reply({hold:h});if(h.status!=='pending')throw Error('Retencion no pendiente');const r=await reader(h.reader_id);if(r.status!=='online')throw Error('Lector desconectado');if(r.action?.status==='in_progress'&&r.action?.process_payment_intent?.payment_intent!==h.payment_intent_id)throw Error('Lector ocupado');
    if(r.action?.status!=='in_progress')await stripe('terminal/readers/'+h.reader_id+'/process_payment_intent',new URLSearchParams({payment_intent:h.payment_intent_id,'process_config[enable_customer_cancellation]':'true'}),'lr-prod-hold-'+h.id+'-process');return reply({hold:h});
   }
-  if(b.action==='tap_secret'){if(h.channel!=='stripe_tap'||h.status!=='pending')throw Error('Tap to Pay no pendiente');const pi=verify(await stripe('payment_intents/'+h.payment_intent_id),h);return reply({hold:h,client_secret:pi.client_secret})}
+  if(b.action==='tap_secret'){if(h.channel!=='stripe_tap')throw Error('Garantía de otro canal');h=await refresh(h);if(h.status!=='pending')return reply({hold:h,...caps()});const pi=verify(await stripe('payment_intents/'+h.payment_intent_id),h);return reply({hold:h,client_secret:['requires_payment_method','requires_confirmation'].includes(pi.status)?pi.client_secret:null,intent_status:pi.status,...caps()})}
   if(!['capture','cancel'].includes(b.action)||b.confirmed!==true)throw Error('Confirma la operacion');h=await refresh(h);if(terminalStates.includes(h.status))return reply({hold:h,already_final:true});
   if(h.status==='creating'&&!h.payment_intent_id&&!h.session_id)throw Error('Reanuda la preparacion por el mismo canal para recuperar la referencia');
   const n=b.action==='capture'?amount(b.amount_cents,Number(h.authorized_cents)):0;

@@ -1,3 +1,4 @@
+import nativeTerminal from "./native-terminal.ts";
 import handleExternalPayment from "./external-payment.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
@@ -26,9 +27,11 @@ async function markPaid(service:any,contract:any,kind:string,reference:string,am
 async function saveCheckoutCard(service:any,contract:any,session:any,actorId:string|null){if(session.payment_status!=="paid"||!session.payment_intent)return null;const pi=await stripe(`/v1/payment_intents/${encodeURIComponent(String(session.payment_intent))}?expand[]=payment_method`);const m=pi.payment_method;const pmId=typeof m==="string"?m:String(m?.id||"");const cus=typeof pi.customer==="string"?pi.customer:String(pi.customer?.id||session.customer||"");return saveMethod(service,contract.id,contract.customer_id,cus,pmId,actorId);}
 async function saveTerminalCard(service:any,contract:any,pi:any,actorId:string|null){const cp=pi?.latest_charge?.payment_method_details?.card_present;const generated=String(cp?.generated_card||"");const cus=typeof pi.customer==="string"?pi.customer:String(pi.customer?.id||"");if(!generated)return null;return saveMethod(service,contract.id,contract.customer_id,cus,generated,actorId);}
 
-Deno.serve(async(req:Request)=>{
- if(req.method==="POST"){const probe=await req.clone().json().catch(()=>({}));if(String(probe.action||"").startsWith("external_"))return handleExternalPayment(req);}
- if(req.method==="OPTIONS")return new Response("ok",{headers:cors});if(req.method!=="POST")return json({error:"Method not allowed"},405);
+async function handler(req:Request){
+ const origin=req.headers.get("Origin")||"";const clientOrigin=["https://lariosrental.github.io","https://localhost","capacitor://localhost"].includes(origin)?origin:"https://lariosrental.github.io";
+ const routed=async(r:Response)=>{r.headers.set("Access-Control-Allow-Origin",clientOrigin);r.headers.set("Vary","Origin");return r};
+ if(req.method==="POST"){const probe=await req.clone().json().catch(()=>({}));if(String(probe.action||"").startsWith("external_"))return routed(await handleExternalPayment(req));if(String(probe.action||"").startsWith("native_"))return routed(await nativeTerminal(req));}
+ if(req.method==="OPTIONS")return new Response("ok",{headers:{...cors,"Access-Control-Allow-Origin":clientOrigin,"Vary":"Origin"}});if(req.method!=="POST")return json({error:"Method not allowed"},405);
  const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");if(!jwt)return json({error:"Authentication required"},401);
  const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});const {data:auth,error:authError}=await service.auth.getUser(jwt);const role=auth.user?.app_metadata?.role;if(authError||!auth.user||!["employee","admin"].includes(role))return json({error:"Not authorized"},403);
  const body=await req.json().catch(()=>({}));const action=String(body.action||"status");
@@ -64,4 +67,5 @@ Deno.serve(async(req:Request)=>{
   }
   return json({error:"Unknown action"},400);
  }catch(e){return json({error:e instanceof Error?e.message:String(e)},502)}
-});
+}
+Deno.serve(async(req:Request)=>{const r=await handler(req);const origin=req.headers.get('Origin')||'';r.headers.set('Access-Control-Allow-Origin',['https://lariosrental.github.io','https://localhost','capacitor://localhost'].includes(origin)?origin:'https://lariosrental.github.io');r.headers.set('Vary','Origin');return r});

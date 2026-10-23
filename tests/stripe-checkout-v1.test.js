@@ -5,7 +5,7 @@ require('../app-v84/www/stripe-checkout-v1.js');
 assert.equal(global.LariosStripe.__test.isCard('Tarjeta'),true);
 assert.equal(global.LariosStripe.__test.isCard('Efectivo'),false);
 const ui=fs.readFileSync(require.resolve('../app-v84/www/payment-methods-v1.js'),'utf8');
-assert.match(ui,/saveDraft/);assert.match(ui,/location\.assign\(d\.checkout_url\)/);assert.match(ui,/call\('verify'/);assert.match(ui,/Pago cancelado/);
+assert.match(ui,/saveDraft/);assert.match(ui,/checkoutTab\.location\.replace\(d\.checkout_url\)/);assert.match(ui,/call\('verify'/);assert.match(ui,/Pago cancelado/);
 const checkout=fs.readFileSync(require.resolve('../supabase/functions/stripe-checkout/index.ts'),'utf8');
 const paymentGuardSource=checkout.match(/function isCardPaymentMethod\(value:unknown\)\{return (\/.*\/i)\.test/);
 assert.ok(paymentGuardSource,'Checkout must validate card payment methods case-insensitively');

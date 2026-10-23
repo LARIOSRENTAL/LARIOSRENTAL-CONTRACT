@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [agent/mobile-v84]
+    branches: [agent/mobile-v84, fix/restore-terminal-payments]
     paths:
       - "app-v84/**"
       - "static/assets/**"
@@ -26,7 +26,9 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+      - name: Prepare native Tap to Pay bridge
+        run: npm run native:prepare
       - name: Bundle contract assets for offline Android WebView
         run: |
           mkdir -p www/assets www/vendor
@@ -46,9 +48,18 @@ jobs:
           grep -q "Larios Rental Pro" www/index.html
           npx cap --version
       - name: Create Android project
-        run: npx cap add android
+        run: |
+          npx cap add android
+          node scripts/prepare-terminal.mjs
       - name: Sync web app
         run: npx cap sync android
+      - name: Verify native payments and manual authorization are packaged
+        run: |
+          grep -q '@capacitor-community/stripe-terminal' package.json
+          grep -q 'stripe-terminal' android/capacitor.settings.gradle
+          grep -q 'prepareAuthorization' android/app/src/main/assets/public/native-terminal.js
+          grep -q 'LariosNativeStripeTerminal' android/app/src/main/assets/public/native-terminal.js
+          grep -q 'native-terminal.js' android/app/src/main/assets/public/index.html
       - name: Set a newer Android version for each build
         env:
           RUN_NUMBER: ${{ github.run_number }}
@@ -119,6 +130,10 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace
+      - name: Disable real Tap to Pay in debug builds
+        if: env.SIGNED_BUILD != 'true'
+        run: |
+          node -e "const fs=require('fs');const p='android/app/src/main/assets/public/native-terminal.js';fs.writeFileSync(p,'window.LariosNativeBuild={debug:true};\n'+fs.readFileSync(p,'utf8'))"
       - name: Build test APK
         if: env.SIGNED_BUILD != 'true'
         run: |
