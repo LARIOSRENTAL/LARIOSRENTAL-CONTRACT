@@ -37,7 +37,7 @@ async function native({interrupted=false,alreadyAuthorized=false,pendingPayment=
  if(pendingPayment)w.localStorage.setItem('lr_native_tap_pending',JSON.stringify({contract_id:id,payment_intent_id:'pi_payment'}));
  w.eval(bridge);
  try{const result=await w.LariosNativeStripeTerminal.authorize({contract_id:id,hold_id:hid});if(pendingPayment)assert.fail('Must not replace pending rental payment');assert.equal(result.authorized,true);assert.deepEqual(sdk,alreadyAuthorized?[]:['collect','confirm']);assert.equal(w.localStorage.getItem('lr_native_tap_pending'),null);assert.equal(requests.some(x=>x.action==='capture'||x.action==='native_create'),false);assert.equal(w.document.getElementById('signature').value,'unchanged');assert.equal(w.document.getElementById('plate').value,'1234ABC')}
- catch(e){if(!pendingPayment)throw e;assert.match(e.message,/otra operación pendiente/);assert.equal(requests.length,0)}finally{w.close()}
+  catch(e){if(!pendingPayment)throw e;assert.match(e.message,/otra operación pendiente/);assert.equal(requests.length,0)}finally{if(!pendingPayment){const none=await w.LariosNativeStripeTerminal.cancel();assert.equal(none.none,true);assert.equal(none.canceled,false,'Do not report a financial cancellation when no operation exists')}w.close()}
 }
 async function webhook(){
  const raw=fs.readFileSync('supabase/functions/stripe-checkout/native-hold.ts','utf8');const code=stripTypeScriptTypes(raw.replace('export async function','async function'),{mode:'transform'});const ctx={Date};vm.createContext(ctx);vm.runInContext(code,ctx);

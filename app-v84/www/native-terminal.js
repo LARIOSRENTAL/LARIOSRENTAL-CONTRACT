@@ -1517,7 +1517,7 @@
       if (working) await StripeTerminal.cancelCollectPaymentMethod().catch(() => {
       });
       const saved = JSON.parse(localStorage.getItem(pendingKey) || "null");
-      if (!saved) return { canceled: true };
+      if (!saved) return { none: true, canceled: false };
       activeContract = saved.contract_id;
       if (saved.kind === "authorization") {
         const d = await holdCall("cancel", { hold_id: saved.hold_id, confirmed: true });
