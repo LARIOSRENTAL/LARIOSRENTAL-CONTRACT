@@ -85,6 +85,7 @@ begin
   return jsonb_build_object('status','review','reason','return_delivery_fuel_missing','contract_id',v_contract.id);
  end if;
  if v_tank is null then
+  update public.contracts set app_payload=coalesce(app_payload,'{}'::jsonb)||jsonb_build_object('return_payment_review','Grupo sin tarifa de combustible configurada; revisar devolución','return_source_message',r.source_id) where id=v_contract.id;
   update larios_import.whatsapp_inbox set status='review',reason='return_fuel_group_rate_missing',contract_id=v_contract.id,processed_at=now() where id=r.id;
   return jsonb_build_object('status','review','reason','return_fuel_group_rate_missing','contract_id',v_contract.id);
  end if;
@@ -95,14 +96,14 @@ begin
  if v_due>0 then
   v_banner:='PTE. DE PAGO '||replace(to_char(v_due,'FM999999990.00'),'.',',')||' € · '||v_reason;
   update public.contracts set return_fuel=v_fuel::text||'/8',
-   app_payload=coalesce(app_payload,'{}'::jsonb)||jsonb_build_object('return_fuel_eighths',v_fuel,'return_payment_due',v_due,'return_payment_reason',v_reason,'return_payment_banner',v_banner,'return_payment_status','pending','return_source_message',r.source_id)
+   app_payload=coalesce(app_payload,'{}'::jsonb)||jsonb_build_object('return_fuel_eighths',v_fuel,'return_payment_due',v_due,'return_payment_reason',v_reason,'return_payment_banner',v_banner,'return_payment_review',null,'return_payment_status','pending','return_source_message',r.source_id)
    where id=v_contract.id;
   update larios_import.whatsapp_inbox set status='created',reason='vehicle_return_payment_pending',contract_id=v_contract.id,processed_at=now() where id=r.id;
   return jsonb_build_object('status','created','reason','vehicle_return_payment_pending','contract_id',v_contract.id,'amount_due',v_due,'message',v_banner);
  end if;
  update public.contracts set status='returned',return_fuel=v_fuel::text||'/8',collected_by='WhatsApp',
   card_last4=null,card_expiry_month=null,card_expiry_year=null,payment_token=null,
-  app_payload=(coalesce(app_payload,'{}'::jsonb)||jsonb_build_object('return_fuel_eighths',v_fuel,'return_payment_due',0,'return_payment_reason',null,'return_payment_banner',null,'return_payment_status','clear','return_source_message',r.source_id,'returned_via_whatsapp',true))
+  app_payload=(coalesce(app_payload,'{}'::jsonb)||jsonb_build_object('return_fuel_eighths',v_fuel,'return_payment_due',0,'return_payment_reason',null,'return_payment_banner',null,'return_payment_review',null,'return_payment_status','clear','return_source_message',r.source_id,'returned_via_whatsapp',true))
    - array['card_number','card_last4','card_expiry','card_expiry_month','card_expiry_year','payment_token'],
   updated_at=now() where id=v_contract.id;
  update larios_import.whatsapp_inbox set status='created',reason='vehicle_return_closed',contract_id=v_contract.id,processed_at=now() where id=r.id;
