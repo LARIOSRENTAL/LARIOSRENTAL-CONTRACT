@@ -1246,9 +1246,12 @@ async function handler(req: Request) {
       form.set("pm_actual_end_date", `${part("day")}/${part("month")}/${part("year")}`);
       form.set("pm_actual_end_time", `${part("hour")}:${part("minute")}`);
       if (contract.app_payload?.return_fuel_eighths != null) form.set("pm_benzina_consegna", String(contract.app_payload.return_fuel_eighths).trim());
+      // This is a back-office User API action, not a Partner API operation.
+      // Partner tokens are rejected by Renthub's authenticated booking form (401 Unauthorized-make-login).
+      const authToken = await userToken();
       const response = await fetch(`${installationUrl()}/rental/booking/add`, {
         method: "POST", redirect: "manual",
-        headers: { Accept: "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-PartnerToken": await partnerToken(), "X-Requested-With": "XMLHttpRequest" },
+        headers: { Accept: "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-UserAuthToken": authToken, "X-Requested-With": "XMLHttpRequest" },
         body: form,
       });
       const raw = await response.text();
