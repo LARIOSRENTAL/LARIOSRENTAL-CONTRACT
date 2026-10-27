@@ -1,8 +1,1 @@
-(function () {
-  if (!('serviceWorker' in navigator) || window.Capacitor?.isNativePlatform?.()) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch(error => {
-      console.warn('La instalación sin conexión no está disponible', error);
-    });
-  });
-})();
+(function(){'use strict';if(!('serviceWorker'in navigator)||window.Capacitor?.isNativePlatform?.())return;let reloading=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;reloading=true;location.reload()});window.addEventListener('load',async()=>{try{const reg=await navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'});await reg.update()}catch(error){console.warn('No se pudo actualizar la aplicación',error)}})})();
