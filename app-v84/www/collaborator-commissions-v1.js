@@ -113,10 +113,8 @@ function updatePrintHeader(rows){
  const exact=collaborators.find(x=>norm(x.name)===norm(partnerText)),names=[...new Set(rows.map(x=>x.collaborators?.name).filter(Boolean))];
  const reportPartner=exact?.name||(names.length===1?names[0]:(partnerText||'COLABORADORES'));
  const title=reportPartner==='COLABORADORES'?'Informe de comisiones colaboradores':'Informe de comisiones - '+reportPartner;
- const grouped={};for(const x of rows.filter(r=>r.included)){const n=x.collaborators?.name||'Sin colaborador';grouped[n]=(grouped[n]||0)+Number(x.commission_amount||0)}
- const totals=Object.entries(grouped).sort((a,b)=>a[0].localeCompare(b[0])).map(([n,v])=>'<div><b>'+esc(n)+'</b>: '+money(v)+'</div>').join('');
  const logoSvg='<img class="commissionVectorLogo" src="larios-logo-print.svg?v=2" alt="Larios Rental">';
- $('commissionPrintHeader').innerHTML='<div class="commissionPrintCorporate">'+logoSvg+'<div class="commissionPrintCompany"><b>LARIOS RENTAL, S.L.</b><br>CIF B92069368<br>C/ Malpica 12 · 29002 Málaga<br>Oficina: Pasaje Noblejas 8 · 29002 Málaga<br>+34 951 09 20 69<br>info@lariosrental.com<br>www.lariosrental.com</div></div><h2 class="commissionPrintTitle">'+esc(title)+'</h2><p class="commissionPrintMeta">Periodo: '+esc(displayDate(from))+' a '+esc(displayDate(to))+' · Estado: '+esc(status)+'</p><div class="commissionAgencyTotal">'+totals+'</div>';
+ $('commissionPrintHeader').innerHTML='<div class="commissionPrintCorporate">'+logoSvg+'<div class="commissionPrintCompany"><b>LARIOS RENTAL, S.L.</b><br>CIF B92069368<br>C/ Malpica 12 · 29002 Málaga<br>Oficina: Pasaje Noblejas 8 · 29002 Málaga<br>+34 951 09 20 69<br>info@lariosrental.com<br>www.lariosrental.com</div></div><h2 class="commissionPrintTitle">'+esc(title)+'</h2><p class="commissionPrintMeta">Periodo: '+esc(displayDate(from))+' a '+esc(displayDate(to))+' · Estado: '+esc(status)+'</p>';
 }
 async function saveRow(id){const tr=document.querySelector('tr[data-id="'+CSS.escape(id)+'"]');if(!tr)return;const base=Number(tr.querySelector('[data-f=base]').value||0),pct=Number(tr.querySelector('[data-f=pct]').value||0),included=tr.querySelector('[data-f=included]').value==='1',reason=tr.querySelector('[data-f=reason]').value;await rpc('app_update_collaborator_commission',{p_id:id,p_rental_base:base,p_commission_percent:pct,p_included:included,p_exclusion_reason:reason});await loadCommissions()}
 async function markSelected(paid){const ids=[...document.querySelectorAll('.commissionCheck:checked')].map(x=>x.value);if(!ids.length)return alert('Selecciona al menos una comisión.');await rpc('app_mark_commissions_paid',{p_ids:ids,p_paid:paid,p_note:''});await loadCommissions()}function renderReportPicker(rows){
@@ -148,6 +146,6 @@ async function printReport(){
 }
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}function escAttr(s){return esc(s)}
 function boot(){ensureScreen();ensureHomeButton()}
-window.LariosCommissions={open:openCommissions,load:loadCommissions,saveRow,markSelected,version:'20261027-v17-commission-picker-align'};
+window.LariosCommissions={open:openCommissions,load:loadCommissions,saveRow,markSelected,version:'20261027-v18-commission-picker-no-duplicate'};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
