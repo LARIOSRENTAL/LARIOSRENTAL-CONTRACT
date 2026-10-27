@@ -112,6 +112,7 @@ async function finalize(){
   if(b)b.textContent='Creando PDF…';const pdf=await buildPdf(draft,snapshot,signature);measured('buildPdfMs');
   if(b)b.textContent='Guardando PDF…';await store(draft,pdf.blob);measured('uploadAndLinkMs');
   await rpc({...savedPayload,id:draft.id||id,status:'confirmed'});measured('confirmMs');
+  try{await rpcCall('app_set_contract_generator',{p_contract_id:draft.id||id})}catch(generatorError){console.warn('No se pudo registrar el usuario generador',generatorError)}
   window.LariosSafeCardPersistence?.clear?.(draft.id||id);
   const label=contractNo(draft);
   // Confirmation already enqueues email on the server. Start the idempotent fallback
