@@ -20,7 +20,23 @@ function installSafeCardPersistence(){if(document.querySelector('script[data-saf
 function installReturnWithoutPreauth(){if(document.querySelector('script[data-return-without-preauth],script[src*="return-without-preauth-v1.js"]')||window.LariosReturnWithoutPreauth)return;const s=document.createElement('script');s.src='return-without-preauth-v1.js?v=1-20260915&ts='+Date.now();s.dataset.returnWithoutPreauth='1';document.body.appendChild(s)}
 function installReservationStabilityLock(){if(document.querySelector('script[data-reservation-stability-lock],script[src*="reservation-stability-lock-v1.js"]')||window.LariosReservationStabilityLock)return;const s=document.createElement('script');s.src='reservation-stability-lock-v1.js?v=1-20260918&ts='+Date.now();s.dataset.reservationStabilityLock='1';document.body.appendChild(s)}
 function installOperationsPanels(){const modules=[['vehicle-manager-v1.js?v=normalize-model-20261004-1','vehicle-manager'],['pricing-manager-v1.js?v=4','pricing-manager'],['contract-download-v1.js?v=3','contract-download'],['contract-panel-v1.js?v=direct-renthub-send-20261004-2','contract-panel']];modules.forEach(([src,key])=>{if(document.querySelector(`script[data-${key}]`))return;const s=document.createElement('script');s.src=src;s.setAttribute('data-'+key,'1');document.body.appendChild(s)})}
-function installAuthoritativeFlow(){if(!window.LariosReservations)return;document.getElementById('lr-authority-reload')?.remove();const s=document.createElement('script');s.id='lr-authority-reload';s.src='pdf-authority-v3.js?authority=12-card-session&ts='+Date.now();s.onload=function(){console.log('Larios V8.4 PDF authority v3 authority=11 loaded last');document.querySelectorAll('script[data-stripe-checkout]').forEach(x=>x.remove());const stripe=document.createElement('script');stripe.src='stripe-checkout-v1.js?v=2&ts='+Date.now();stripe.dataset.stripeCheckout='1';document.body.appendChild(stripe)};s.onerror=function(){console.error('Could not reload PDF authority v3')};document.body.appendChild(s)}
+function installAuthoritativeFlow(){
+  const loader=window.LariosPdfAuthorityLoader||(window.LariosPdfAuthorityLoader={});
+  loader.ensure=function(){
+    if(window.LariosPdfAuthorityV3?.finalize)return Promise.resolve(window.LariosPdfAuthorityV3);
+    if(loader.promise)return loader.promise;
+    loader.promise=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src=new URL('pdf-authority-v3.js?authority=13-retry-loader&ts='+Date.now(),document.baseURI).href;
+      script.onload=()=>{let attempt=0;const wait=()=>{if(window.LariosPdfAuthorityV3?.finalize)return resolve(window.LariosPdfAuthorityV3);if(attempt++<120)return setTimeout(wait,100);reject(new Error('El módulo PDF no terminó de inicializar'))};wait()};
+      script.onerror=()=>reject(new Error('No se pudo descargar el generador PDF'));
+      document.head.appendChild(script);
+    }).catch(error=>{loader.promise=null;throw error});
+    return loader.promise;
+  };
+  loader.finalize=async function(){try{const api=await loader.ensure();return await api.finalize()}catch(error){alert('No se pudo iniciar el generador PDF: '+(error?.message||String(error)));throw error}};
+  if(window.LariosReservations)setTimeout(()=>loader.ensure().then(()=>{document.querySelectorAll('script[data-stripe-checkout]').forEach(x=>x.remove());const stripe=document.createElement('script');stripe.src='stripe-checkout-v1.js?v=2&ts='+Date.now();stripe.dataset.stripeCheckout='1';document.body.appendChild(stripe)}).catch(error=>console.error('No se pudo precargar PDF authority',error)),0);
+}
 installSessionFetch();installSignaturePersistence();installRoleAccess();installAdminUsers();installUserProfile();installPasswordAccess();installReservationAdmin();installGeneratorAudit();installUiCleanup();installSmartDates();installVehicleSalesHistory();installVehiclePlateNormalize();installUppercaseFields();installMultiUnitVehicles();setTimeout(installOperationsPanels,50);setTimeout(installVehicleRetire,250);setTimeout(installAuthoritativeFlow,500);setTimeout(installGeneratedContractEdit,3600);setTimeout(installReturnWithoutPreauth,4200);
 (function waitForPdfAuthority(attempt=0){
   if(window.LariosPdfAuthorityV3?.finalize&&window.LariosReservations?.save?.__lrPdfAuthority===true){
