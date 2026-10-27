@@ -27,7 +27,7 @@ function installAuthoritativeFlow(){
     if(loader.promise)return loader.promise;
     loader.promise=new Promise((resolve,reject)=>{
       const script=document.createElement('script');
-      script.src=new URL('pdf-authority-v3.js?authority=13-retry-loader&ts='+Date.now(),document.baseURI).href;
+      script.src=new URL('pdf-authority-v3.js?authority=14-syntax-fixed&ts='+Date.now(),document.baseURI).href;
       script.onload=()=>{let attempt=0;const wait=()=>{if(window.LariosPdfAuthorityV3?.finalize)return resolve(window.LariosPdfAuthorityV3);if(attempt++<120)return setTimeout(wait,100);reject(new Error('El módulo PDF no terminó de inicializar'))};wait()};
       script.onerror=()=>reject(new Error('No se pudo descargar el generador PDF'));
       document.head.appendChild(script);
