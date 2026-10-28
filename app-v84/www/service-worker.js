@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261028-bicycle-editor-7';
+const CACHE = 'larios-rental-pro-20261028-iphone-native-typing-8';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
