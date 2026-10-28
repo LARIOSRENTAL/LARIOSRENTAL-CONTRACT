@@ -103,7 +103,7 @@ function bind(){
   if(resetInsurance&&$('insurance_total'))Object.assign($('insurance_total').dataset,{manualPrice:'0',editingPrice:'0'});
   if(['vehicle_group','rental_days','customer_birth_date','pickup_date'].includes(id)&&$('young_driver_amount'))Object.assign($('young_driver_amount').dataset,{manualPrice:'0',editingPrice:'0',priceReady:'1'});
   recalc(false);recalcReady(false);
- };e.addEventListener('change',fn);e.addEventListener('input',fn)});
+ };e.addEventListener('change',fn);if(!['text','email','tel','search','url'].includes(String(e.type||'').toLowerCase())&&e.tagName!=='TEXTAREA')e.addEventListener('input',fn)});
  form.querySelectorAll('[id^="v2_"],[id^="fx_"]').forEach(e=>{if(!/^(INPUT|SELECT)$/.test(e.tagName)||e.dataset.autoPriceV2==='1')return;e.dataset.autoPriceV2='1';added=true;const fn=()=>{recalc(false);recalcReady(false)};e.addEventListener('change',fn);e.addEventListener('input',fn)});
  if(fresh||added)recalcReady(false);
 }
