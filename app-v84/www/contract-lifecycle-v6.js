@@ -131,6 +131,9 @@ function patchPrices(){if(window.LariosWebBooking?.preservePrice())return;
   if(form.dataset.lifecycleTotals!=='1'){
     form.dataset.lifecycleTotals='1';
     form.addEventListener('input',e=>{
+      const id=String(e.target?.id||'');
+      const relevant=['rental_price','insurance_total','franchise','young_driver_amount','discount_percent','rental_days','vehicle_quantity','return_location'].includes(id)||/^v2_/.test(id)||/^fx_/.test(id)||/^extra_/.test(id);
+      if(!relevant)return;
       if(e.target?.id==='discount_percent'){e.stopImmediatePropagation();authoritativeTotal();return}
       setTimeout(()=>{patchPrices();authoritativeTotal()},0);
     },true);
