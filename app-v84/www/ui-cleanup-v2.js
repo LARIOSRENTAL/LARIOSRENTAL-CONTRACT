@@ -34,10 +34,10 @@ function installStyle(){
 }
 function boot(){
   installStyle();clean();
-  new MutationObserver(clean).observe(document.body,{subtree:true,childList:true,characterData:true});
+  new MutationObserver(()=>{if(!window.LariosTypingPerformance?.active?.())clean()}).observe(document.body,{subtree:true,childList:true,characterData:true});
   window.addEventListener('larios:agenda-controls-ready',()=>setTimeout(clean,50));
   window.addEventListener('focus',clean);
-  setInterval(clean,1500);
+  setInterval(()=>{if(!window.LariosTypingPerformance?.active?.())clean()},1500);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.LariosUiCleanup={refresh:clean,version:'20260914-v2'};

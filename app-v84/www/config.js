@@ -6,6 +6,13 @@ window.LARIOS_CONFIG = window.LARIOS_CONFIG || {
   contractEmailEndpoint: 'https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/send-contract'
 };
 
+// This file is the first application script loaded by index.html. Load the
+// editor performance shield synchronously so it can quiet every observer
+// registered by the legacy modules that follow it.
+if (!window.LariosTypingPerformance && document.readyState === 'loading') {
+  document.write('<script src="typing-performance-v5.js?v=main-thread-shield-20261028-1"></script>');
+}
+
 // Cargar el guard del scanner al final, despues de scanner.js, V5 y V6.
 // Evita que codigo antiguo intente escribir en #scanTitle antes de crear la vista.
 window.addEventListener('load', function () {

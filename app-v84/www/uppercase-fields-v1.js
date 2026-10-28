@@ -70,5 +70,5 @@ function boot(){
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.LariosUppercaseFields={scan,normalizeAll,version:'20261028-iphone-native-typing-v3'};
-window.LariosTypingPerformance={active:typingActive,version:'20261028-main-thread-quiet-v4'};
+if(!window.LariosTypingPerformance)window.LariosTypingPerformance={active:typingActive,version:'20261028-main-thread-quiet-v4'};
 })();
