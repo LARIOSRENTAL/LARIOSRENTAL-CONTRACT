@@ -127,7 +127,7 @@ function affectsPricing(target){
 function bind(){
   const form=$('reservationForm');if(!form||form.dataset.runtimeHotfix==='1')return;
   form.dataset.runtimeHotfix='1';
-  form.addEventListener('input',event=>{if(affectsPricing(event.target))setTimeout(recalc,0)},true);
+  form.addEventListener('input',event=>{const e=event.target;if(affectsPricing(e)&&!['text','email','tel','search','url'].includes(String(e?.type||'').toLowerCase())&&e?.tagName!=='TEXTAREA')setTimeout(recalc,0)},true);
   form.addEventListener('change',event=>{if(affectsPricing(event.target))setTimeout(recalc,0)},true);
   setTimeout(recalc,50);
 }
