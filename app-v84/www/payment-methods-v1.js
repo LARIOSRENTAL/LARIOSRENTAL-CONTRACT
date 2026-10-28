@@ -37,7 +37,7 @@ function reorderEditorSections(){
 let orderingSections=false,sectionObserver=null;
 function observeSectionOrder(){
  const form=$('reservationForm');if(!form||sectionObserver)return;
- sectionObserver=new MutationObserver(()=>{if(orderingSections)return;requestAnimationFrame(reorderEditorSections)});
+ sectionObserver=new MutationObserver(()=>{if(orderingSections||window.LariosTypingPerformance?.active?.())return;requestAnimationFrame(reorderEditorSections)});
  sectionObserver.observe(form,{childList:true,subtree:true});
  requestAnimationFrame(reorderEditorSections)
 }
