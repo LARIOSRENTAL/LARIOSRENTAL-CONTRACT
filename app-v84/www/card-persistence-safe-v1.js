@@ -86,6 +86,7 @@ function hookEdit(){
 }
 let lastVisibleId='';
 function watchForm(){
+  if(window.LariosTypingPerformance?.active?.())return;
   hookEdit();bindInputs();
   const panel=$('reservation'),id=currentId();
   if(panel&&!panel.classList.contains('hidden')&&id&&id!==lastVisibleId){lastVisibleId=id;setTimeout(()=>hydrate(id),120)}
