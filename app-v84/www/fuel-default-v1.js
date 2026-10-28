@@ -11,5 +11,5 @@ function schedule(){[0,80,250,600].forEach(ms=>setTimeout(()=>apply().catch(()=>
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',schedule,{once:true});else schedule();
 new MutationObserver(schedule).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
 window.addEventListener('larios:access-ready',()=>{contracts=[];currentKey='';schedule()});
-setInterval(()=>apply().catch(()=>{}),1500);
+setInterval(()=>{if(!window.LariosTypingPerformance?.active?.())apply().catch(()=>{})},1500);
 })();
