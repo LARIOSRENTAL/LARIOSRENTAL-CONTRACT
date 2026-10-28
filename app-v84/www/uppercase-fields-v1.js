@@ -22,7 +22,11 @@ function configure(el){
   el.style.textTransform='uppercase';
   if(el.tagName!=='SELECT'){
     upperValue(el);
-    el.addEventListener('input',()=>upperValue(el));
+    // Do not rewrite the value on every keystroke. On iOS that interrupts the
+    // keyboard composition buffer and makes typed text appear seconds late.
+    // CSS keeps the visible text uppercase while the final value is normalized
+    // when editing finishes.
+    el.addEventListener('compositionend',()=>upperValue(el));
     el.addEventListener('change',()=>upperValue(el));
     el.addEventListener('blur',()=>upperValue(el));
     el.addEventListener('paste',()=>setTimeout(()=>upperValue(el),0));
