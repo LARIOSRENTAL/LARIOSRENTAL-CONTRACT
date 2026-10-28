@@ -167,7 +167,7 @@ function install(){
     agendaTimer=setTimeout(()=>{agendaTimer=0;ensureAgenda(force)},40)
   };
   let priceTimer=0;
-  const schedulePrices=()=>{if(priceTimer)return;priceTimer=setTimeout(()=>{priceTimer=0;if(!$('reservation')?.classList.contains('hidden'))patchPrices()},0)};
+  const schedulePrices=()=>{if(window.LariosTypingPerformance?.active?.()||priceTimer)return;priceTimer=setTimeout(()=>{priceTimer=0;if(!window.LariosTypingPerformance?.active?.()&&!$('reservation')?.classList.contains('hidden'))patchPrices()},80)};
   const reservation=$('reservation'),form=$('reservationForm'),agenda=$('agenda');
 
   // LariosReservations is intentionally read-only. Do not monkey-patch its methods.
@@ -177,6 +177,7 @@ function install(){
     editingId=e?.detail?.id||x?.id||editingId;
     setTimeout(()=>{patchPrices();if(x)hydrateFinancials(x)},120);
   });
+  document.addEventListener('larios:typing-idle',schedulePrices);
 
   if(reservation)new MutationObserver(schedulePrices).observe(reservation,{attributes:true,attributeFilter:['class']});
   if(form)new MutationObserver(records=>{
