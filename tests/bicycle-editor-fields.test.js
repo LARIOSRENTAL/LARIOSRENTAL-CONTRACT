@@ -49,5 +49,8 @@ const uppercase=fs.readFileSync(path.join(root,'uppercase-fields-v1.js'),'utf8')
 assert.doesNotMatch(uppercase,/addEventListener\('input',\(\)=>upperValue/,'iOS typing must not rewrite input values per keystroke');
 const pricing=fs.readFileSync(path.join(root,'pricing-manager-v1.js'),'utf8');
 assert.doesNotMatch(pricing,/setInterval\(\(\)=>\{ensureCatalog\(\);bindAutomatic\(\)\},1400\)/,'pricing binding must not poll forever');
+const authorityLoader=fs.readFileSync(path.join(root,'final-authority.js'),'utf8');
+assert.match(authorityLoader,/uppercase-fields-v1\.js\?v=iphone-typing-20261028-2&ts=/,'uppercase typing fix must bypass the old iPhone cache');
+assert.match(authorityLoader,/pricing-manager-v1\.js\?v=iphone-typing-20261028-2&ts=/,'pricing performance fix must bypass the old iPhone cache');
 
 console.log('bicycle editor fields and typing performance: ok');
