@@ -114,11 +114,21 @@ function recalc(){if(window.LariosAutoPricing){window.LariosAutoPricing.recalcul
     const tr=rows.find(r=>r.classList.contains('priceTotal'));if(tr?.querySelector('b'))tr.querySelector('b').textContent=money(total)+' €';
   }
 }
+const pricingInputIds=new Set([
+  'vehicle_group','vehicle_quantity','rental_days','pickup_date','pickup_time',
+  'return_date','return_time','return_location','tariff94','full_insurance',
+  'young_driver','young_driver_amount','customer_birth_date','discount_percent',
+  'rental_price','insurance_total','franchise'
+]);
+function affectsPricing(target){
+  const id=String(target?.id||'');
+  return pricingInputIds.has(id)||/^v2_/.test(id)||/^fx_/.test(id)||/^extra_/.test(id);
+}
 function bind(){
   const form=$('reservationForm');if(!form||form.dataset.runtimeHotfix==='1')return;
   form.dataset.runtimeHotfix='1';
-  form.addEventListener('input',()=>setTimeout(recalc,0),true);
-  form.addEventListener('change',()=>setTimeout(recalc,0),true);
+  form.addEventListener('input',event=>{if(affectsPricing(event.target))setTimeout(recalc,0)},true);
+  form.addEventListener('change',event=>{if(affectsPricing(event.target))setTimeout(recalc,0)},true);
   setTimeout(recalc,50);
 }
 let tries=0;const timer=setInterval(()=>{bind();if(++tries>120)clearInterval(timer)},250);
