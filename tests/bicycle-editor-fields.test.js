@@ -47,10 +47,25 @@ assert.equal($('lrCustomerAddress').style.display,'');
 
 const uppercase=fs.readFileSync(path.join(root,'uppercase-fields-v1.js'),'utf8');
 assert.doesNotMatch(uppercase,/addEventListener\('input',\(\)=>upperValue/,'iOS typing must not rewrite input values per keystroke');
+assert.doesNotMatch(uppercase,/text-transform\s*:\s*uppercase/i,'iOS text inputs must not use live CSS uppercase composition');
+assert.doesNotMatch(uppercase,/addEventListener\('compositionend'/,'iOS composition must remain native until blur/change');
+assert.match(uppercase,/document\.addEventListener\('input',isolateNativeTyping,true\)/,'legacy per-key handlers must be isolated from ordinary text fields');
 const pricing=fs.readFileSync(path.join(root,'pricing-manager-v1.js'),'utf8');
 assert.doesNotMatch(pricing,/setInterval\(\(\)=>\{ensureCatalog\(\);bindAutomatic\(\)\},1400\)/,'pricing binding must not poll forever');
 const authorityLoader=fs.readFileSync(path.join(root,'final-authority.js'),'utf8');
-assert.match(authorityLoader,/uppercase-fields-v1\.js\?v=iphone-typing-20261028-2&ts=/,'uppercase typing fix must bypass the old iPhone cache');
+assert.match(authorityLoader,/uppercase-fields-v1\.js\?v=iphone-native-typing-20261028-3&ts=/,'uppercase typing fix must bypass the old iPhone cache');
 assert.match(authorityLoader,/pricing-manager-v1\.js\?v=iphone-typing-20261028-2&ts=/,'pricing performance fix must bypass the old iPhone cache');
+
+const typingDom=new JSDOM('<!doctype html><form id="reservationForm"><input id="customer_name"></form>',{runScripts:'outside-only'});
+const typingInput=typingDom.window.document.getElementById('customer_name');let legacyInputCalls=0;
+typingInput.addEventListener('input',()=>legacyInputCalls++);
+typingDom.window.eval(uppercase);
+typingDom.window.document.dispatchEvent(new typingDom.window.Event('DOMContentLoaded'));
+typingInput.value='ignacio';
+typingInput.dispatchEvent(new typingDom.window.Event('input',{bubbles:true}));
+assert.equal(typingInput.value,'ignacio','typing must remain untouched while the field has focus');
+assert.equal(legacyInputCalls,0,'ordinary text typing must not reach legacy synchronous handlers');
+typingInput.dispatchEvent(new typingDom.window.Event('blur'));
+assert.equal(typingInput.value,'IGNACIO','uppercase normalization must still happen after editing');
 
 console.log('bicycle editor fields and typing performance: ok');
