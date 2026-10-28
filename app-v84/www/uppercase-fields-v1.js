@@ -3,6 +3,7 @@
 const ROOT_SELECTORS=['#reservationForm','#lrVehicleForm'];
 const EXCLUDED_TYPES=new Set(['password','hidden','file','checkbox','radio','range','color']);
 const LIVE_TEXT_INPUTS=new Set(['vehicle_plate','card_number','card_expiry']);
+let editingField=null,scanFrame=0;
 function shouldHandle(el){
   if(!el||!el.matches?.('input,textarea,select'))return false;
   if(el.tagName==='INPUT'&&EXCLUDED_TYPES.has(String(el.type||'text').toLowerCase()))return false;
@@ -38,6 +39,15 @@ function scan(root=document){
   });
 }
 function normalizeAll(){ROOT_SELECTORS.forEach(sel=>document.querySelectorAll(sel+' input,'+sel+' textarea').forEach(upperValue))}
+function isTextEditingField(el){
+  if(!shouldHandle(el)||el.tagName==='SELECT')return false;
+  const type=String(el.type||'text').toLowerCase();
+  return el.tagName==='TEXTAREA'||['text','email','tel','search','url'].includes(type);
+}
+function typingActive(){return !!editingField&&document.activeElement===editingField}
+function beginTyping(el){if(isTextEditingField(el)){editingField=el;document.documentElement.dataset.lrTypingActive='1'}}
+function endTyping(el){setTimeout(()=>{if(editingField!==el||document.activeElement===el)return;editingField=null;delete document.documentElement.dataset.lrTypingActive;document.dispatchEvent(new CustomEvent('larios:typing-idle'))},0)}
+function scheduleScan(){if(typingActive()||scanFrame)return;scanFrame=requestAnimationFrame(()=>{scanFrame=0;if(!typingActive())scan()})}
 function isolateNativeTyping(event){
   const el=event.target;
   if(!shouldHandle(el)||el.tagName==='SELECT'||LIVE_TEXT_INPUTS.has(el.id))return;
@@ -52,11 +62,13 @@ function isolateNativeTyping(event){
 function boot(){
   document.getElementById('lrUppercaseFieldsStyle')?.remove();
   scan();
-  new MutationObserver(()=>scan()).observe(document.body,{subtree:true,childList:true});
+  new MutationObserver(scheduleScan).observe(document.body,{subtree:true,childList:true});
   document.addEventListener('input',isolateNativeTyping,true);
-  document.addEventListener('focusin',e=>configure(e.target),true);
+  document.addEventListener('focusin',e=>{configure(e.target);beginTyping(e.target)},true);
+  document.addEventListener('focusout',e=>endTyping(e.target),true);
   document.addEventListener('submit',normalizeAll,true);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.LariosUppercaseFields={scan,normalizeAll,version:'20261028-iphone-native-typing-v3'};
+window.LariosTypingPerformance={active:typingActive,version:'20261028-main-thread-quiet-v4'};
 })();
