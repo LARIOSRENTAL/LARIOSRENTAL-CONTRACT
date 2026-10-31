@@ -2089,6 +2089,47 @@ async function handler(req: Request) {
         checked = await verify(code, { checkStart: false, checkPayment: false });
       }
 
+      // Reservations that were already present in Renthub are immutable links:
+      // "Mandar datos Renthub" may update their customer/anagraphic record, but
+      // must never create a replacement booking or cancel the original one.
+      const linkedExisting = contract.renthub_sync_status === "linked_existing"
+        || String(contract.app_payload?.renthub_linked_existing_code || "") === code;
+      if (linkedExisting) {
+        if (!customerCode) {
+          throw new Error("La reserva existente se conserva, pero Renthub no devolvió el cliente asociado para actualizar sus datos.");
+        }
+        const now = new Date().toISOString();
+        const linkedPayload = {
+          ...(contract.app_payload || {}),
+          renthub_linked_existing_code: code,
+          renthub_existing_customer_updated_at: now,
+          renthub_existing_booking_preserved: true,
+        };
+        await requireWrite(actor.from("contracts").update({
+          renthub_sync_status: "synced_existing",
+          renthub_last_sync_at: now,
+          renthub_sync_error: null,
+          app_payload: linkedPayload,
+        }).eq("id", contract.id), "No se pudo guardar la actualización del cliente de Renthub");
+        console.log(JSON.stringify({
+          event: "renthub_linked_existing_customer_updated",
+          contract_number: contract.contract_number,
+          booking_code: code,
+          booking_preserved: true,
+          replacement_skipped: true,
+          cancellation_skipped: true,
+        }));
+        return json({
+          verified: true,
+          updated_existing_customer: true,
+          existing_booking_preserved: true,
+          replacement_skipped: true,
+          cancellation_skipped: true,
+          external_reference: code,
+          updated,
+        });
+      }
+
       if (checked.verified && contract.renthub_sync_status === "payment_pending") {
         payment = await syncRenthubAccountingPayment(contract, checked.detail, paymentMethod, paymentAmount);
         const retryPayload = paymentSyncPayload(contract.app_payload || {}, payment);

@@ -35,6 +35,10 @@ function splitPhone(value:unknown){
   return{prefix:code,mobile};
 }
 const amount=(v:unknown)=>Number(String(v??"0").trim().replace(/\s/g,"").replace(",","."));
+async function sha256(value:string){
+  const bytes=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map((x)=>x.toString(16).padStart(2,"0")).join("");
+}
 function netFromGross(v:unknown,vatValue:unknown){const gross=amount(v),vat=Math.max(0,amount(vatValue));return Number.isFinite(gross)&&vat>0?gross/(1+vat/100):gross;}
 function pricingCategoryForGroup(group:unknown){
   const g=groupName(group);
@@ -203,7 +207,7 @@ function exactPhoneMatch(candidate:any,targetRaw:string){
 function exactNameMatch(candidate:any,targetRaw:string){
   const target=norm(targetRaw);
   if(!target||target==="pendiente larios rental"||target==="seguro"||target==="cliente pendiente larios rental")return false;
-  return candidateCustomerName(candidate).includes(target);
+  return candidateCustomerName(candidate).some((name:string)=>name===target||name.endsWith(" "+target)||target.endsWith(" "+name));
 }
 function scalarIds(values:any[]){
   const out:string[]=[];
@@ -236,16 +240,18 @@ function sameDateTime(v:any,targetStart:string){
 }
 let userTokenCache="";
 async function userToken(force=false){
-  const configuredApiKey=env("RENTHUB_USER_API_KEY"),email=env("RENTHUB_USER_API_EMAIL"),password=env("RENTHUB_USER_API_PASSWORD");
-  if(!force&&configuredApiKey)return configuredApiKey;
+  const email=env("RENTHUB_USER_API_EMAIL");
+  // RENTHUB_USER_API_KEY is the login credential. Renthub requires exchanging
+  // it for a session token before calling endpoints with X-UserAuthToken.
+  const password=env("RENTHUB_USER_API_KEY")||env("RENTHUB_USER_API_PASSWORD");
   if(!force&&userTokenCache)return userTokenCache;
-  if(force&&(!email||!password)&&configuredApiKey)return configuredApiKey;
   if(!email||!password)throw Error("Renthub User API no configurada");
   const form=new FormData();form.set("email",email);form.set("password",password);
   const response=await fetch(`${base()}/api/auth/login`,{method:"POST",headers:{Accept:"application/json"},body:form});
   const raw=await response.text();let data:any={};try{data=raw?JSON.parse(raw):{}}catch{}
   const headerToken=response.headers.get("X-UserAuthToken")||response.headers.get("X-Auth-Token")||response.headers.get("Authorization")||"";
-  userTokenCache=String(data?.result?.token||data?.token||headerToken).replace(/^Bearer\s+/i,"");
+  const tokenValue=data?.result?.token?.key||data?.result?.token||data?.token?.key||data?.token||headerToken;
+  userTokenCache=typeof tokenValue==="string"?tokenValue.replace(/^Bearer\s+/i,"").trim():"";
   if(!response.ok||!userTokenCache)throw Error(`Renthub User API authentication failed (${response.status})`);
   return userTokenCache;
 }
@@ -277,7 +283,7 @@ async function findExistingBookings(target:{phone:string,name:string,start:strin
 
   try{
     const q=new URLSearchParams({page:"1",per_page:"50",start_date_from:target.date,start_date_to:target.date});
-    const data=await userApiFetch("/module/rental/api/v1/booking?"+q.toString());
+    const data=await userApiFetch("/module/rental/api/v1/reservation?"+q.toString());
     inspect(collectBookings(data),"user_api");
     complete=true;
   }catch(e){
@@ -285,6 +291,21 @@ async function findExistingBookings(target:{phone:string,name:string,start:strin
   }
 
   return {matches:[...byCode.values()],complete,partnerChecked};
+}
+function selectExistingBookings(matches:any[],target:{phone:string,name:string,price:number}){
+  const targetName=norm(target.name);
+  const genericNames=new Set(["","particular","pendiente larios rental","city expert"]);
+  const hasSpecificName=!genericNames.has(targetName);
+  if(hasSpecificName){
+    const byExactName=matches.filter((row:any)=>!!row?._lr_name_match);
+    if(byExactName.length)return byExactName;
+    // A shared telephone, time and price does not make two named customers the
+    // same booking. This is common when an agency sends several reservations.
+    return [];
+  }
+  const byPhoneAndPrice=matches.filter((row:any)=>!!row?._lr_phone_match&&!!row?._lr_price_match);
+  if(byPhoneAndPrice.length)return byPhoneAndPrice;
+  return matches.filter((row:any)=>!!row?._lr_phone_match||!!row?._lr_name_match);
 }
 Deno.serve(async(req:Request)=>{
   if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
@@ -300,7 +321,11 @@ Deno.serve(async(req:Request)=>{
   const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
   const service=createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});
   const body=await req.json().catch(()=>({})),action=String(body.action||"create"),id=String(body.contract_id||"");
-  const bridge=action==="create_whatsapp"||action==="amend_whatsapp";
+  const reconcile=action==="reconcile_existing";
+  const rollbackReconcile=action==="rollback_reconcile_duplicate";
+  const inspectReconcile=action==="inspect_reconcile_existing";
+  const inspectSearch=action==="inspect_reconcile_search";
+  const bridge=action==="create_whatsapp"||action==="amend_whatsapp"||reconcile||rollbackReconcile||inspectReconcile||inspectSearch;
   if(!bridge&&!jwt)return json({error:"Authentication required"},401);
   if(bridge&&!body.import_token)return json({error:"Token del puente obligatorio"},403);
   let actor:any=service;
@@ -320,28 +345,69 @@ Deno.serve(async(req:Request)=>{
        !body.import_token||p.renthub_local_only===true||p.time_pending===true||p.time_inferred===true||
        c.status!=="draft"||c.pdf_path||p.renthub_created_from_web===true)
       return json({error:"Reserva WhatsApp no apta para creación automática"},409);
-    const bridgeVerifier=createClient(env("SUPABASE_URL"),env("SUPABASE_ANON_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});
-    const {data:verified,error:verifyError}=await bridgeVerifier.rpc("larios_whatsapp_process",{
-      p_chat:p.source_whatsapp_group,p_id:p.source_whatsapp_message_id,p_token:String(body.import_token)
-    });
-    if(verifyError||verified?.status!=="created"||
-       String(verified?.contract_id)!==String(id) &&
-       !(Number(p.source_whatsapp_unit_count)>1 && Number(p.source_whatsapp_unit_index)>1))
-      return json({error:"Origen WhatsApp no autorizado"},403);
+    if(reconcile||rollbackReconcile||inspectReconcile||inspectSearch){
+      const expected=String(p.renthub_reconcile_nonce_sha256||"");
+      const supplied=await sha256(String(body.import_token||""));
+      if(!expected||supplied!==expected)return json({error:"Reconciliación no autorizada"},403);
+    }else{
+      const bridgeVerifier=createClient(env("SUPABASE_URL"),env("SUPABASE_ANON_KEY"),{auth:{persistSession:false,autoRefreshToken:false}});
+      const {data:verified,error:verifyError}=await bridgeVerifier.rpc("larios_whatsapp_process",{
+        p_chat:p.source_whatsapp_group,p_id:p.source_whatsapp_message_id,p_token:String(body.import_token)
+      });
+      if(verifyError||verified?.status!=="created"||
+         String(verified?.contract_id)!==String(id) &&
+         !(Number(p.source_whatsapp_unit_count)>1 && Number(p.source_whatsapp_unit_index)>1))
+        return json({error:"Origen WhatsApp no autorizado"},403);
+    }
     // For multi-vehicle messages, the inbox stores the first contract ID. The
     // contract's own source fields and token-scoped inbox row bind each unit.
     const madrid=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Madrid",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date());
     if(`${c.delivery_date} ${String(c.delivery_time||"").slice(0,5)}`<=madrid)
       return json({error:"La recogida ya no es futura"},409);
+    if(inspectReconcile){
+      const code=String(body.external_reference||"").trim().toUpperCase();
+      if(!/^[A-Z0-9]+-[A-Z0-9]+$/.test(code))return json({error:"Código Renthub no válido"},400);
+      const detail=await rh(`/module/rental/api/partner/booking/details/${encodeURIComponent(code)}`);
+      const booking=detail?.result?.booking||{};
+      const linkedCustomer=detail?.result?.customer||{};
+      return json({
+        found:String(booking?.code||"")===code,
+        external_reference:String(booking?.code||code),
+        customer_name:String(linkedCustomer?.full_name||[linkedCustomer?.name,linkedCustomer?.surname].filter(Boolean).join(" ")||""),
+        customer_phone:String(linkedCustomer?.mobile||linkedCustomer?.phone||""),
+        start_datetime:String(booking?.start_datetime||""),
+        end_datetime:String(booking?.end_datetime||""),
+        total:booking?.total_amount??booking?.total??null
+      });
+    }
+    if(rollbackReconcile){
+      const code=String(c.renthub_contract_id||"").trim();
+      if(!code)return json({error:"No hay una reserva técnica que retirar"},409);
+      await rh(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(code)}`,{method:"DELETE"});
+      const rollbackAt=new Date().toISOString();
+      const rollbackPayload={...p,
+        renthub_reconcile_nonce_sha256:null,
+        renthub_reconcile_rollback_code:code,
+        renthub_reconcile_rollback_at:rollbackAt,
+        renthub_existing_booking_preserved:true
+      };
+      await requireWrite(service.from("contracts").update({
+        renthub_contract_id:null,
+        renthub_sync_status:"failed",
+        renthub_sync_error:"Pendiente de enlazar manualmente con la reserva original existente en Renthub.",
+        app_payload:rollbackPayload
+      }).eq("id",id).eq("renthub_contract_id",code),"No se pudo registrar la retirada de la reserva técnica");
+      return json({cancelled_duplicate:true,cancelled_code:code,existing_booking_preserved:true});
+    }
     if(c.renthub_sync_status==="creating"&&!bridgeAmend)return json({error:"Creación ya iniciada; verificar en Renthub antes de reintentar"},409);
-    if(!bridgeAmend&&c.renthub_sync_status==="failed" &&
+    if(!bridgeAmend&&!reconcile&&!inspectSearch&&c.renthub_sync_status==="failed" &&
        !norm(c.renthub_sync_error).includes("codigo internacional es obligatorio"))
       return json({error:"Error anterior pendiente de verificación en Renthub"},409);
   }
   if(action==="update")return json({error:"La actualización queda pendiente del endpoint de Renthub.",pending_endpoint:true},409);
   if(action!=="create"&&!bridge)return json({error:"Unknown action"},400);
-  if(c.renthub_contract_id&&!bridgeAmend)return json({created:true,already_created:true,external_reference:c.renthub_contract_id});
-  if(bridge&&!bridgeAmend){
+  if(c.renthub_contract_id&&!bridgeAmend&&!inspectSearch)return json({created:true,already_created:true,external_reference:c.renthub_contract_id});
+  if(bridge&&!bridgeAmend&&!inspectSearch){
     let claimQuery=service.from("contracts").update({renthub_sync_status:"creating",renthub_sync_error:null})
       .eq("id",id).eq("renthub_sync_status",c.renthub_sync_status).is("renthub_contract_id",null);
     if(c.renthub_sync_status==="failed")claimQuery=claimQuery.eq("renthub_sync_error",c.renthub_sync_error);
@@ -372,6 +438,46 @@ Deno.serve(async(req:Request)=>{
       payload.price_source="base_tariff";
     }else{
       payload.price_source="explicit";
+    }
+    if(inspectSearch){
+      const lookup=await findExistingBookings({
+        phone:String(customer?.phone||payload.customer_phone||""),
+        name:String(customer?.full_name||payload.customer_name||""),
+        start:realStart,
+        price:Number(rentalGross||0),
+        date:String(c.delivery_date||"")
+      });
+      const q=new URLSearchParams({page:"1",per_page:"50",start_date_from:String(c.delivery_date||""),start_date_to:String(c.delivery_date||"")});
+      const rawList=await userApiFetch("/module/rental/api/v1/reservation?"+q.toString());
+      const needle=norm(customer?.full_name||payload.customer_name||"");
+      const diagnosticRows:any[]=[];
+      const visit=(value:any)=>{
+        if(value==null||diagnosticRows.length>=8)return;
+        if(Array.isArray(value)){for(const item of value)visit(item);return;}
+        if(typeof value!=="object")return;
+        let rendered="";try{rendered=norm(JSON.stringify(value));}catch{}
+        if(needle&&rendered.includes(needle)){
+          diagnosticRows.push(Object.fromEntries(Object.entries(value).filter(([,item])=>
+            item==null||["string","number","boolean"].includes(typeof item)||
+            (typeof item==="object"&&item!==null&&!Array.isArray(item))
+          )));
+        }
+        for(const item of Object.values(value))visit(item);
+      };
+      visit(rawList);
+      return json({
+        complete:lookup.complete,
+        partner_checked:lookup.partnerChecked,
+        matches:lookup.matches.map((row:any)=>({
+          code:bookingCode(row),
+          start:bookingStart(row),
+          name_match:!!row?._lr_name_match,
+          phone_match:!!row?._lr_phone_match,
+          price_match:!!row?._lr_price_match,
+          source:row?._lr_source||null
+        })),
+        diagnostic_rows:diagnosticRows
+      });
     }
     const pickupText=String(c.delivery_location||payload.pickup_location||"").trim(),dropoffText=String(c.return_location||payload.return_location||pickupText).trim();
     const pickupAddress=String(map.pickupAddress||"").trim(),dropoffAddress=String(map.dropoffAddress||"").trim();
@@ -460,7 +566,11 @@ Deno.serve(async(req:Request)=>{
       console.warn("Local web mirror duplicate precheck failed",e);
     }
 
-    const existing=precheck.matches;
+    const existing=selectExistingBookings(precheck.matches,{
+      phone:String(customer?.phone||payload.customer_phone||""),
+      name:String(customer?.full_name||payload.customer_name||""),
+      price:Number(rentalGross||0)
+    });
     if(existing.length===1){
       const existingCode=bookingCode(existing[0]);
       if(existingCode){
@@ -478,6 +588,7 @@ Deno.serve(async(req:Request)=>{
             renthub_duplicate_match_phone:!!existing[0]?._lr_phone_match,
             renthub_duplicate_match_name:!!existing[0]?._lr_name_match,
             renthub_duplicate_match_price:!!existing[0]?._lr_price_match,
+            renthub_reconcile_nonce_sha256:null,
             renthub_model_id:map.model,
             renthub_pickup_location_id:map.pickup,
             renthub_dropoff_location_id:map.dropoff
@@ -489,6 +600,17 @@ Deno.serve(async(req:Request)=>{
     }
     if(existing.length>1){
       throw Error("Se han encontrado varias reservas de Renthub con la misma fecha y hora y coincidencia en precio, nombre o teléfono. No se crea una nueva para evitar duplicados; revisar cuál corresponde.");
+    }
+    if(reconcile){
+      throw Error("No se ha localizado por nombre la reserva original de Renthub. No se crea ninguna reserva nueva.");
+    }
+    const paidExistingHint=bridge&&(
+      payload.paid_mentioned===true||
+      ["paid","pagado","pending_payment"].includes(norm(payload.payment_status))||
+      /\b(pagado|pendiente\s+de\s+pago|pte\.?\s*pago)\b/i.test(String(payload.whatsapp_message||""))
+    );
+    if(paidExistingHint){
+      throw Error("El mensaje indica que la reserva ya existe o está pagada en Renthub. No se crea otra; queda pendiente de enlazar la original por nombre.");
     }
     if(!precheck.complete){
       throw Error("No se ha podido contrastar el listado completo de reservas actuales de Renthub. La reserva NO se crea para evitar un posible duplicado.");
