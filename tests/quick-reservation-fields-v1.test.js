@@ -34,4 +34,34 @@ assert.equal(hotel.agency,'Hotel Molina Lario');
 assert.equal(hotel.pickup_location,'Hotel Molina Lario');
 assert.equal(hotel.customer_name,'María');
 
+const bro=fields.clean('11:00 g b bro 405 un día',{pickup_location:'bro',return_location:'bro',customer_name:'Pendiente',reservation_detail:'405'});
+assert.equal(bro.agency,'HOTEL BRO');
+assert.equal(bro.pickup_location,'HOTEL BRO');
+assert.equal(bro.customer_name,'Pendiente Larios Rental');
+
+const itineraryMessage=`Seat Ibiza - Modelo C.
+Del: 1 de Noviembre - Recogida en AGP
+Al: 5 de Noviembre - Devuelve en AGP
+Total: 4 días.
+Vuelo del 1 de Noviembrre: SN3735 (llegada a las 14.30h)
+Vuelo del 5 de Noviembre: LX2115 (salida a las 16:20h.)
+_*Dejarán el vehículo sobre las 14:00h. del 5/11._
+
+Nombre: Filip Marest
+Teléfono: +32 475 92 07 18
+
+Cristine bedford`;
+const itinerary=fields.clean(itineraryMessage,{pickup_location:itineraryMessage,return_location:itineraryMessage,customer_name:'Cristine bedford',reservation_detail:'',vehicle_group:''});
+assert.equal(itinerary.customer_name,'Filip Marest');
+assert.equal(itinerary.agency,'Cristine Bedfor Guest Houses Málaga');
+assert.equal(itinerary.pickup_date,'2026-11-01');
+assert.equal(itinerary.pickup_time,'14:30');
+assert.equal(itinerary.return_date,'2026-11-05');
+assert.equal(itinerary.return_time,'14:00');
+assert.equal(itinerary.pickup_location,'AGP');
+assert.equal(itinerary.return_location,'AGP');
+assert.equal(itinerary.rental_days,'4');
+assert.equal(itinerary.vehicle_group,'C');
+assert.equal(itinerary.reservation_detail,'Seat Ibiza · Modelo C');
+
 console.log('WhatsApp quick reservation fields: ok');

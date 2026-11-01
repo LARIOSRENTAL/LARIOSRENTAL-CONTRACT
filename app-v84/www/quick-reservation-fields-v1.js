@@ -6,6 +6,8 @@ const aliases={"ofi":"5","oficina":"5","oficina principal":"5","pasaje noblejas"
 const normalize=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 const phones=/\+\d[\d\s\u00a0().-]{6,}\d|(?<!\d)[679]\d{8}(?!\d)/g;
 const special=[
+ {name:'HOTEL BRO',re:/\b(?:hotel\s+)?bro\b/i},
+ {name:'Cristine Bedfor Guest Houses Málaga',re:/\bcristin(?:e|a)\s+bedfor(?:d)?\b/i},
  {name:'CITY EXPERT',re:/\b(?:cister\s*city\s*expert|city\s*expert|cister\s*city|cister)\b/i,branch:/\b(?:cister|calle granada|m[aá]laga estaci[oó]n autobuses|estaci[oó]n autobuses|muelle heredia)\b/i},
  {name:'L APARTAMENTOS 636638887',re:/\b(?:ele\s*apart(?:a?ment(?:os)?|ments?)|l\s*apart(?:a?ment(?:os)?|ments?)|lapart(?:a?ment(?:os)?|ments?))\b/i},
  {name:'SOL MAESTRANZA',re:/\bsol\s+maestranza\b/i},
@@ -47,8 +49,27 @@ function compactLocation(raw,p){
  const detail=String(p?.reservation_detail||'').trim();if(detail&&/^\d{2,4}$/.test(detail))s=s.replace(new RegExp('(?:^|\\s)'+detail+'(?=\\s|$)'),' ');
  return s.replace(/[|,;]+/g,' ').replace(/(?:\s*\/\s*)+/g,' ').replace(/\s+/g,' ').trim();
 }
+const months={enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12};
+function isoNamedDate(day,month){
+ const n=months[normalize(month)],year=Number(new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric'}).format(new Date()));
+ if(!n)return'';
+ return year+'-'+String(n).padStart(2,'0')+'-'+String(Number(day)).padStart(2,'0');
+}
+function clock(raw){const m=String(raw||'').match(/\b([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\s*h?\b/i);return m?String(Number(m[1])).padStart(2,'0')+':'+m[2]:''}
+function itinerary(raw){
+ const source=String(raw||'');
+ const pickup=source.match(/\bdel\s*:\s*(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s*-\s*recogida\s+en\s+([^\n-]+)/i);
+ const returned=source.match(/\bal\s*:\s*(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s*-\s*devuelve\s+en\s+([^\n-]+)/i);
+ if(!pickup||!returned)return null;
+ const pickupDate=isoNamedDate(pickup[1],pickup[2]),returnDate=isoNamedDate(returned[1],returned[2]);
+ const arrival=source.match(/\bllegada\s+a\s+las\s+([0-2]?\d\s*[:.]\s*[0-5]\d)\s*h?/i);
+ const drop=source.match(/\bdejar[aá]n\s+el\s+veh[ií]culo\s+sobre\s+las\s+([0-2]?\d\s*[:.]\s*[0-5]\d)\s*h?/i);
+ const model=source.match(/^\s*([^\n]+?)(?=\s*\n|\s+-\s*Modelo\b)/i)?.[1]?.trim()||'';
+ const group=source.match(/\bmodelo\s+([A-Z0-9-]+)\b/i)?.[1]?.toUpperCase()||'';
+ return{pickupDate,returnDate,pickupTime:clock(arrival?.[1]),returnTime:clock(drop?.[1]),pickupLocation:pickup[3].trim(),returnLocation:returned[3].trim(),model,group};
+}
 function clean(raw,p){
- const source=String(raw||''),person=source.match(/(?:^|\n)\s*(?:nombre\s+(?:del\s+)?cliente|cliente)\s*:\s*([^\n]+)/i)?.[1]?.trim()||'';
+ const source=String(raw||''),person=source.match(/(?:^|\n)\s*(?:nombre(?:\s+(?:del\s+)?cliente)?|cliente)\s*:\s*([^\n]+)/i)?.[1]?.trim()||'';
  const phone=source.match(phones)?.[0]||'';
  const collaborator=partner(source.replace(person||'\u0000',' '));
  let customer=person||nameAfterPhone(source,collaborator)||String(p.customer_name||'').trim();
@@ -63,7 +84,7 @@ function clean(raw,p){
    const branch=collaborator.branch;
    let other=without.replace(/[ ,;|]+/g,' ').replace(/\b(?:de|del)\s*$/i,'').trim();
    if(branch&&other&&normalize(other)!==normalize(branch))other=other.replace(new RegExp('\\s+'+branch.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$','i'),' ').trim();
-   if(other&&normalize(other)!==normalize(branch)){const tokens=other.split(/\s+/);if(tokens.length>1&&/^(?:ofi|oficina)$/i.test(tokens[0])&&partner(tokens.slice(1).join(' ')))other=tokens[0];location=other}else if(/city expert/i.test(collaborator.name)&&branch){location='City Expert '+branch}else location=collaborator.match;
+   if(other&&normalize(other)!==normalize(branch)){const tokens=other.split(/\s+/);if(tokens.length>1&&/^(?:ofi|oficina)$/i.test(tokens[0])&&partner(tokens.slice(1).join(' ')))other=tokens[0];location=other}else if(/city expert/i.test(collaborator.name)&&branch){location='City Expert '+branch}else location=collaborator.name==='HOTEL BRO'?'HOTEL BRO':collaborator.match;
    p.agency=collaborator.name;
  }
  location=location.replace(/(?:^|\s)[/,;]+|[/,;]+$/g,' ').replace(/\s+/g,' ').trim();
@@ -72,9 +93,20 @@ function clean(raw,p){
  p.return_location=verbose&&p.return_location&&normalize(p.return_location)!==normalize(p.pickup_location)?stripPhone(p.return_location):p.pickup_location;
  p.customer_name=customer;
  if(phone)p.customer_phone=phone;
+ const trip=itinerary(source);
+ if(trip){
+   const start=new Date(trip.pickupDate+'T00:00:00Z'),end=new Date(trip.returnDate+'T00:00:00Z');
+   p.pickup_date=trip.pickupDate;p.return_date=trip.returnDate;
+   if(trip.pickupTime)p.pickup_time=trip.pickupTime;
+   if(trip.returnTime)p.return_time=trip.returnTime;
+   p.pickup_location=trip.pickupLocation;p.return_location=trip.returnLocation;
+   p.rental_days=String(Math.max(1,Math.round((end-start)/86400000)));
+   if(trip.group&&!p.vehicle_group)p.vehicle_group=trip.group;
+   p.reservation_detail=[trip.model,trip.group?'Modelo '+trip.group:''].filter(Boolean).join(' · ');
+ }
  phones.lastIndex=0;if(phones.test(String(p.reservation_detail||'')))p.reservation_detail='';
  return p;
 }
-root.LariosQuickFields={clean,partner,stripPhone};
+root.LariosQuickFields={clean,partner,stripPhone,itinerary};
 if(typeof module!=='undefined')module.exports=root.LariosQuickFields;
 })(typeof window!=='undefined'?window:globalThis);
