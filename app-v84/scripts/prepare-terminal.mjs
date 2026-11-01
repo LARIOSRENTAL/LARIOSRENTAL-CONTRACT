@@ -117,7 +117,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
   'import com.getcapacitor.BridgeActivity;',
   'public class MainActivity extends BridgeActivity {',
   ' @Override public void onCreate(Bundle savedInstanceState){super.onCreate(savedInstanceState);registerPlugin(LariosKioskPlugin.class);}',
-  ' @Override protected void onResume(){super.onResume();LariosKioskController.enter(this);}',
+  ' @Override public void onResume(){super.onResume();LariosKioskController.enter(this);}',
   '}'
  ].join('\n'));
 }
