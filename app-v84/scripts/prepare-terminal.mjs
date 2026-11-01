@@ -40,3 +40,85 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
  const vars='android/variables.gradle';s=fs.readFileSync(vars,'utf8').replace(/minSdkVersion\s*=\s*\d+/,'minSdkVersion = 26');fs.writeFileSync(vars,s);
 }
 console.log('Stripe Terminal 5.8.0: initialization, consent and permission patches applied.');
+
+
+// Larios Rental dedicated-device kiosk mode.
+// Activated only when this package has been provisioned as Android Device Owner.
+if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
+ const manifest='android/app/src/main/AndroidManifest.xml';
+ let m=fs.readFileSync(manifest,'utf8');
+ if(!m.includes('android.permission.RECEIVE_BOOT_COMPLETED'))m=m.replace('<application','<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/><application');
+ if(!m.includes('LariosDeviceAdminReceiver')){
+  m=m.replace('</application>','<receiver android:name=".LariosDeviceAdminReceiver" android:permission="android.permission.BIND_DEVICE_ADMIN" android:exported="true"><meta-data android:name="android.app.device_admin" android:resource="@xml/larios_device_admin"/><intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/></intent-filter></receiver></application>');
+ }
+ if(!m.includes('android.intent.category.HOME')){
+  const activityAt=m.indexOf('android:name=".MainActivity"');
+  if(activityAt<0)throw Error('Cannot locate MainActivity in AndroidManifest.xml');
+  const closeAt=m.indexOf('</activity>',activityAt);
+  if(closeAt<0)throw Error('Cannot locate MainActivity closing tag');
+  const home='<intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.HOME"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>';
+  m=m.slice(0,closeAt)+home+m.slice(closeAt);
+ }
+ fs.writeFileSync(manifest,m);
+ const javaDir='android/app/src/main/java/com/lariosrental/management';fs.mkdirSync(javaDir,{recursive:true});
+ const xmlDir='android/app/src/main/res/xml';fs.mkdirSync(xmlDir,{recursive:true});
+ fs.writeFileSync(path.join(xmlDir,'larios_device_admin.xml'),'<?xml version="1.0" encoding="utf-8"?><device-admin xmlns:android="http://schemas.android.com/apk/res/android"><uses-policies><force-lock/></uses-policies></device-admin>');
+ fs.writeFileSync(path.join(javaDir,'LariosDeviceAdminReceiver.java'),[
+  'package com.lariosrental.management;',
+  'import android.app.admin.DeviceAdminReceiver;',
+  'public class LariosDeviceAdminReceiver extends DeviceAdminReceiver {}'
+ ].join('\\n'));
+ fs.writeFileSync(path.join(javaDir,'LariosKioskController.java'),[
+  'package com.lariosrental.management;',
+  'import android.app.Activity;',
+  'import android.app.admin.DevicePolicyManager;',
+  'import android.content.ComponentName;',
+  'import android.content.Context;',
+  'import android.content.Intent;',
+  'import android.content.IntentFilter;',
+  'public final class LariosKioskController {',
+  ' private static DevicePolicyManager dpm(Context c){ return (DevicePolicyManager)c.getSystemService(Context.DEVICE_POLICY_SERVICE); }',
+  ' private static ComponentName admin(Context c){ return new ComponentName(c,LariosDeviceAdminReceiver.class); }',
+  ' public static boolean isOwner(Context c){ return dpm(c).isDeviceOwnerApp(c.getPackageName()); }',
+  ' public static void enter(Activity a){',
+  '  if(!isOwner(a)) return;',
+  '  DevicePolicyManager d=dpm(a); ComponentName who=admin(a); String pkg=a.getPackageName();',
+  '  d.setLockTaskPackages(who,new String[]{pkg});',
+  '  d.setLockTaskFeatures(who,DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO|DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS);',
+  '  IntentFilter home=new IntentFilter(Intent.ACTION_MAIN);home.addCategory(Intent.CATEGORY_HOME);home.addCategory(Intent.CATEGORY_DEFAULT);',
+  '  d.addPersistentPreferredActivity(who,home,new ComponentName(a,MainActivity.class));',
+  '  if(d.isLockTaskPermitted(pkg)) try{a.startLockTask();}catch(Exception ignored){}',
+  ' }',
+  ' public static void exit(Activity a){',
+  '  if(!isOwner(a)) return;',
+  '  try{a.stopLockTask();}catch(Exception ignored){}',
+  '  dpm(a).clearPackagePersistentPreferredActivities(admin(a),a.getPackageName());',
+  ' }',
+  '}'
+ ].join('\\n'));
+ fs.writeFileSync(path.join(javaDir,'LariosKioskPlugin.java'),[
+  'package com.lariosrental.management;',
+  'import android.content.Intent;',
+  'import android.provider.Settings;',
+  'import com.getcapacitor.JSObject;',
+  'import com.getcapacitor.Plugin;',
+  'import com.getcapacitor.PluginCall;',
+  'import com.getcapacitor.PluginMethod;',
+  'import com.getcapacitor.annotation.CapacitorPlugin;',
+  '@CapacitorPlugin(name="LariosKiosk")',
+  'public class LariosKioskPlugin extends Plugin {',
+  ' @PluginMethod public void status(PluginCall call){JSObject o=new JSObject();o.put("deviceOwner",LariosKioskController.isOwner(getContext()));o.put("lockTaskPermitted",((android.app.admin.DevicePolicyManager)getContext().getSystemService(android.content.Context.DEVICE_POLICY_SERVICE)).isLockTaskPermitted(getContext().getPackageName()));call.resolve(o);}',
+  ' @PluginMethod public void enter(PluginCall call){LariosKioskController.enter(getActivity());call.resolve();}',
+  ' @PluginMethod public void exitToSettings(PluginCall call){LariosKioskController.exit(getActivity());Intent i=new Intent(Settings.ACTION_SETTINGS);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);getContext().startActivity(i);call.resolve();}',
+  '}'
+ ].join('\\n'));
+ fs.writeFileSync(path.join(javaDir,'MainActivity.java'),[
+  'package com.lariosrental.management;',
+  'import android.os.Bundle;',
+  'import com.getcapacitor.BridgeActivity;',
+  'public class MainActivity extends BridgeActivity {',
+  ' @Override public void onCreate(Bundle savedInstanceState){super.onCreate(savedInstanceState);registerPlugin(LariosKioskPlugin.class);}',
+  ' @Override protected void onResume(){super.onResume();LariosKioskController.enter(this);}',
+  '}'
+ ].join('\\n'));
+}
