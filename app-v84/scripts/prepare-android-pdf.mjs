@@ -38,7 +38,11 @@ public class MainActivity extends BridgeActivity {
   private class LariosAndroidPrint {
     @JavascriptInterface
     public String getVersion() {
-      return BuildConfig.VERSION_NAME;
+      try {
+        return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+      } catch (Exception ignored) {
+        return "8.4";
+      }
     }
 
     @JavascriptInterface
