@@ -63,8 +63,8 @@ jobs:
       - name: Create Android project
         run: |
           npx cap add android
-          node scripts/prepare-android-pdf.mjs
           node scripts/prepare-terminal.mjs
+          node scripts/prepare-android-pdf.mjs
       - name: Sync web app
         run: npx cap sync android
       - name: Verify native payments and manual authorization are packaged

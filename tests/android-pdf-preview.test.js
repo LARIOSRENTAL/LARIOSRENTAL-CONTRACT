@@ -16,6 +16,9 @@ assert.match(lifecycle,/LariosContractDownload\?\.closePreview/);
 assert.match(prepare,/addJavascriptInterface\(new LariosAndroidPrint\(\), "LariosAndroidPrint"\)/);
 assert.match(prepare,/createPrintDocumentAdapter/);
 assert.match(workflow,/node scripts\/prepare-android-pdf\.mjs/);
+assert.ok(workflow.indexOf('node scripts/prepare-terminal.mjs') < workflow.indexOf('node scripts/prepare-android-pdf.mjs'),'print bridge must be applied after kiosk preparation');
+assert.match(prepare,/registerPlugin\(LariosKioskPlugin\.class\)/);
+assert.match(prepare,/LariosKioskController\.enter\(this\)/);
 assert.match(workflow,/vendor\/pdfjs\/pdf\.worker\.mjs/);
 
 console.log('Android in-app PDF preview and print bridge: ok');

@@ -41,7 +41,6 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
 }
 console.log('Stripe Terminal 5.8.0: initialization, consent and permission patches applied.');
 
-
 // Larios Rental dedicated-device kiosk mode.
 // Activated only when this package has been provisioned as Android Device Owner.
 if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
@@ -67,7 +66,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
   'package com.lariosrental.management;',
   'import android.app.admin.DeviceAdminReceiver;',
   'public class LariosDeviceAdminReceiver extends DeviceAdminReceiver {}'
- ].join('\\n'));
+ ].join('\n'));
  fs.writeFileSync(path.join(javaDir,'LariosKioskController.java'),[
   'package com.lariosrental.management;',
   'import android.app.Activity;',
@@ -95,7 +94,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
   '  dpm(a).clearPackagePersistentPreferredActivities(admin(a),a.getPackageName());',
   ' }',
   '}'
- ].join('\\n'));
+ ].join('\n'));
  fs.writeFileSync(path.join(javaDir,'LariosKioskPlugin.java'),[
   'package com.lariosrental.management;',
   'import android.content.Intent;',
@@ -111,7 +110,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
   ' @PluginMethod public void enter(PluginCall call){LariosKioskController.enter(getActivity());call.resolve();}',
   ' @PluginMethod public void exitToSettings(PluginCall call){LariosKioskController.exit(getActivity());Intent i=new Intent(Settings.ACTION_SETTINGS);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);getContext().startActivity(i);call.resolve();}',
   '}'
- ].join('\\n'));
+ ].join('\n'));
  fs.writeFileSync(path.join(javaDir,'MainActivity.java'),[
   'package com.lariosrental.management;',
   'import android.os.Bundle;',
@@ -120,5 +119,5 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
   ' @Override public void onCreate(Bundle savedInstanceState){super.onCreate(savedInstanceState);registerPlugin(LariosKioskPlugin.class);}',
   ' @Override protected void onResume(){super.onResume();LariosKioskController.enter(this);}',
   '}'
- ].join('\\n'));
+ ].join('\n'));
 }

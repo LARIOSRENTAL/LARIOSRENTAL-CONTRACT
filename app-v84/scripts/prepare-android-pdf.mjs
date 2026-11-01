@@ -9,9 +9,7 @@ for(const name of ['pdf.mjs','pdf.worker.mjs']){
 }
 
 const activity=path.join(root,'android','app','src','main','java','com','lariosrental','management','MainActivity.java');
-let source=fs.readFileSync(activity,'utf8');
-if(!source.includes('LariosAndroidPrint')){
-  source=`package com.lariosrental.management;
+const source=`package com.lariosrental.management;
 
 import android.content.Context;
 import android.os.Bundle;
@@ -25,7 +23,14 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    registerPlugin(LariosKioskPlugin.class);
     getBridge().getWebView().addJavascriptInterface(new LariosAndroidPrint(), "LariosAndroidPrint");
+  }
+
+  @Override
+  protected void onResume() {
+    super.onResume();
+    LariosKioskController.enter(this);
   }
 
   private class LariosAndroidPrint {
@@ -43,7 +48,6 @@ public class MainActivity extends BridgeActivity {
   }
 }
 `;
-  fs.writeFileSync(activity,source);
-}
+fs.writeFileSync(activity,source);
 
 console.log('Android PDF preview and print bridge prepared');
