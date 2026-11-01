@@ -3,7 +3,9 @@
 let contracts=[],loading=false,lastLoad=0;
 let pdfjsPromise=null,activePreview=null;
 const headers=()=>({apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'});
-const nativeAndroid=()=>!!window.Capacitor?.isNativePlatform?.()&&String(window.Capacitor?.getPlatform?.()||'').toLowerCase()==='android';
+const nativeAndroid=()=>!!window.LariosAndroidPrint||(
+  !!window.Capacitor?.isNativePlatform?.()&&String(window.Capacitor?.getPlatform?.()||'').toLowerCase()==='android'
+);
 async function refresh(force=false){if(loading||(!force&&Date.now()-lastLoad<3000))return;loading=true;try{const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_list_contracts',{method:'POST',headers:headers(),body:'{}'});if(r.ok){contracts=await r.json();lastLoad=Date.now()}}finally{loading=false}}
 async function record(id){let c=contracts.find(x=>x.id===id);if(!c){await refresh(true);c=contracts.find(x=>x.id===id)}return c||null}
 async function pdfBlob(c){if(!c?.pdf_path)throw new Error('Este contrato todavía no tiene PDF guardado.');const safe=c.pdf_path.split('/').map(encodeURIComponent).join('/'),urls=[cfg.supabaseUrl+'/storage/v1/object/authenticated/contracts/'+safe,cfg.supabaseUrl+'/storage/v1/object/contracts/'+safe];for(const url of urls){const r=await fetch(url,{headers:headers()});if(r.ok)return r.blob()}throw new Error('No se pudo recuperar el PDF guardado.')}
@@ -22,7 +24,7 @@ function closePreview(){
   document.body.classList.remove('lrPdfPreviewOpen');
   return true;
 }
-async function showNativePreview(c,blob){
+async function showPdfPreview(meta,blob){
   closePreview();
   const root=document.createElement('section');
   root.id='lrPdfPreview';
@@ -31,9 +33,9 @@ async function showNativePreview(c,blob){
   const toolbar=document.createElement('header'),back=document.createElement('button'),title=document.createElement('b'),print=document.createElement('button'),pages=document.createElement('main');
   toolbar.className='lrPdfPreviewToolbar';
   back.type='button';back.className='lrPdfPreviewBack';back.textContent='← Volver';back.onclick=closePreview;
-  title.textContent='Contrato '+String(c?.contract_number||'');
+  title.textContent=String(meta?.title||'Documento PDF');
   print.type='button';print.className='lrPdfPreviewPrint';print.textContent='Imprimir';print.disabled=true;
-  print.onclick=()=>{const name='Contrato '+String(c?.contract_number||'Larios Rental');if(window.LariosAndroidPrint?.printDocument)window.LariosAndroidPrint.printDocument(name);else window.print()};
+  print.onclick=()=>{const name=String(meta?.title||'Documento Larios Rental');if(window.LariosAndroidPrint?.printDocument)window.LariosAndroidPrint.printDocument(name);else window.print()};
   pages.className='lrPdfPreviewPages';
   toolbar.append(back,title,print);root.append(toolbar,pages);document.body.appendChild(root);
   activePreview=root;document.body.classList.add('lrPdfPreviewOpen');
@@ -51,6 +53,7 @@ async function showNativePreview(c,blob){
   print.disabled=false;
   return root;
 }
+async function showNativePreview(c,blob){return showPdfPreview({title:'Contrato '+String(c?.contract_number||'')},blob)}
 async function printContract(id){
   if(nativeAndroid()){
     try{const c=await record(id),blob=await pdfBlob(c);await showNativePreview(c,blob)}
@@ -90,5 +93,6 @@ body.lrPdfPreviewOpen{overflow:hidden}
   .lrPdfPreviewPage:last-child{break-after:auto;page-break-after:auto}
   .lrPdfPreviewPage canvas{width:100%!important;max-width:none!important}
 }
-`;document.head.appendChild(s);setInterval(decorate,1200);window.LariosContractDownload={download,print:printContract,refresh,record,closePreview,showNativePreview};
+`;document.head.appendChild(s);setInterval(decorate,1200);window.LariosContractDownload={download,print:printContract,refresh,record,closePreview,showNativePreview,showPdfPreview,nativeAndroid};
+try{const version=window.LariosAndroidPrint?.getVersion?.();if(version){const el=document.getElementById('lrReleaseVersion');if(el)el.textContent='ANDROID '+version+' · PDF INTERNO · MODO KIOSCO'}}catch(_){}
 })();

@@ -77,7 +77,10 @@ jobs:
           test -f android/app/src/main/assets/public/vendor/pdfjs/pdf.mjs
           test -f android/app/src/main/assets/public/vendor/pdfjs/pdf.worker.mjs
           grep -q 'LariosAndroidPrint' android/app/src/main/java/com/lariosrental/management/MainActivity.java
+          grep -q 'LariosAndroidKiosk' android/app/src/main/java/com/lariosrental/management/MainActivity.java
           grep -q 'showNativePreview' android/app/src/main/assets/public/contract-download-v1.js
+          grep -q 'showPdfPreview' android/app/src/main/assets/public/agenda-pdf-v1.js
+          grep -q 'Activar modo kiosco' android/app/src/main/assets/public/android-kiosk-v1.js
       - name: Set a newer Android version for each build
         env:
           RUN_NUMBER: ${{ github.run_number }}

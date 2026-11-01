@@ -24,16 +24,23 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     registerPlugin(LariosKioskPlugin.class);
+    getBridge().getWebView().clearCache(true);
     getBridge().getWebView().addJavascriptInterface(new LariosAndroidPrint(), "LariosAndroidPrint");
+    getBridge().getWebView().addJavascriptInterface(new LariosAndroidKiosk(), "LariosAndroidKiosk");
   }
 
   @Override
   public void onResume() {
     super.onResume();
-    LariosKioskController.enter(this);
+    LariosKioskController.resume(this);
   }
 
   private class LariosAndroidPrint {
+    @JavascriptInterface
+    public String getVersion() {
+      return BuildConfig.VERSION_NAME;
+    }
+
     @JavascriptInterface
     public void printDocument(final String requestedTitle) {
       runOnUiThread(() -> {
@@ -43,6 +50,31 @@ public class MainActivity extends BridgeActivity {
           ? "Contrato Larios Rental" : requestedTitle.trim();
         PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(title);
         manager.print(title, adapter, null);
+      });
+    }
+  }
+
+  private class LariosAndroidKiosk {
+    @JavascriptInterface
+    public boolean isEnabled() {
+      return LariosKioskController.isEnabled(MainActivity.this);
+    }
+
+    @JavascriptInterface
+    public boolean isDeviceOwner() {
+      return LariosKioskController.isOwner(MainActivity.this);
+    }
+
+    @JavascriptInterface
+    public void enable() {
+      runOnUiThread(() -> LariosKioskController.enable(MainActivity.this));
+    }
+
+    @JavascriptInterface
+    public void disableToSettings() {
+      runOnUiThread(() -> {
+        LariosKioskController.exit(MainActivity.this);
+        startActivity(new android.content.Intent(android.provider.Settings.ACTION_SETTINGS));
       });
     }
   }
