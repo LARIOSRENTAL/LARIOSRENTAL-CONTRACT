@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+
+const download=fs.readFileSync(path.join(__dirname,'../app-v84/www/contract-download-v1.js'),'utf8');
+const lifecycle=fs.readFileSync(path.join(__dirname,'../app-v84/www/android-lifecycle-v1.js'),'utf8');
+const prepare=fs.readFileSync(path.join(__dirname,'../app-v84/scripts/prepare-android-pdf.mjs'),'utf8');
+const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/android-apk.yml'),'utf8');
+
+assert.match(download,/nativeAndroid\(\)[\s\S]*showNativePreview\(c,blob\)/);
+assert.match(download,/vendor\/pdfjs\/pdf\.mjs/);
+assert.match(download,/LariosAndroidPrint\?\.printDocument/);
+assert.match(download,/window\.LariosContractDownload=\{[^}]*closePreview/);
+assert.ok(download.indexOf('if(nativeAndroid())')<download.indexOf("window.open('about:blank'"),'Android must be handled before browser popup');
+assert.match(lifecycle,/LariosContractDownload\?\.closePreview/);
+assert.match(prepare,/addJavascriptInterface\(new LariosAndroidPrint\(\), "LariosAndroidPrint"\)/);
+assert.match(prepare,/createPrintDocumentAdapter/);
+assert.match(workflow,/node scripts\/prepare-android-pdf\.mjs/);
+assert.match(workflow,/vendor\/pdfjs\/pdf\.worker\.mjs/);
+
+console.log('Android in-app PDF preview and print bridge: ok');

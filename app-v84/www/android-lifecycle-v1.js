@@ -23,6 +23,7 @@
   }
 
   function goBack() {
+    if (window.LariosContractDownload?.closePreview?.()) return true;
     const quick = document.getElementById('quickReservationModal');
     if (quick && !quick.classList.contains('hidden')) {
       window.LariosReservations?.closeQuick();

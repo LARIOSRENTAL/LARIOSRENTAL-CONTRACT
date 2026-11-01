@@ -63,6 +63,7 @@ jobs:
       - name: Create Android project
         run: |
           npx cap add android
+          node scripts/prepare-android-pdf.mjs
           node scripts/prepare-terminal.mjs
       - name: Sync web app
         run: npx cap sync android
@@ -73,6 +74,10 @@ jobs:
           grep -q 'prepareAuthorization' android/app/src/main/assets/public/native-terminal.js
           grep -q 'LariosNativeStripeTerminal' android/app/src/main/assets/public/native-terminal.js
           grep -q 'native-terminal.js' android/app/src/main/assets/public/index.html
+          test -f android/app/src/main/assets/public/vendor/pdfjs/pdf.mjs
+          test -f android/app/src/main/assets/public/vendor/pdfjs/pdf.worker.mjs
+          grep -q 'LariosAndroidPrint' android/app/src/main/java/com/lariosrental/management/MainActivity.java
+          grep -q 'showNativePreview' android/app/src/main/assets/public/contract-download-v1.js
       - name: Set a newer Android version for each build
         env:
           RUN_NUMBER: ${{ github.run_number }}
