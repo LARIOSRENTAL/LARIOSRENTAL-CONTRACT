@@ -111,20 +111,20 @@ async function resumeContract(id){
 }
 async function markDone(id){
  if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden marcar un contrato como ya realizado.');
- if(!confirm('¿Marcar este contrato como ya realizado manualmente o en Renthub?\n\nSe conservarán las fechas y los datos del contrato. No se generará un PDF nuevo.'))return;
- const button=$('lrAlreadyDoneEditor');if(button)button.disabled=true;
+ const button=$('lrAlreadyDoneEditor');if(button?.disabled)return;if(button)button.disabled=true;
  try{
   const saved=await saveOpenReservation();
   const fresh=await rpc('app_contract_record',{p_contract_id:saved.id});
   const p={...(fresh||{}),id:saved.id,status:'confirmed',contract_already_done:true,contract_done_source:'manual_or_renthub'};
-  if(['pickup_date','pickup_time','return_date','return_time'].some(key=>!p[key]))throw Error('El contrato no conserva todas las fechas. No se ha confirmado.');
+  if(['pickup_date','pickup_time','return_date','return_time'].some(key=>!p[key]))throw Error('Faltan fechas u horas: no se ha confirmado el contrato.');
   const confirmed=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});
-  if(!confirmed?.id||confirmed.status!=='confirmed')throw Error('El servidor no confirmó el contrato.');
-  const checked=await rpc('app_contract_record',{p_contract_id:confirmed.id});
-  if(checked?.status!=='confirmed'||!checked.pickup_date||!checked.return_date)throw Error('La confirmación no conservó las fechas. Revisa el contrato.');
+  if(!confirmed?.id||confirmed.status!=='confirmed'||!confirmed.pickup_date||!confirmed.return_date)throw Error('No se confirmó correctamente el contrato o faltan fechas.');
   record=null;recordId='';sessionStorage.removeItem('lr_resume_contract');sessionStorage.removeItem('lr_force_resume_contract');
-  $('lrAlreadyDoneEditor')?.remove();window.LariosReservations?.close?.();
-  await window.LariosReservations?.loadAgenda?.($('agendaDate')?.value||checked.pickup_date);
+  $('lrAlreadyDoneEditor')?.remove();
+  // close() already restores the agenda and starts its refresh: never wait for a second refresh.
+  window.LariosReservations?.close?.();
+  const activeDate=$('agendaDate')?.value||confirmed.pickup_date;
+  if($('agendaDate')&&!$('agendaDate').value)$('agendaDate').value=activeDate;
   decorateAgenda();
  }catch(e){alert('No se pudo marcar el contrato como realizado: '+e.message)}
  finally{if(button?.isConnected)button.disabled=false}
