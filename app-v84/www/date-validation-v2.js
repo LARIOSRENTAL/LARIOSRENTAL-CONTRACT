@@ -96,6 +96,8 @@ function configureField(el){
   el.addEventListener('paste',()=>setTimeout(()=>normalizeField(el),0));
 }
 function configureAll(){DATE_IDS.forEach(id=>configureField($(id)))}
+// Delegate on the document: catch input immediately, including fields recreated by Editar reserva.
+document.addEventListener('input',function(e){const el=e.target;if(!DATE_IDS.includes(el?.id))return;onDateInput(e)},true);
 function patchValidation(){
   const api=window.LariosValidation;if(!api||api.__dateV2Robust)return false;
   const original=api.validate?.bind(api);if(original)api.validate=function(){normalizeAll();return original()};
