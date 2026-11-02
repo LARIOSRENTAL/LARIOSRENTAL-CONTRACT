@@ -85,7 +85,7 @@ if(fs.existsSync('android/app/src/main/AndroidManifest.xml')){
   ' public static boolean isEnabled(Context c){ return isOwner(c)||c.getSharedPreferences(PREF,Context.MODE_PRIVATE).getBoolean("enabled",false); }',
   ' private static void immersive(Activity a){ a.getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE); }',
   ' public static void enable(Activity a){a.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putBoolean("enabled",true).apply();enter(a);}',
-  ' public static void resume(Activity a){if(isEnabled(a))enter(a);}',
+  ' public static void resume(Activity a){if(isOwner(a)){enter(a);return;} if(isEnabled(a)){immersive(a);return;} immersive(a);}',
   ' public static void enter(Activity a){',
   '  immersive(a); DevicePolicyManager d=dpm(a); ComponentName who=admin(a); String pkg=a.getPackageName();',
   '  if(isOwner(a)){',
