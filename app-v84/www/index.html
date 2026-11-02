@@ -33,22 +33,36 @@ function update(el){
  if(v!==el.value){el.value=v;try{el.setSelectionRange(v.length,v.length)}catch(_){}}
 }
 function onKey(e){if(ids.has(e.target?.id))update(e.target)}
-document.addEventListener('keydown',function(e){
- const el=e.target;
- if(e.key!=='Backspace'||!ids.has(el?.id)||el.selectionStart==null||el.selectionStart!==el.selectionEnd)return;
- const caret=el.selectionStart,raw=String(el.value||'');
- // A slash is a visual separator, never an obstacle to deleting the preceding digit.
- if(caret<=0||raw[caret-1]!=='/')return;
+function displayDeleting(d){
+ if(d.length<2)return d;
+ if(d.length<4)return d.slice(0,2)+'/'+d.slice(2);
+ if(d.length<6)return d.slice(0,2)+'/'+d.slice(2,4)+'/'+d.slice(4);
+ return d.slice(0,2)+'/'+d.slice(2,4)+'/'+d.slice(4);
+}
+function eraseDigit(el,forward){
+ const original=String(el.value||''),from=el.selectionStart??original.length,to=el.selectionEnd??from;
+ const leftDigits=original.slice(0,from).replace(/\D/g,'').length;
+ const digits=original.replace(/\D/g,'').split('');
+ const start=leftDigits,end=original.slice(0,to).replace(/\D/g,'').length;
+ if(end>start)digits.splice(start,end-start);
+ else if(forward){if(start<digits.length)digits.splice(start,1)}
+ else if(start>0)digits.splice(start-1,1);
+ const out=displayDeleting(digits.join(''));el.value=out;
+ const wanted=end>start?start:(forward?start:Math.max(0,start-1));
+ let caret=0,seen=0;while(caret<out.length&&seen<wanted){if(/\d/.test(out[caret]))seen++;caret++}
+ try{el.setSelectionRange(caret,caret)}catch(_){}
+}
+function deleteKey(e){
+ if(!ids.has(e.target?.id)||!['Backspace','Delete'].includes(e.key))return;
+ e.preventDefault();e.stopImmediatePropagation();eraseDigit(e.target,e.key==='Delete');
+}
+document.addEventListener('keydown',deleteKey,true);
+document.addEventListener('beforeinput',function(e){
+ if(!ids.has(e.target?.id)||!['deleteContentBackward','deleteContentForward'].includes(e.inputType))return;
  e.preventDefault();e.stopImmediatePropagation();
- let pos=caret-2;
- while(pos>=0&&!/[0-9]/.test(raw[pos]))pos--;
- if(pos<0)return;
- const before=raw.slice(0,pos),after=raw.slice(pos+1);
- const next=format(before+after,el.id);
- el.value=next;
- const digitsBefore=before.replace(/\D/g,'').length;
- const prefix=next.slice(0,Math.min(next.length,digitsBefore+2));
- try{el.setSelectionRange(prefix.length,prefix.length)}catch(_){}
+ // Keyboard Delete/Backspace is handled by keydown; this handles mobile keyboards.
+ if(e.target.dataset.lrDateKeyDeleteHandled==='1')return;
+ eraseDigit(e.target,e.inputType==='deleteContentForward');
 },true);
 document.addEventListener('input',onKey,true);
 document.addEventListener('keyup',onKey,true);
