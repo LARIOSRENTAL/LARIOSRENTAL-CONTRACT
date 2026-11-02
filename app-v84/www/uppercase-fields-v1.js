@@ -63,6 +63,11 @@ function boot(){
   document.getElementById('lrUppercaseFieldsStyle')?.remove();
   scan();
   new MutationObserver(scheduleScan).observe(document.body,{subtree:true,childList:true});
+  document.addEventListener('input',e=>{
+    const el=e.target;
+    if(e.isComposing||!shouldHandle(el)||el.tagName==='SELECT')return;
+    upperValue(el);
+  },true);
   document.addEventListener('input',isolateNativeTyping,true);
   document.addEventListener('focusin',e=>{configure(e.target);beginTyping(e.target)},true);
   document.addEventListener('focusout',e=>endTyping(e.target),true);
