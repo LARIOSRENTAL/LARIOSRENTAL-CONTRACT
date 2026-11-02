@@ -8,3 +8,33 @@
 
 <!-- Deploy restored 2026-10-21 noon snapshot -->
 <script src="native-terminal.js?v=20261023-payments-and-holds"></script>
+<script id="lr-live-date-mask-20261102">
+(function(){
+'use strict';
+const ids=new Set(['customer_birth_date','license_issue','license_expiry','additional_birth_date','additional_license_issue','additional_license_expiry']);
+const expiry=new Set(['license_expiry','additional_license_expiry']);
+function format(v,id){
+ const d=String(v||'').replace(/\D/g,'').slice(0,8);
+ if(d.length<2)return d;
+ if(d.length<4)return d.slice(0,2)+'/'+d.slice(2);
+ if(d.length<6)return d.slice(0,2)+'/'+d.slice(2,4)+'/'+d.slice(4);
+ if(d.length===6){
+  const year=Number(d.slice(4)),current=new Date().getFullYear()%100;
+  const full=expiry.has(id)?2000+year:(year<=current?2000+year:1900+year);
+  return d.slice(0,2)+'/'+d.slice(2,4)+'/'+full;
+ }
+ return d.slice(0,2)+'/'+d.slice(2,4)+'/'+d.slice(4);
+}
+function update(el){
+ if(!el||!ids.has(el.id))return;
+ if(el.type!=='text')try{el.type='text'}catch(_){}
+ el.inputMode='numeric';
+ const v=format(el.value,el.id);
+ if(v!==el.value){el.value=v;try{el.setSelectionRange(v.length,v.length)}catch(_){}}
+}
+function onKey(e){if(ids.has(e.target?.id))update(e.target)}
+document.addEventListener('input',onKey,true);
+document.addEventListener('keyup',onKey,true);
+document.addEventListener('paste',e=>{if(ids.has(e.target?.id))setTimeout(()=>update(e.target),0)},true);
+})();
+</script>
