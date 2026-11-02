@@ -33,6 +33,23 @@ function update(el){
  if(v!==el.value){el.value=v;try{el.setSelectionRange(v.length,v.length)}catch(_){}}
 }
 function onKey(e){if(ids.has(e.target?.id))update(e.target)}
+document.addEventListener('keydown',function(e){
+ const el=e.target;
+ if(e.key!=='Backspace'||!ids.has(el?.id)||el.selectionStart==null||el.selectionStart!==el.selectionEnd)return;
+ const caret=el.selectionStart,raw=String(el.value||'');
+ // A slash is a visual separator, never an obstacle to deleting the preceding digit.
+ if(caret<=0||raw[caret-1]!=='/')return;
+ e.preventDefault();e.stopImmediatePropagation();
+ let pos=caret-2;
+ while(pos>=0&&!/[0-9]/.test(raw[pos]))pos--;
+ if(pos<0)return;
+ const before=raw.slice(0,pos),after=raw.slice(pos+1);
+ const next=format(before+after,el.id);
+ el.value=next;
+ const digitsBefore=before.replace(/\D/g,'').length;
+ const prefix=next.slice(0,Math.min(next.length,digitsBefore+2));
+ try{el.setSelectionRange(prefix.length,prefix.length)}catch(_){}
+},true);
 document.addEventListener('input',onKey,true);
 document.addEventListener('keyup',onKey,true);
 document.addEventListener('paste',e=>{if(ids.has(e.target?.id))setTimeout(()=>update(e.target),0)},true);
