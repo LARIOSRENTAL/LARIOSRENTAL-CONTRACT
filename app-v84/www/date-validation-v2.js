@@ -46,8 +46,8 @@ function normalizeField(el){if(!el||!el.value)return false;clearPending(el);cons
 function normalizeAll(){DATE_IDS.forEach(id=>normalizeField($(id)))}
 function partialFormat(digits){
   digits=String(digits||'').replace(/\D/g,'').slice(0,8);
-  if(digits.length<=2)return digits;
-  if(digits.length<=4)return digits.slice(0,2)+'/'+digits.slice(2);
+  if(digits.length<2)return digits;
+  if(digits.length<=4)return digits.slice(0,2)+'/'+digits.slice(2)+(digits.length===4?'/':'');
   return digits.slice(0,2)+'/'+digits.slice(2,4)+'/'+digits.slice(4,8);
 }
 function isExternalInput(e,raw){
@@ -79,7 +79,7 @@ function onDateInput(e){
   const digits=rawDigits.slice(0,8);
   el.value=partialFormat(digits);
   if(digits.length===8){normalizeField(el);return}
-  if(digits.length===6){scheduleSixDigitExpansion(el,digits);return}
+  if(digits.length===6){const normalized=iso(digits,el.id);if(normalized&&valid(normalized,el.id)){el.value=fromIso(normalized);clearError(el)}return}
   if(valid(el.value,el.id))clearError(el);
 }
 function configureField(el){
