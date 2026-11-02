@@ -15,10 +15,10 @@ async function refreshAll(){
 async function remove(id,label){
   if(!id)return;
   const name=label||'esta reserva';
-  if(!confirm('¿Eliminar definitivamente '+name+' de Larios Rental?\n\nSi ya fue enviada a Renthub, se eliminará igualmente de Larios Rental. La cancelación automática en Renthub se hará cuando Renthub nos habilite ese endpoint.'))return;
+
   try{
     const result=await deleteRpc(id);
-    alert(result?.renthub_was_linked?'Reserva eliminada de Larios Rental. Esta reserva tenía referencia de Renthub; por ahora debes cancelarla también en Renthub si sigue activa allí.':'Reserva eliminada correctamente.');
+    if(result?.renthub_was_linked)console.warn('Reserva eliminada localmente; comprueba cancelación en Renthub.');
     await refreshAll();
   }catch(e){alert('No se eliminó la reserva. '+(e?.message||String(e)))}
 }
