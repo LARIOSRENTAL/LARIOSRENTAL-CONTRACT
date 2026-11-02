@@ -90,7 +90,7 @@ function configureField(el){
   try{el.type='text'}catch(_){ }
   el.inputMode='numeric';el.setAttribute('inputmode','numeric');el.setAttribute('autocomplete','off');el.setAttribute('maxlength','10');el.placeholder='dd/mm/aaaa';
   if(current){el.value=current;normalizeField(el)}
-  el.addEventListener('input',onDateInput);
+  el.addEventListener('input',onDateInput,{capture:true});
   el.addEventListener('blur',()=>normalizeField(el));
   el.addEventListener('change',()=>normalizeField(el));
   el.addEventListener('paste',()=>setTimeout(()=>normalizeField(el),0));
