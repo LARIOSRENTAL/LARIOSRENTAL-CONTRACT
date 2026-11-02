@@ -32,7 +32,7 @@ function update(el){
  const v=format(el.value,el.id);
  if(v!==el.value){el.value=v;try{el.setSelectionRange(v.length,v.length)}catch(_){}}
 }
-function onKey(e){if(ids.has(e.target?.id))update(e.target)}
+function onKey(e){if(!ids.has(e.target?.id))return;if(e.type==='keyup'&&(e.key==='Backspace'||e.key==='Delete'))return;update(e.target)}
 function displayDeleting(d){
  if(d.length<2)return d;
  if(d.length<4)return d.slice(0,2)+'/'+d.slice(2);
