@@ -67,7 +67,24 @@ function ensureCashBox(){
 }
 async function hydrate(){ensureCashBox();const id=window.LariosCurrentContractId||'';if(!id)return;try{const r=await loadRecord(id);if(id!==window.LariosCurrentContractId)return;if($('cash_without_card')&&!cashDirty)$('cash_without_card').checked=r?.cash_without_card===true||String(r?.cash_without_card)==='true';if($('agency')&&!$('agency').value&&r?.agency)$('agency').value=r.agency}catch(e){console.warn('Workflow hydrate',e)}}
 function currentStatus(){return recordId===window.LariosCurrentContractId&&record?.status?record.status:'draft'}
-async function saveOpenReservation(){const id=window.LariosCurrentContractId||'';if(!id)throw Error('No hay una reserva abierta.');const prior=await loadRecord(id),bridge=window.LariosStripeBridge,p=bridge?.payload?bridge.payload():{...prior};p.id=id;p.status=prior?.status||'draft';p.payment_method=$('payment_method')?.value||p.payment_method||'';const cashPay=/efectivo|cash/i.test(String(p.payment_method||''));p.cash_without_card=!!$('cash_without_card')?.checked||cashPay;p.agency=$('agency')?.value||prior?.agency||'';const saved=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});record=saved;recordId=saved?.id||id;cashDirty=false;window.LariosCurrentContractId=recordId;sessionStorage.setItem('lr_resume_contract',recordId);return saved}
+async function saveOpenReservation(){
+ const id=window.LariosCurrentContractId||'';if(!id)throw Error('No hay una reserva abierta.');
+ const prior=await loadRecord(id),bridge=window.LariosStripeBridge;
+ const incoming=bridge?.payload?bridge.payload():{};
+ const p={...(prior||{}),...(incoming||{})};p.id=id;p.status=prior?.status||'draft';
+ const required=['pickup_date','pickup_time','return_date','return_time'];
+ for(const key of ['pickup_date','pickup_time','return_date','return_time','pickup_location','return_location','rental_days','vehicle_group','agency','customer_name','reservation_detail','whatsapp_message','renthub_id']){
+  if((p[key]===undefined||p[key]===null||p[key]==='')&&prior?.[key]!==undefined&&prior[key]!==null&&prior[key]!=='')p[key]=prior[key];
+ }
+ for(const key of required){const el=$(key);if(el&&String(el.value||'').trim())p[key]=el.value.trim();}
+ if(required.some(key=>!p[key]))throw Error('Faltan fechas u horas: no se ha modificado el contrato.');
+ p.payment_method=$('payment_method')?.value||p.payment_method||'';
+ p.cash_without_card=!!$('cash_without_card')?.checked||/efectivo|cash/i.test(String(p.payment_method||''));
+ p.agency=$('agency')?.value||p.agency||'';
+ const saved=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});
+ if(!saved?.id)throw Error('El servidor no confirmó el guardado.');
+ record=saved;recordId=saved.id;cashDirty=false;window.LariosCurrentContractId=recordId;sessionStorage.setItem('lr_resume_contract',recordId);return saved;
+}
 async function resumeContract(id){
   if(!id)return;
   sessionStorage.setItem('lr_resume_contract',id);
@@ -92,7 +109,26 @@ async function resumeContract(id){
   };
   run();
 }
-async function markDone(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden marcar un contrato como ya realizado.');if(!confirm('¿Marcar este contrato como ya realizado manualmente o en Renthub?\n\nSe guardarán primero todos los cambios actuales de la reserva, incluida la matrícula asignada. No se generará un PDF nuevo.'))return;try{const saved=await saveOpenReservation(),p={...saved,id:saved?.id||id,status:'confirmed',contract_already_done:true,contract_done_source:'manual_or_renthub'};await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});record=null;recordId='';$('lrAlreadyDoneEditor')?.remove();try{window.LariosReservations?.close?.()}catch(_){}await window.LariosReservations?.loadAgenda?.($('agendaDate')?.value);decorateAgenda()}catch(e){alert('No se pudo marcar el contrato como realizado: '+e.message)}}
+async function markDone(id){
+ if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden marcar un contrato como ya realizado.');
+ if(!confirm('¿Marcar este contrato como ya realizado manualmente o en Renthub?\n\nSe conservarán las fechas y los datos del contrato. No se generará un PDF nuevo.'))return;
+ const button=$('lrAlreadyDoneEditor');if(button)button.disabled=true;
+ try{
+  const saved=await saveOpenReservation();
+  const fresh=await rpc('app_contract_record',{p_contract_id:saved.id});
+  const p={...(fresh||{}),id:saved.id,status:'confirmed',contract_already_done:true,contract_done_source:'manual_or_renthub'};
+  if(['pickup_date','pickup_time','return_date','return_time'].some(key=>!p[key]))throw Error('El contrato no conserva todas las fechas. No se ha confirmado.');
+  const confirmed=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});
+  if(!confirmed?.id||confirmed.status!=='confirmed')throw Error('El servidor no confirmó el contrato.');
+  const checked=await rpc('app_contract_record',{p_contract_id:confirmed.id});
+  if(checked?.status!=='confirmed'||!checked.pickup_date||!checked.return_date)throw Error('La confirmación no conservó las fechas. Revisa el contrato.');
+  record=null;recordId='';sessionStorage.removeItem('lr_resume_contract');sessionStorage.removeItem('lr_force_resume_contract');
+  $('lrAlreadyDoneEditor')?.remove();window.LariosReservations?.close?.();
+  await window.LariosReservations?.loadAgenda?.($('agendaDate')?.value||checked.pickup_date);
+  decorateAgenda();
+ }catch(e){alert('No se pudo marcar el contrato como realizado: '+e.message)}
+ finally{if(button?.isConnected)button.disabled=false}
+}
 function decorateAgenda(){const snap=window.LariosReservations?.getAgendaSnapshot?.();if(!snap)return;const admin=window.LariosAccess?.isAdmin?.()===true,cols=document.querySelectorAll('#agenda .agendaCol'),cards=cols[0]?.querySelectorAll('.agendaItem.rich')||[];(snap.deliveries||[]).forEach((x,i)=>{const c=cards[i];if(!c)return;const done=x.status!=='draft'||x.contract_already_done===true;c.classList.toggle('lrContractDone',done);c.querySelector('.lrAlreadyDone')?.remove();const edit=[...c.querySelectorAll('button')].find(b=>/Editar reserva/i.test(b.textContent||''));if(edit)edit.style.display=''})}
 let agendaTimer=0;function scheduleAgenda(){if(!agendaTimer)agendaTimer=setTimeout(()=>{agendaTimer=0;decorateAgenda()},0)}
 function reconcileEditorActions(){
