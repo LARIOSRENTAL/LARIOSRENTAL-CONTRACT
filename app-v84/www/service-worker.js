@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261104-observer-signature-performance-12';
+const CACHE = 'larios-rental-pro-20261104-apple-native-text-13';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {

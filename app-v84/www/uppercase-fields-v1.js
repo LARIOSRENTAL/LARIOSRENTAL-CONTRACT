@@ -4,6 +4,8 @@ const ROOT_SELECTORS=['#reservationForm','#lrVehicleForm','#quickReservationModa
 const EXCLUDED_TYPES=new Set(['password','hidden','file','checkbox','radio','range','color']);
 const LIVE_TEXT_INPUTS=new Set(['vehicle_plate','card_number','card_expiry']);
 let editingField=null,scanFrame=0;
+const nativeAppleTyping=/iPhone|iPad|iPod/.test(navigator.userAgent)||navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
+function keepAppleEditing(el){return nativeAppleTyping&&document.activeElement===el&&!LIVE_TEXT_INPUTS.has(el.id)}
 function shouldHandle(el){
   if(!el||!el.matches?.('input,textarea,select'))return false;
   if(el.tagName==='INPUT'&&EXCLUDED_TYPES.has(String(el.type||'text').toLowerCase()))return false;
@@ -29,7 +31,7 @@ function configure(el){
     // focus. Uppercase normalization happens only after editing finishes.
     el.addEventListener('change',()=>upperValue(el));
     el.addEventListener('blur',()=>upperValue(el));
-    el.addEventListener('paste',()=>setTimeout(()=>upperValue(el),0));
+    el.addEventListener('paste',()=>setTimeout(()=>{if(!keepAppleEditing(el))upperValue(el)},0));
   }
 }
 function scan(root=document){
@@ -66,10 +68,10 @@ function boot(){
   new MutationObserver(scheduleScan).observe(document.body,{subtree:true,childList:true});
   window.addEventListener('input',e=>{
     const el=e.target;
-    if(e.isComposing||!shouldHandle(el)||el.tagName==='SELECT')return;
+    if(e.isComposing||!shouldHandle(el)||el.tagName==='SELECT'||keepAppleEditing(el))return;
     upperValue(el);
   },true);
-  window.addEventListener('compositionend',e=>upperValue(e.target),true);
+  window.addEventListener('compositionend',e=>{if(!keepAppleEditing(e.target))upperValue(e.target)},true);
   document.addEventListener('input',isolateNativeTyping,true);
   document.addEventListener('focusin',e=>{configure(e.target);beginTyping(e.target)},true);
   document.addEventListener('focusout',e=>endTyping(e.target),true);
