@@ -40,3 +40,20 @@ begin
  end if;
 end;
 $patch$;
+
+-- Handle time-before-date as well as date-before-time, including ISO timestamps.
+do $patch$
+declare v_def text;
+begin
+ select pg_get_functiondef('public.lr_whatsapp_clean_place_hint(text)'::regprocedure) into v_def;
+ if position('-- Mixed date/time prefixes' in v_def)=0 then
+  v_def:=replace(v_def,E'begin\n',E'begin\n  -- Mixed date/time prefixes.\n  v := regexp_replace(v, ''^([[:space:]]*([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]{1,2}[/.][0-9]{1,2}([/.][0-9]{2,4})?|([01]?[0-9]|2[0-3])[:;h.][0-5][0-9]|pasado mañana|mañana|hoy)([[:space:]T]+|$))+'', '''', ''i'');\n');
+  execute v_def;
+ end if;
+ select pg_get_functiondef('public.lr_whatsapp_normalize_location_candidate(text,jsonb)'::regprocedure) into v_def;
+ if position('-- Canonical return hotel' in v_def)=0 then
+  v_def:=replace(v_def,E'  if upper(v_loc)=',E'  -- Canonical return hotel.\n  if v_return_loc ~* ''^(hotel[[:space:]]+)?(vincci[[:space:]]+)?larios[[:space:]]+(10|diez)([[:space:]]|$)'' then v_return_loc := ''VINCCI LARIOS 10'';end if;\n  if v_return_loc ~* ''^m[[:space:]]+centt?ro$|^m[[:space:]]+centto$'' then v_return_loc := ''MALAGA CENTRO HOTEL'';end if;\n  if upper(v_loc)=');
+  execute v_def;
+ end if;
+end;
+$patch$;
