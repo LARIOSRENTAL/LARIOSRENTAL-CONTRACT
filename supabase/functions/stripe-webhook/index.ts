@@ -8,10 +8,10 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const stripeApiVersion = () => env("STRIPE_API_VERSION") || "2026-08-26.dahlia";
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
 function safeEqual(a: string, b: string) { if (a.length !== b.length) return false; let value = 0; for (let i = 0; i < a.length; i++) value |= a.charCodeAt(i) ^ b.charCodeAt(i); return value === 0; }
-async function verifySignature(raw: string, header: string) {
+async function verifySignature(raw: string, header: string, secret: string) {
   const parts = header.split(",").map((part) => part.split("=")), timestamp = parts.find(([key]) => key === "t")?.[1] || "", signatures = parts.filter(([key]) => key === "v1").map(([, value]) => value);
   if (!/^\d+$/.test(timestamp) || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300 || !signatures.length) return false;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env("STRIPE_WEBHOOK_SECRET")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const expected = hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${timestamp}.${raw}`)));
   return signatures.some((signature) => safeEqual(expected, signature));
 }
@@ -43,9 +43,12 @@ async function saveReusablePaymentMethod(service: any, payment: any, session: an
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!env("STRIPE_WEBHOOK_SECRET").startsWith("whsec_")) return json({ error: "Webhook not configured" }, 503);
+  const serviceSecrets=createClient(env('SUPABASE_URL'),env('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});
+  const {data:storedSecret,error:secretError}=await serviceSecrets.rpc('app_stripe_webhook_secret_get');
+  const secrets=[storedSecret,env('STRIPE_WEBHOOK_SECRET')].filter((v:any)=>typeof v==='string'&&v.startsWith('whsec_'));
+  if(!secrets.length)return json({error:'Webhook not configured'},503);
   const raw = await req.text();
-  if (!(await verifySignature(raw, req.headers.get("Stripe-Signature") || ""))) return json({ error: "Invalid signature" }, 400);
+  if (!(await Promise.all(secrets.map((secret:string)=>verifySignature(raw, req.headers.get("Stripe-Signature") || "",secret)))).some(Boolean)) return json({ error: "Invalid signature" }, 400);
   const nativeEvent=JSON.parse(raw);
   if(['payment_intent.amount_capturable_updated','payment_intent.succeeded','payment_intent.canceled','payment_intent.payment_failed'].includes(nativeEvent.type)&&nativeEvent.data?.object?.metadata?.purpose==='rental_guarantee'){
     const db=createClient(env('SUPABASE_URL'),env('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});

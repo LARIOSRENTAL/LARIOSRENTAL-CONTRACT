@@ -9,13 +9,24 @@ async function stripe(path: string, body?: URLSearchParams, key?: string) {
 // Keep background reconciliation subscribed even when the app closes during confirmation.
 // The URL is server-owned; callers cannot change the endpoint or its existing events.
 let webhookReady: Promise<void>|null=null;
-export async function ensureNativeWebhook(){
+export async function ensureNativeWebhook(provision=false){
  if(webhookReady)return webhookReady;
  webhookReady=(async()=>{
   const target=env('SUPABASE_URL').replace(/\/$/,'')+'/functions/v1/stripe-webhook';
   const endpoints=await stripe('webhook_endpoints?limit=100');
-  const matches=(endpoints.data||[]).filter((e:any)=>String(e.url||'').replace(/\/$/,'')===target&&e.status==='enabled');
-  if(!matches.length)throw Error('No se encontró el webhook activo de Larios Rental en Stripe. Revisa la configuración antes de cobrar.');
+  let matches=(endpoints.data||[]).filter((e:any)=>String(e.url||'').replace(/\/$/,'')===target&&e.status==='enabled');
+  if(!matches.length){
+   if(!provision)throw Error('Un administrador debe pulsar Comprobar lector una vez para activar la conexión de Stripe.');
+   const service=createClient(env('SUPABASE_URL'),env('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});
+   const params=new URLSearchParams({url:target,description:'Larios Rental payments and rental guarantees'});
+   const events=['payment_intent.succeeded','payment_intent.amount_capturable_updated','payment_intent.canceled','payment_intent.payment_failed','checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired'];
+   events.forEach((event,index)=>params.set('enabled_events['+index+']',event));
+   const endpoint=await stripe('webhook_endpoints',params,'larios-webhook-repair-v1-'+env('SUPABASE_URL'));
+   if(!String(endpoint.secret||'').startsWith('whsec_'))throw Error('Stripe no devolvió la firma del webhook; no se ha iniciado ningún cobro.');
+   const {error}=await service.rpc('app_stripe_webhook_secret_set',{p_secret:endpoint.secret});
+   if(error){await stripe('webhook_endpoints/'+endpoint.id,new URLSearchParams({status:'disabled'}));throw Error('No se pudo guardar la firma del webhook; no se ha iniciado ningún cobro.');}
+   matches=[endpoint];
+  }
   const required=['payment_intent.succeeded','payment_intent.amount_capturable_updated','payment_intent.canceled','payment_intent.payment_failed'];
   for(const endpoint of matches){const events=endpoint.enabled_events||[];if(events.includes('*')||required.every(e=>events.includes(e)))continue;
    const params=new URLSearchParams();[...new Set([...events,...required])].forEach((event:string,index:number)=>params.set('enabled_events['+index+']',event));
@@ -61,7 +72,7 @@ export default async function nativeTerminal(req: Request) {
   if(!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(body.contract_id||''))return json({error:'Contrato no válido'},400);
   const {data:c,error:contractError}=await db.from('contracts').select('id,contract_number,total,app_payload').eq('id',body.contract_id).single();
   if(contractError||!c)return json({error:'Contrato no encontrado'},404);
-  if(action==='native_config')return json({location_id:location,mode:live?'live':'test',configured:true});
+  if(action==='native_config'){if(role==='admin')await ensureNativeWebhook(true);return json({location_id:location,mode:live?'live':'test',configured:true})}
   if(action==='native_connection_token'){const token=await stripe('terminal/connection_tokens',new URLSearchParams({location}));return json({secret:token.secret})}
   const {data:rows,error:rowsError}=await db.from('stripe_payments').select('*').eq('contract_id',c.id).like('checkout_session_id','tap:%').order('created_at',{ascending:false});
   if(rowsError)throw Error('No se pudieron comprobar los cobros anteriores');

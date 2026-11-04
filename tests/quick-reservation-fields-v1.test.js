@@ -64,4 +64,7 @@ assert.equal(itinerary.rental_days,'4');
 assert.equal(itinerary.vehicle_group,'C');
 assert.equal(itinerary.reservation_detail,'Seat Ibiza · Modelo C');
 
+const centro=fields.clean('9:00 g a 1 dia m Centto 218',{pickup_location:'m Centto',reservation_detail:'218'});
+assert.match(centro.agency,/Centro HOTEL/);
+assert.doesNotMatch(centro.pickup_location,/9:00/);
 console.log('WhatsApp quick reservation fields: ok');

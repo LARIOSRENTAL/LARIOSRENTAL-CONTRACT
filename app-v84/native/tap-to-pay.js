@@ -1,6 +1,17 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { TextRecognition } from '@capacitor-mlkit/text-recognition';
 import { Device } from '@capacitor/device';
 import { StripeTerminal, TerminalEventsEnum, TerminalConnectTypes } from '@capacitor-community/stripe-terminal';
+// Scanner does not depend on Stripe availability and never uploads images.
+if(Capacitor.isNativePlatform())window.LariosNativeScanner={async capture(){
+ if(!Capacitor.isPluginAvailable('TextRecognition'))throw Error('Reinstala la APK actualizada para activar el escáner nativo.');
+ const photo=await Camera.getPhoto({source:CameraSource.Camera,resultType:CameraResultType.Uri,quality:95,correctOrientation:true,allowEditing:false});
+ if(!photo.path)throw Error('La cámara no devolvió una imagen local.');
+ const result=await TextRecognition.processImage({path:photo.path,script:'LATIN'});
+ if(!result.text?.trim())throw Error('No se detectó texto legible. Repite la foto sin reflejos.');
+ return {webPath:photo.webPath,text:result.text};
+}};
 // Installed only in native builds. A browser keeps the existing external-payment flow.
 if(Capacitor.isNativePlatform()&&Capacitor.isPluginAvailable('StripeTerminal')){
  let initialized=false,listening=false,initializing=null,activeContract='',connected=false,working=false;

@@ -1,0 +1,20 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {JSDOM}=require('jsdom');
+(async()=>{
+ const dom=new JSDOM('<body><form id="reservationForm"><input id="customer_name" value="Original"><input id="driving_license"><input id="customer_birth_date"><input id="license_issue"><input id="license_expiry"></form><section id="reservation"></section><section id="scan"></section><footer class="foot"></footer>',{url:'https://localhost',runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;
+ w.URL.createObjectURL=()=> 'blob:preview';w.alert=()=>{throw Error('Unexpected alert')};
+ const text='B\n1. Timmermans\n2. Ivo C. L.\n3. 15.08.1967 Heerlen\n4a. 23.04.2024\n4b. 23.04.2034\n5. 1807509282';let captures=0,recognitions=0;
+ w.Capacitor={isNativePlatform:()=>true,isPluginAvailable:name=>name==='TextRecognition'};
+ w.CameraSource={Camera:'CAMERA'};w.CameraResultType={Uri:'uri'};
+ w.Camera={getPhoto:async options=>{assert.equal(options.source,'CAMERA');captures++;return{path:'file:///private/photo.jpg',webPath:'https://localhost/_capacitor_file_/photo.jpg'}}};
+ w.TextRecognition={processImage:async options=>{assert.equal(options.path,'file:///private/photo.jpg');recognitions++;return{text}}};
+ w.fetch=async url=>{assert.equal(url,'https://localhost/_capacitor_file_/photo.jpg','Native document must stay local');return{ok:true,blob:async()=>new w.Blob(['image'],{type:'image/jpeg'})}};
+ w.eval(fs.readFileSync('app-v84/native/tap-to-pay.js','utf8').replace(/^import .*;\n/gm,''));
+ w.eval(fs.readFileSync('app-v84/www/uppercase-fields-v1.js','utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+ const name=w.document.getElementById('customer_name');name.value='iñaki pérez';name.dispatchEvent(new w.Event('input',{bubbles:true}));assert.equal(name.value,'IÑAKI PÉREZ');
+ w.eval(fs.readFileSync('app-v84/www/scanner-v5.js','utf8'));
+ w.LariosScanner.open('identity','main');await w.LariosScanner.choose();assert.equal(captures,1);assert.equal(recognitions,1);
+ assert.equal(name.value,'IÑAKI PÉREZ','Scanning must wait for review');assert.match(w.document.getElementById('scanResult').textContent,/Timmermans/i);
+ w.LariosScanner.apply();assert.equal(name.value,'IVO C L TIMMERMANS');assert.equal(w.document.getElementById('license_issue').value,'2024-04-23');assert.equal(w.document.getElementById('license_expiry').value,'2034-04-23');assert.equal(w.document.getElementById('driving_license').value,'1807509282');
+ dom.window.close();console.log('Native camera and ML Kit without Stripe or cloud upload, review before apply, live uppercase: ok');
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const ROOT_SELECTORS=['#reservationForm','#lrVehicleForm'];
+const ROOT_SELECTORS=['#reservationForm','#lrVehicleForm','#quickReservationModal'];
 const EXCLUDED_TYPES=new Set(['password','hidden','file','checkbox','radio','range','color']);
 const LIVE_TEXT_INPUTS=new Set(['vehicle_plate','card_number','card_expiry']);
 let editingField=null,scanFrame=0;
@@ -21,7 +21,8 @@ function upperValue(el){
 function configure(el){
   if(!shouldHandle(el)||el.dataset.lrUppercase==='1')return;
   el.dataset.lrUppercase='1';
-  el.style.removeProperty('text-transform');
+  el.style.textTransform='uppercase';
+  el.setAttribute('autocapitalize','characters');
   if(el.tagName!=='SELECT'){
     upperValue(el);
     // Keep iOS keyboard composition completely native while the field has
@@ -50,7 +51,7 @@ function endTyping(el){setTimeout(()=>{if(editingField!==el||document.activeElem
 function scheduleScan(){if(typingActive()||scanFrame)return;scanFrame=requestAnimationFrame(()=>{scanFrame=0;if(!typingActive())scan()})}
 function isolateNativeTyping(event){
   const el=event.target;
-  if(!shouldHandle(el)||el.tagName==='SELECT'||LIVE_TEXT_INPUTS.has(el.id))return;
+  if(!shouldHandle(el)||el.closest('#quickReservationModal')||el.tagName==='SELECT'||LIVE_TEXT_INPUTS.has(el.id))return;
   const type=String(el.type||'text').toLowerCase();
   if(el.tagName!=='TEXTAREA'&&!['text','email','tel','search','url'].includes(type))return;
   // The browser has already inserted the character. Stop legacy pricing,
@@ -63,17 +64,18 @@ function boot(){
   document.getElementById('lrUppercaseFieldsStyle')?.remove();
   scan();
   new MutationObserver(scheduleScan).observe(document.body,{subtree:true,childList:true});
-  document.addEventListener('input',e=>{
+  window.addEventListener('input',e=>{
     const el=e.target;
     if(e.isComposing||!shouldHandle(el)||el.tagName==='SELECT')return;
     upperValue(el);
   },true);
+  window.addEventListener('compositionend',e=>upperValue(e.target),true);
   document.addEventListener('input',isolateNativeTyping,true);
   document.addEventListener('focusin',e=>{configure(e.target);beginTyping(e.target)},true);
   document.addEventListener('focusout',e=>endTyping(e.target),true);
   document.addEventListener('submit',normalizeAll,true);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-window.LariosUppercaseFields={scan,normalizeAll,version:'20261028-iphone-native-typing-v3'};
+window.LariosUppercaseFields={scan,normalizeAll,version:'20261104-live-uppercase-v4'};
 if(!window.LariosTypingPerformance)window.LariosTypingPerformance={active:typingActive,version:'20261028-main-thread-quiet-v4'};
 })();
