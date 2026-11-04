@@ -5,7 +5,7 @@ if(window.LariosTypingPerformance?.version==='20261028-main-thread-shield-v5')re
 const NativeObserver=window.MutationObserver;
 const ROOTS='#reservationForm,#lrVehicleForm';
 const TEXT_TYPES=new Set(['text','email','tel','search','url','number']);
-let activeField=null;
+let activeField=null,signingPointer=null;
 const pendingObservers=new Set();
 
 function belongsToEditor(el){return !!el?.matches?.('input,textarea,select')&&!!el.closest?.(ROOTS)}
@@ -14,7 +14,7 @@ function isTextField(el){
   if(el.tagName==='TEXTAREA')return true;
   return TEXT_TYPES.has(String(el.type||'text').toLowerCase());
 }
-function active(){return !!activeField&&document.activeElement===activeField}
+function active(){return signingPointer!==null||!!activeField&&document.activeElement===activeField}
 function markActive(el){
   if(!belongsToEditor(el))return;
   activeField=el;
@@ -53,6 +53,7 @@ if(NativeObserver){
     const observer=new NativeObserver((records,current)=>{
       if(!active())return callback(records,current);
       state.records.push(...records);
+      if(state.records.length>200)state.records.splice(0,state.records.length-200);
       state.observer=current;
       pendingObservers.add(state);
     });
@@ -62,6 +63,9 @@ if(NativeObserver){
   window.MutationObserver.prototype=NativeObserver.prototype;
   window.MutationObserver.toString=()=>NativeObserver.toString();
 }
+
+document.addEventListener('pointerdown',event=>{if(event.target?.matches?.('#signatureCanvas,#signatureFull'))signingPointer=event.pointerId},true);
+for(const kind of ['pointerup','pointercancel','lostpointercapture'])document.addEventListener(kind,event=>{if(event.pointerId!==signingPointer)return;signingPointer=null;setTimeout(flushObservers,40)},true);
 
 document.addEventListener('focusin',event=>markActive(event.target),true);
 document.addEventListener('focusout',event=>release(event.target),true);
