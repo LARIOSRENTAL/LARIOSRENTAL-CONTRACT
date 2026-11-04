@@ -109,13 +109,23 @@ function decorateAgenda(){
     if(isAdmin&&isReturn&&x.status!=='draft'&&x.status!=='returned'&&x.status!=='collected'&&!card.querySelector('.agendaLifecycleActions')){const actions=document.createElement('div');actions.className='agendaLifecycleActions';actions.innerHTML=`<button type="button" onclick="LariosLifecycle.extend('${x.id}')">Ampliar reserva</button><button type="button" onclick="LariosLifecycle.changeVehicle('${x.id}')">Cambio de vehículo</button>`;card.appendChild(actions)}
   })
 }
-async function refreshAgenda(){await refreshData();if(typeof changeAgendaDate==='function')await changeAgendaDate();setTimeout(decorateAgenda,120)}
+async function refreshAgenda(){if(typeof changeAgendaDate==='function')await changeAgendaDate();setTimeout(decorateAgenda,120);void refreshData().catch(e=>console.warn('Actualización de contratos',e))}
+const returningIds=new Set();
 async function markReturned(id,depositConfirmed){
+ if(returningIds.has(id))return;
+ returningIds.add(id);
+ const buttons=[...document.querySelectorAll('.agendaItem.rich button')].filter(b=>(b.getAttribute('onclick')||'').includes(id)&&/recogid|devolver/i.test(b.textContent||''));
+ buttons.forEach(b=>{b.disabled=true;b.dataset.lrPendingReturn='1';b.textContent='Guardando...'});
  try{
   await rpc('app_mark_contract_returned',{p_contract_id:id,p_deposit_confirmed:!!depositConfirmed});
   closePage();
-  await refreshAgenda();
- }catch(e){alert('No se pudo marcar la recogida: '+e.message)}
+  // The server has now confirmed the return. Update button state immediately.
+  buttons.forEach(b=>{b.textContent='Vehículo recogido';b.dataset.lrPendingReturn='';b.disabled=true});
+  void refreshAgenda();
+ }catch(e){
+  buttons.forEach(b=>{b.disabled=false;b.textContent='Marcar como recogido';delete b.dataset.lrPendingReturn});
+  alert('No se pudo marcar la recogida: '+e.message);
+ }finally{returningIds.delete(id)}
 }
 async function collected(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden gestionar la recogida del vehículo.');if(!contracts.length)await refreshData();const x=contract(id);if(!x)return;if(x.deposit_method==='preauthorization'&&window.LariosGuarantees){await window.LariosGuarantees.completeReturn(id);return}if(number(x.deposit)>0&&!x.deposit_return_confirmed_at){showPage('Confirmar devolución del depósito',`<div class="lrDepositConfirm"><b>DEPÓSITO · ${money(x.deposit)} €</b><p>Confirma que se ha gestionado la devolución de este depósito antes de marcar el vehículo como recogido.</p><div class="lrLifecycleActions"><button class="secondary" type="button" onclick="LariosLifecycle.close()">Cancelar</button><button class="lrAcceptDeposit" type="button" onclick="LariosLifecycle.confirmDeposit('${x.id}')">Aceptar y marcar recogido</button></div></div>`);return}await markReturned(id,false)}
 function selectedExtrasUi(){let total=0;for(const key of Object.keys(extraDefinitions)){if(!$('v2_'+key)?.checked)continue;const qty=Math.max(1,number($('v2_'+key+'_qty')?.value)||1),price=number($('v2_'+key+'_price')?.value);total+=qty*price;const out=$('v2_'+key+'_total');if(out)out.textContent=money(qty*price).replace('.',',')+' €'}for(const n of [1,2]){const name=$('v2_custom'+n+'_name')?.value.trim(),qty=Math.max(1,number($('v2_custom'+n+'_qty')?.value)||1),price=number($('v2_custom'+n+'_price')?.value),value=name?qty*price:0;total+=value;const out=$('v2_custom'+n+'_total');if(out)out.textContent=money(value).replace('.',',')+' €'}return total}
