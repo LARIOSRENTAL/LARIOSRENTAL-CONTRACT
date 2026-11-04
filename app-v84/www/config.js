@@ -1,9 +1,10 @@
-window.LARIOS_CONFIG = window.LARIOS_CONFIG || {
+window.LARIOS_TEST_ENV = true;
+window.LARIOS_CONFIG = {
   // Clave publica del proyecto Supabase. No contiene secretos administrativos.
-  supabaseUrl: 'https://yowwxoeubqduwiyubyru.supabase.co',
-  supabasePublishableKey: 'sb_publishable_6Y7kfR1-MYtfm9r1NldYRg_p1D4sx72',
+  supabaseUrl: 'https://proyecto-pruebas-pendiente.invalid',
+  supabasePublishableKey: '',
   requireEmployeeLogin: true,
-  contractEmailEndpoint: 'https://yowwxoeubqduwiyubyru.supabase.co/functions/v1/send-contract'
+  contractEmailEndpoint: 'https://proyecto-pruebas-pendiente.invalid/functions/v1/send-contract'
 };
 
 // This file is the first application script loaded by index.html. Load the
