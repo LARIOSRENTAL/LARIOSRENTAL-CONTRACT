@@ -1,1 +1,1 @@
-Purpose: republish final TEST Flow 2C parser cleanup under /pruebas: ahora=current Madrid date/time; 2 125 = 2x125cc; 3x50 = 3 motos 50cc; scooter quantity tokens do not contaminate location. Production runtime files are unchanged by this trigger.
+Purpose: republish test Flow 2C with restored OCR web scanner, mapped licence fields and fresh service-worker cache after scanner fixes on 2026-11-05.
