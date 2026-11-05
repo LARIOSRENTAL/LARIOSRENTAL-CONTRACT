@@ -11,7 +11,6 @@ try{
   });
 }catch(e){
   console.warn('Could not hard-lock LariosScanner',e);
-  window.LariosScanner=active;
 }
 const mark=function(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · '+(window.Capacitor?.isNativePlatform?.()?'ESCÁNER NATIVO ML KIT':'ESCÁNER WEB LOCAL');};
 mark();
