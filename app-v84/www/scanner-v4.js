@@ -87,7 +87,11 @@ function prepareWebCameraPicker(){
  input.style.cssText='position:absolute;inset:0;width:100%;height:100%;opacity:0.01;z-index:10;display:block;cursor:pointer;';
  input.onchange=function(){selected(this);};
 }
-function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h){if(scanKind==='keys')h.textContent='Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.';else if(window.Capacitor?.isNativePlatform?.())h.textContent='Android usará su escáner nativo. Revisa los datos antes de aplicarlos.';else h.innerHTML='<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';}render(null);state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');},0);}
+function showWaiting(){
+ const box=resultBox();
+ box.innerHTML='<b>Esperando captura</b><div class="muted" style="margin-top:5px">Los datos aparecerán después de procesar la fotografía.</div>';
+}
+function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h){if(scanKind==='keys')h.textContent='Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.';else if(window.Capacitor?.isNativePlatform?.())h.textContent='Android usará su escáner nativo. Revisa los datos antes de aplicarlos.';else h.innerHTML='<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';}showWaiting();state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');},0);}
 async function choose(){
  if(window.Capacitor?.isNativePlatform?.()){
   try{
