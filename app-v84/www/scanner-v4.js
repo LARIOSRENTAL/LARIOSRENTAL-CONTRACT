@@ -21,7 +21,18 @@ function lineAfter(lines,idx){for(let i=idx+1;i<Math.min(lines.length,idx+3);i++
 function numbered(lines,label){const re=new RegExp('^\\s*'+label+'\\s*[.)]?\\s*[:;-]?\\s*(.*)$','i');for(let i=0;i<lines.length;i++){const m=lines[i].text.match(re);if(m)return clean(m[1])||lineAfter(lines,i);}return'';}
 function labelled(lines,labels){for(let i=0;i<lines.length;i++){const u=upper(lines[i].text);for(const label of labels){const L=upper(label);const p=u.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+label.length).replace(/^\s*[:#º°./-]+\s*/,''));return tail||lineAfter(lines,i);}}}return'';}
 function country(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/FUHRERSCHEIN|OSTERREICH|MODELL DER EUROPAISCHEN UNION/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
-function parseIdentity(items){const lines=linesFrom(items),text=lines.map(x=>x.text).join('\n'),c=country(text),r={};if(c)r.country=c;if(c==='ARGENTINA'){const sur=validName(labelled(lines,['APELLIDO / LAST NAME','APELLIDO','LAST NAME']));const given=validName(labelled(lines,['NOMBRE / FIRST NAME','NOMBRE','FIRST NAME']));if(sur&&given)r.name=`${given} ${sur}`;const lic=validLicence(labelled(lines,['N° LICENCIA / LICENSE N°','Nº LICENCIA','LICENSE N','LICENCIA']));if(lic)r.license=lic;r.birth=parseDate(labelled(lines,['FECHA DE NAC. / DATE OF BIRTH','FECHA DE NAC','DATE OF BIRTH']));r.issue=parseDate(labelled(lines,['OTORGAMIENTO / DATE OF ISSUE','OTORGAMIENTO','DATE OF ISSUE']));r.expiry=parseDate(labelled(lines,['VENCIMIENTO / EXPIRES','VENCIMIENTO','EXPIRES']));const ad=clean(labelled(lines,['DOMICILIO / ADDRESS','DOMICILIO','ADDRESS']));if(ad.length>=5&&ad.length<=80)r.address=ad;}else{const sur=validName(numbered(lines,'1')),given=validName(numbered(lines,'2'));if(sur&&given)r.name=`${given} ${sur}`;r.birth=parseDate(numbered(lines,'3'));r.issue=parseDate(numbered(lines,'4a'));r.expiry=parseDate(numbered(lines,'4b'));const lic=validLicence(numbered(lines,'5'));if(lic)r.license=lic;}const compact=upper(text).replace(/\s+/g,'');const doc=(compact.match(/(?:[XYZ]\d{7}[A-Z]|\d{8}[A-Z])/i)||[])[0];if(doc)r.document=doc;for(const k of Object.keys(r))if(!r[k])delete r[k];return r;}
+function numberedAddress(lines){
+ const start=lines.findIndex(x=>/^\s*8\s*[.)]?\s*[:;-]?/i.test(x.text));
+ if(start<0)return'';
+ const first=lines[start].text.replace(/^\s*8\s*[.)]?\s*[:;-]?\s*/i,'');
+ const parts=[first];
+ for(let i=start+1;i<lines.length&&i<=start+3;i++){
+  if(/^\s*(?:1|2|3|4\s*a|4\s*b|4\s*c|5|7|8|9)\s*[.)]/i.test(lines[i].text))break;
+  parts.push(lines[i].text);
+ }
+ return clean(parts.join(' '));
+}
+function parseIdentity(items){const lines=linesFrom(items),text=lines.map(x=>x.text).join('\n'),c=country(text),r={};if(c)r.country=c;if(c==='ARGENTINA'){const sur=validName(labelled(lines,['APELLIDO / LAST NAME','APELLIDO','LAST NAME']));const given=validName(labelled(lines,['NOMBRE / FIRST NAME','NOMBRE','FIRST NAME']));if(sur&&given)r.name=`${given} ${sur}`;const lic=validLicence(labelled(lines,['N° LICENCIA / LICENSE N°','Nº LICENCIA','LICENSE N','LICENCIA']));if(lic)r.license=lic;r.birth=parseDate(labelled(lines,['FECHA DE NAC. / DATE OF BIRTH','FECHA DE NAC','DATE OF BIRTH']));r.issue=parseDate(labelled(lines,['OTORGAMIENTO / DATE OF ISSUE','OTORGAMIENTO','DATE OF ISSUE']));r.expiry=parseDate(labelled(lines,['VENCIMIENTO / EXPIRES','VENCIMIENTO','EXPIRES']));const ad=clean(labelled(lines,['DOMICILIO / ADDRESS','DOMICILIO','ADDRESS']));if(ad.length>=5&&ad.length<=120)r.address=ad;}else{const sur=validName(numbered(lines,'1')),given=validName(numbered(lines,'2'));if(sur&&given)r.name=`${given} ${sur}`;r.birth=parseDate(numbered(lines,'3'));r.issue=parseDate(numbered(lines,'4a'));r.expiry=parseDate(numbered(lines,'4b'));const lic=validLicence(numbered(lines,'5'));if(lic)r.license=lic;const address=numberedAddress(lines);if(address.length>=5&&address.length<=120)r.address=address;}const compact=upper(text).replace(/\s+/g,'');const doc=(compact.match(/(?:[XYZ]\d{7}[A-Z]|\d{8}[A-Z])/i)||[])[0];if(doc)r.document=doc;for(const k of Object.keys(r))if(!r[k])delete r[k];return r;}
 
 function hideLegacyDetectedFields(){const scan=$('scan');if(!scan)return;scan.querySelectorAll('[data-legacy-scan],.scanLegacyFields').forEach(e=>e.remove());const heading=[...scan.querySelectorAll('.section')].find(e=>/Datos detectados/i.test(e.textContent||''));if(heading){let n=heading.nextElementSibling;while(n&&!(n.tagName==='BUTTON'&&/Aplicar al contrato/i.test(n.textContent||''))){const next=n.nextElementSibling;if(n.id!=='scanText'&&n.id!=='scanV4Result')n.remove();n=next;}}}
 function resultBox(){let b=$('scanV4Result');if(b)return b;b=document.createElement('div');b.id='scanV4Result';b.className='notice';b.style.margin='10px 0';const btn=[...document.querySelectorAll('#scan button')].find(e=>/Aplicar al contrato/i.test(e.textContent||''));if(btn)btn.parentNode.insertBefore(b,btn);return b;}
@@ -29,19 +40,27 @@ function render(r){const b=resultBox();if(!b)return;if(!r||Object.keys(r).length
 
 async function getOCR(){if(ocr)return ocr;state('Cargando motor PaddleOCR…');const mod=await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');if(!mod.PaddleOCR)throw new Error('No se pudo cargar PaddleOCR');ocr=await mod.PaddleOCR.create({lang:'en',ocrVersion:'PP-OCRv5',worker:false,ortOptions:{backend:'wasm',wasmPaths:'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',numThreads:1,simd:true}});return ocr;}
 async function recognizeIdentity(file,nativeText){
- let items;
- if(nativeText&&String(nativeText).trim()){
-  const text=String(nativeText).trim();
-  if($('scanText'))$('scanText').value=text;
-  items=linesFrom(text.split(/\r?\n/).map(text=>({text,score:1})));
- }else{
-  const engine=await getOCR();
-  state('Leyendo documento con PaddleOCR…');
-  const out=await engine.predict(file,{textRecScoreThresh:0.78,textDetBoxThresh:0.55,textDetThresh:0.3,textDetMaxSideLimit:2600});
-  const res=Array.isArray(out)?out[0]:null;
-  items=linesFrom(res&&res.items);
-  if($('scanText'))$('scanText').value=items.map(x=>x.text).join('\n');
+ let text=String(nativeText||'').trim();
+ if(!text){
+  state('Cargando OCR web…');
+  if(!window.Tesseract){
+   await new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload=resolve;script.onerror=()=>reject(new Error('No se pudo cargar Tesseract OCR'));
+    document.head.appendChild(script);
+   });
+  }
+  if(!window.Tesseract)throw new Error('El motor OCR web no está disponible');
+  const result=await window.Tesseract.recognize(file,'spa+eng',{logger:m=>{
+   if(m&&m.status==='recognizing text')state('Leyendo permiso… '+Math.round((m.progress||0)*100)+'%');
+  }});
+  text=String(result?.data?.text||'').trim();
  }
+ if(!text)throw new Error('No se detectó texto legible');
+ if($('scanText'))$('scanText').value=text;
+ if($('scanRaw'))$('scanRaw').textContent=text;
+ const items=linesFrom(text.split(/\r?\n/).map(line=>({text:line,score:1})));
  const parsed=parseIdentity(items);
  const core=['name','license','birth','issue','expiry','country'].filter(k=>parsed[k]).length;
  if(core<4)throw new Error('La lectura no alcanza suficiente confianza');
@@ -68,7 +87,7 @@ function prepareWebCameraPicker(){
  input.style.cssText='position:absolute;inset:0;width:100%;height:100%;opacity:0.01;z-index:10;display:block;cursor:pointer;';
  input.onchange=function(){selected(this);};
 }
-function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h)h.textContent=scanKind==='keys'?'Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.':(window.Capacitor?.isNativePlatform?.()?'En Android se abrirá el escáner nativo. Revisa los datos antes de aplicarlos.':'Haz una foto frontal del documento. El navegador usará el OCR web PaddleOCR. Revisa los datos antes de aplicarlos.');render(null);state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web V4 preparado.');},0);}
+function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h){if(scanKind==='keys')h.textContent='Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.';else if(window.Capacitor?.isNativePlatform?.())h.textContent='Android usará su escáner nativo. Revisa los datos antes de aplicarlos.';else h.innerHTML='<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';}render(null);state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');},0);}
 async function choose(){
  if(window.Capacitor?.isNativePlatform?.()){
   try{
