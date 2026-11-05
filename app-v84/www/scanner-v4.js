@@ -13,29 +13,36 @@ function esc(v){return String(v||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;
 function setField(id,v){if(!v)return false;const e=$(id);if(!e)return false;e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true;}
 
 function validDate(d,m,y){const x=new Date(Date.UTC(y,m-1,d));if(y<1900||y>2100||x.getUTCFullYear()!==y||x.getUTCMonth()!==m-1||x.getUTCDate()!==d)return'';return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;}
-function parseDate(v){const s=upper(v).normalize('NFD').replace(/[\u0300-\u036f]/g,' ');let m=s.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);if(m){let y=Number(m[3]);if(y<100)y+=(y>35?1900:2000);return validDate(Number(m[1]),Number(m[2]),y);}const mons={ENE:1,JAN:1,FEB:2,MAR:3,ABR:4,APR:4,MAY:5,JUN:6,JUL:7,AGO:8,AUG:8,SEP:9,SEPT:9,OCT:10,NOV:11,DIC:12,DEC:12};m=s.match(/(\d{1,2})\s+([A-Z]{3,5})\s+(\d{2,4})/);if(m&&mons[m[2]]){let y=Number(m[3]);if(y<100)y+=(y>35?1900:2000);return validDate(Number(m[1]),mons[m[2]],y);}return'';}
+function parseDate(v){const s=upper(v).normalize('NFD').replace(/[\u0300-\u036f]/g,' ').replace(/\\s*([.\\/-])\\s*/g,'$1');let m=s.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);if(m){let y=Number(m[3]);if(y<100)y+=(y>35?1900:2000);return validDate(Number(m[1]),Number(m[2]),y);}const mons={ENE:1,JAN:1,FEB:2,MAR:3,ABR:4,APR:4,MAY:5,JUN:6,JUL:7,AGO:8,AUG:8,SEP:9,SEPT:9,OCT:10,NOV:11,DIC:12,DEC:12};m=s.match(/(\d{1,2})\s+([A-Z]{3,5})\s+(\d{2,4})/);if(m&&mons[m[2]]){let y=Number(m[3]);if(y<100)y+=(y>35?1900:2000);return validDate(Number(m[1]),mons[m[2]],y);}return'';}
 function validName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').replace(/\s+/g,' ').trim();if(s.length<3||s.length>60)return'';if(/PERMISO|CONDUC|LICEN|FUHRER|FÜHRER|REINO|ESPANA|ESPAÑA|ARGENTINA|EUROP|FECHA|DATE|NACIMIENTO|BIRTH|ADDRESS|DOMICILIO|SEGURIDAD|TRANSPORTE/i.test(s))return'';return s;}
 function validLicence(v){const s=upper(v).replace(/[^A-Z0-9-]/g,'');if(s.length<5||s.length>18||!/\d{4,}/.test(s))return'';return s;}
 function linesFrom(items){return (items||[]).filter(x=>x&&x.text&&Number(x.score||0)>=0.78).map(x=>({text:clean(x.text),score:Number(x.score||0)}));}
 function lineAfter(lines,idx){for(let i=idx+1;i<Math.min(lines.length,idx+3);i++){if(lines[i].text)return lines[i].text;}return'';}
-function numbered(lines,label){const re=new RegExp('^\\s*'+label+'\\s*[.)]?\\s*[:;-]?\\s*(.*)$','i');for(let i=0;i<lines.length;i++){const m=lines[i].text.match(re);if(m)return clean(m[1])||lineAfter(lines,i);}return'';}
+function numberedMarker(label){const token=String(label).replace(/([abc])/gi,'\\s*$1');return new RegExp('(?:^|\\s)'+token+'(?=\\s|[.):;-]|$)\\s*[.)]?\\s*[:;-]?\\s*','i');}
+function numbered(lines,label){
+ const stops=['1','2','3','4a','4b','4c','5','7','8','9'].filter(x=>x!==label).map(numberedMarker);
+ const marker=numberedMarker(label);
+ const next=(text)=>{let at=-1;for(const re of stops){const hit=re.exec(text);if(hit&&(at<0||hit.index<at))at=hit.index;}return at;};
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i].text,hit=marker.exec(line);if(!hit)continue;
+  let value=line.slice(hit.index+hit[0].length),cut=next(value);if(cut>=0)value=value.slice(0,cut);
+  const parts=[clean(value)];
+  for(let j=i+1;j<lines.length&&j<=i+2;j++){
+   const k=next(lines[j].text);
+   if(k>=0){if(k>0)parts.push(clean(lines[j].text.slice(0,k)));break;}
+   parts.push(clean(lines[j].text));
+  }
+  const result=clean(parts.filter(Boolean).join(' '));if(result)return result;
+ }
+ return'';
+}
 function labelled(lines,labels){for(let i=0;i<lines.length;i++){const u=upper(lines[i].text);for(const label of labels){const L=upper(label);const p=u.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+label.length).replace(/^\s*[:#º°./-]+\s*/,''));return tail||lineAfter(lines,i);}}}return'';}
 function country(text){const t=upper(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/REINO DE ESPANA|PERMISO DE CONDUCCION/.test(t))return'ESPAÑA';if(/FUHRERSCHEIN|OSTERREICH|MODELL DER EUROPAISCHEN UNION/.test(t))return'AUSTRIA';if(/LICENCIA NACIONAL DE CONDUCIR|REPUBLICA ARGENTINA|BUENOS AIRES/.test(t))return'ARGENTINA';return'';}
-function numberedAddress(lines){
- const start=lines.findIndex(x=>/^\s*8\s*[.)]?\s*[:;-]?/i.test(x.text));
- if(start<0)return'';
- const first=lines[start].text.replace(/^\s*8\s*[.)]?\s*[:;-]?\s*/i,'');
- const parts=[first];
- for(let i=start+1;i<lines.length&&i<=start+3;i++){
-  if(/^\s*(?:1|2|3|4\s*a|4\s*b|4\s*c|5|7|8|9)\s*[.)]/i.test(lines[i].text))break;
-  parts.push(lines[i].text);
- }
- return clean(parts.join(' '));
-}
+function numberedAddress(lines){return numbered(lines,'8');}
 function parseIdentity(items){const lines=linesFrom(items),text=lines.map(x=>x.text).join('\n'),c=country(text),r={};if(c)r.country=c;if(c==='ARGENTINA'){const sur=validName(labelled(lines,['APELLIDO / LAST NAME','APELLIDO','LAST NAME']));const given=validName(labelled(lines,['NOMBRE / FIRST NAME','NOMBRE','FIRST NAME']));if(sur&&given)r.name=`${given} ${sur}`;const lic=validLicence(labelled(lines,['N° LICENCIA / LICENSE N°','Nº LICENCIA','LICENSE N','LICENCIA']));if(lic)r.license=lic;r.birth=parseDate(labelled(lines,['FECHA DE NAC. / DATE OF BIRTH','FECHA DE NAC','DATE OF BIRTH']));r.issue=parseDate(labelled(lines,['OTORGAMIENTO / DATE OF ISSUE','OTORGAMIENTO','DATE OF ISSUE']));r.expiry=parseDate(labelled(lines,['VENCIMIENTO / EXPIRES','VENCIMIENTO','EXPIRES']));const ad=clean(labelled(lines,['DOMICILIO / ADDRESS','DOMICILIO','ADDRESS']));if(ad.length>=5&&ad.length<=120)r.address=ad;}else{const sur=validName(numbered(lines,'1')),given=validName(numbered(lines,'2'));if(sur&&given)r.name=`${given} ${sur}`;r.birth=parseDate(numbered(lines,'3'));r.issue=parseDate(numbered(lines,'4a'));r.expiry=parseDate(numbered(lines,'4b'));const lic=validLicence(numbered(lines,'5'));if(lic)r.license=lic;const address=numberedAddress(lines);if(address.length>=5&&address.length<=120)r.address=address;}const compact=upper(text).replace(/\s+/g,'');const doc=(compact.match(/(?:[XYZ]\d{7}[A-Z]|\d{8}[A-Z])/i)||[])[0];if(doc)r.document=doc;for(const k of Object.keys(r))if(!r[k])delete r[k];return r;}
 
 function hideLegacyDetectedFields(){const scan=$('scan');if(!scan)return;scan.querySelectorAll('[data-legacy-scan],.scanLegacyFields').forEach(e=>e.remove());const heading=[...scan.querySelectorAll('.section')].find(e=>/Datos detectados/i.test(e.textContent||''));if(heading){let n=heading.nextElementSibling;while(n&&!(n.tagName==='BUTTON'&&/Aplicar al contrato/i.test(n.textContent||''))){const next=n.nextElementSibling;if(n.id!=='scanText'&&n.id!=='scanV4Result')n.remove();n=next;}}}
-function resultBox(){let b=$('scanV4Result');if(b)return b;b=document.createElement('div');b.id='scanV4Result';b.className='notice';b.style.margin='10px 0';const btn=[...document.querySelectorAll('#scan button')].find(e=>/Aplicar al contrato/i.test(e.textContent||''));if(btn)btn.parentNode.insertBefore(b,btn);return b;}
+function resultBox(){let b=$('scanResult')||$('scanV4Result');if(b)return b;b=document.createElement('div');b.id='scanV4Result';b.className='notice';b.style.margin='10px 0';const btn=[...document.querySelectorAll('#scan button')].find(e=>/Aplicar al contrato/i.test(e.textContent||''));if(btn)btn.parentNode.insertBefore(b,btn);return b;}
 function render(r){const b=resultBox();if(!b)return;if(!r||Object.keys(r).length===0){b.innerHTML='<b>Sin datos fiables</b><div class="muted">No se copiará ningún dato al contrato. Repite la foto más cerca, recta y sin reflejos.</div>';return;}const map=[['Nombre','name'],['Documento','document'],['Permiso','license'],['Nacimiento','birth'],['Expedición','issue'],['Caducidad','expiry'],['País','country'],['Domicilio','address']];b.innerHTML='<b>Datos detectados para revisar</b>'+map.filter(x=>r[x[1]]).map(([l,k])=>`<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;padding:5px 0"><strong>${l}</strong><span>${esc(r[k])}</span></div>`).join('');}
 
 async function getOCR(){if(ocr)return ocr;state('Cargando motor PaddleOCR…');const mod=await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');if(!mod.PaddleOCR)throw new Error('No se pudo cargar PaddleOCR');ocr=await mod.PaddleOCR.create({lang:'en',ocrVersion:'PP-OCRv5',worker:false,ortOptions:{backend:'wasm',wasmPaths:'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',numThreads:1,simd:true}});return ocr;}
