@@ -33,7 +33,7 @@ function findNumbered(lines,label){
  const marker=numberMarker(label),inline=numberMarker(label,false);
  const nextMarker=(value)=>{let next=-1;for(const re of stops){const hit=re.exec(value);if(hit&&(next<0||hit.index<next))next=hit.index}return next};
  for(let i=0;i<lines.length;i++){
-  const line=lines[i].text;let hit=marker.exec(line);if(!hit)hit=inline.exec(line);if(!hit)continue;
+  const line=lines[i].text;let hit=marker.exec(line);if(!hit){hit=inline.exec(line);if(hit&&line.slice(0,hit.index).trim().length>8)continue;}if(!hit)continue;
   let value=line.slice(hit.index+hit[0].length),cut=nextMarker(value);if(cut>=0)value=value.slice(0,cut);
   const parts=[clean(value)];
   for(let j=i+1;j<lines.length&&j<=i+2;j++){const k=nextMarker(lines[j].text);if(k>=0){if(k>0)parts.push(clean(lines[j].text.slice(0,k)));break}parts.push(clean(lines[j].text))}
