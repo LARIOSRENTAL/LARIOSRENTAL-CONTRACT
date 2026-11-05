@@ -29,7 +29,7 @@ function numbered(lines,label){
   const parts=[clean(value)];
   for(let j=i+1;j<lines.length&&j<=i+2;j++){
    const k=next(lines[j].text);
-   if(k>=0){if(k>0)parts.push(clean(lines[j].text.slice(0,k)));break;}
+   if(k>=0){const prefix=clean(lines[j].text.slice(0,k));if(/[A-Za-zÀ-ÿ]{3,}/.test(prefix))parts.push(prefix);break;}
    parts.push(clean(lines[j].text));
   }
   const result=clean(parts.filter(Boolean).join(' '));if(result)return result;
