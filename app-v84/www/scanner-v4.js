@@ -52,7 +52,23 @@ async function decodeQR(file){const bmp=await createImageBitmap(file);if('Barcod
 function regFromQR(raw){const s=clean(raw);let m=s.match(/^LRV:([A-Z0-9-]{4,12})$/i);if(m)return upper(m[1]);try{const j=JSON.parse(s);if(j&&j.registration)return upper(j.registration);}catch(e){}m=s.match(/(?:registration|matricula|plate)=([A-Z0-9-]{4,12})/i);return m?upper(m[1]):'';}
 async function recognizeVehicle(file){state('Leyendo QR del llavero…');const raw=await decodeQR(file);if(!raw)throw new Error('No se detectó ningún QR');const reg=regFromQR(raw);if(!reg)throw new Error('El QR no tiene un identificador de vehículo válido');const rows=await window.api('vehicles?select=registration,make,model,fuel_type,category,color&registration=eq.'+encodeURIComponent(reg)+'&limit=1');const v=rows&&rows[0];if(!v)throw new Error('No existe el vehículo '+reg+' en la flota');return{plate:v.registration,model:clean([v.make,v.model].filter(Boolean).join(' ')),fuel:v.fuel_type||'',group:v.category||'',color:v.color||''};}
 
-function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();const h=$('scanHelp');if(h)h.textContent=scanKind==='keys'?'Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.':(window.Capacitor?.isNativePlatform?.()?'En Android se abrirá el escáner nativo. Revisa los datos antes de aplicarlos.':'Haz una foto frontal del documento. El navegador usará el OCR web PaddleOCR. Revisa los datos antes de aplicarlos.');render(null);state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web V4 preparado.');},0);}
+function prepareWebCameraPicker(){
+ if(window.Capacitor?.isNativePlatform?.())return;
+ const input=$('scanFile'),button=$('scanChoose');
+ if(!input||!button)return;
+ const parent=input.parentElement;
+ if(parent&&parent.dataset&&parent.dataset.webCameraPicker==='1')return;
+ const wrapper=document.createElement('div');
+ wrapper.dataset.webCameraPicker='1';
+ wrapper.style.cssText='position:relative;width:100%;min-height:48px;';
+ button.parentNode.insertBefore(wrapper,button);
+ wrapper.appendChild(button);
+ wrapper.appendChild(input);
+ input.classList.remove('hidden');
+ input.style.cssText='position:absolute;inset:0;width:100%;height:100%;opacity:0.01;z-index:10;display:block;cursor:pointer;';
+ input.onchange=function(){selected(this);};
+}
+function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h)h.textContent=scanKind==='keys'?'Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.':(window.Capacitor?.isNativePlatform?.()?'En Android se abrirá el escáner nativo. Revisa los datos antes de aplicarlos.':'Haz una foto frontal del documento. El navegador usará el OCR web PaddleOCR. Revisa los datos antes de aplicarlos.');render(null);state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web V4 preparado.');},0);}
 async function choose(){
  if(window.Capacitor?.isNativePlatform?.()){
   try{
