@@ -28,16 +28,49 @@ function resultBox(){let b=$('scanV4Result');if(b)return b;b=document.createElem
 function render(r){const b=resultBox();if(!b)return;if(!r||Object.keys(r).length===0){b.innerHTML='<b>Sin datos fiables</b><div class="muted">No se copiará ningún dato al contrato. Repite la foto más cerca, recta y sin reflejos.</div>';return;}const map=[['Nombre','name'],['Documento','document'],['Permiso','license'],['Nacimiento','birth'],['Expedición','issue'],['Caducidad','expiry'],['País','country'],['Domicilio','address']];b.innerHTML='<b>Datos detectados para revisar</b>'+map.filter(x=>r[x[1]]).map(([l,k])=>`<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;padding:5px 0"><strong>${l}</strong><span>${esc(r[k])}</span></div>`).join('');}
 
 async function getOCR(){if(ocr)return ocr;state('Cargando motor PaddleOCR…');const mod=await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');if(!mod.PaddleOCR)throw new Error('No se pudo cargar PaddleOCR');ocr=await mod.PaddleOCR.create({lang:'en',ocrVersion:'PP-OCRv5',worker:false,ortOptions:{backend:'wasm',wasmPaths:'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',numThreads:1,simd:true}});return ocr;}
-async function recognizeIdentity(file){const engine=await getOCR();state('Leyendo documento con PaddleOCR…');const out=await engine.predict(file,{textRecScoreThresh:0.78,textDetBoxThresh:0.55,textDetThresh:0.3,textDetMaxSideLimit:2600});const res=Array.isArray(out)?out[0]:null;const items=linesFrom(res&&res.items);if($('scanText'))$('scanText').value=items.map(x=>x.text).join('\n');const parsed=parseIdentity(items);const core=['name','license','birth','issue','expiry','country'].filter(k=>parsed[k]).length;if(core<4)throw new Error('La lectura no alcanza suficiente confianza');return parsed;}
+async function recognizeIdentity(file,nativeText){
+ let items;
+ if(nativeText&&String(nativeText).trim()){
+  const text=String(nativeText).trim();
+  if($('scanText'))$('scanText').value=text;
+  items=linesFrom(text.split(/\r?\n/).map(text=>({text,score:1})));
+ }else{
+  const engine=await getOCR();
+  state('Leyendo documento con PaddleOCR…');
+  const out=await engine.predict(file,{textRecScoreThresh:0.78,textDetBoxThresh:0.55,textDetThresh:0.3,textDetMaxSideLimit:2600});
+  const res=Array.isArray(out)?out[0]:null;
+  items=linesFrom(res&&res.items);
+  if($('scanText'))$('scanText').value=items.map(x=>x.text).join('\n');
+ }
+ const parsed=parseIdentity(items);
+ const core=['name','license','birth','issue','expiry','country'].filter(k=>parsed[k]).length;
+ if(core<4)throw new Error('La lectura no alcanza suficiente confianza');
+ return parsed;
+}
 
 async function decodeQR(file){const bmp=await createImageBitmap(file);if('BarcodeDetector' in window){try{const d=new BarcodeDetector({formats:['qr_code']});const codes=await d.detect(bmp);if(codes&&codes[0]&&codes[0].rawValue)return codes[0].rawValue;}catch(e){}}if(!window.jsQR)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=ok;s.onerror=no;document.head.appendChild(s);});const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;const ctx=c.getContext('2d');ctx.drawImage(bmp,0,0);const im=ctx.getImageData(0,0,c.width,c.height);const q=window.jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});return q&&q.data||'';}
 function regFromQR(raw){const s=clean(raw);let m=s.match(/^LRV:([A-Z0-9-]{4,12})$/i);if(m)return upper(m[1]);try{const j=JSON.parse(s);if(j&&j.registration)return upper(j.registration);}catch(e){}m=s.match(/(?:registration|matricula|plate)=([A-Z0-9-]{4,12})/i);return m?upper(m[1]):'';}
 async function recognizeVehicle(file){state('Leyendo QR del llavero…');const raw=await decodeQR(file);if(!raw)throw new Error('No se detectó ningún QR');const reg=regFromQR(raw);if(!reg)throw new Error('El QR no tiene un identificador de vehículo válido');const rows=await window.api('vehicles?select=registration,make,model,fuel_type,category,color&registration=eq.'+encodeURIComponent(reg)+'&limit=1');const v=rows&&rows[0];if(!v)throw new Error('No existe el vehículo '+reg+' en la flota');return{plate:v.registration,model:clean([v.make,v.model].filter(Boolean).join(' ')),fuel:v.fuel_type||'',group:v.category||'',color:v.color||''};}
 
-function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();const h=$('scanHelp');if(h)h.textContent=scanKind==='keys'?'Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.':'Haz una foto frontal del documento. Scanner V4 usa PaddleOCR y no copiará nada al contrato hasta que revises el resultado.';render(null);state('Scanner V4 preparado.');},0);}
-function choose(){
+function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();const h=$('scanHelp');if(h)h.textContent=scanKind==='keys'?'Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.':(window.Capacitor?.isNativePlatform?.()?'En Android se abrirá el escáner nativo. Revisa los datos antes de aplicarlos.':'Haz una foto frontal del documento. El navegador usará el OCR web PaddleOCR. Revisa los datos antes de aplicarlos.');render(null);state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web V4 preparado.');},0);}
+async function choose(){
+ if(window.Capacitor?.isNativePlatform?.()){
+  try{
+   if(!window.LariosNativeScanner)throw new Error('No está disponible el escáner nativo de Android. Actualiza la APK.');
+   state('Abriendo escáner nativo de Android…');
+   const shot=await window.LariosNativeScanner.capture();
+   const response=await fetch(shot.webPath);
+   if(!response.ok)throw new Error('No se pudo abrir la fotografía local');
+   const file=new File([await response.blob()],'documento.jpg',{type:'image/jpeg'});
+   await selected({files:[file]},shot.text);
+  }catch(e){
+   lastResult=null;render(null);
+   state(/cancel/i.test(e?.message||'')?'Captura cancelada.':(e?.message||'Error al abrir el escáner Android'));
+  }
+  return;
+ }
  const i=$('scanFile');
- if(!i)return base.choose();
+ if(!i)return;
  i.value='';
  // iOS Safari blocks programmatic clicks on display:none file inputs.
  i.classList.remove('hidden');
@@ -50,7 +83,7 @@ function choose(){
  }
  window.setTimeout(()=>i.classList.add('hidden'),1200);
 }
-async function selected(input){const file=input&&input.files&&input.files[0];if(!file)return;lastResult=null;const p=$('scanPreview');if(p){p.src=URL.createObjectURL(file);p.classList.remove('hidden');}hideLegacyDetectedFields();try{lastResult=scanKind==='keys'?await recognizeVehicle(file):await recognizeIdentity(file);render(lastResult);state('Lectura completada. Revisa los datos antes de aplicarlos.');}catch(e){console.error('Scanner V4',e);render(null);state((e&&e.message?e.message:'No se pudo leer el documento')+'. No se ha modificado el contrato.');}}
+async function selected(input,nativeText){const file=input&&input.files&&input.files[0];if(!file)return;lastResult=null;const p=$('scanPreview');if(p){p.src=URL.createObjectURL(file);p.classList.remove('hidden');}hideLegacyDetectedFields();try{lastResult=scanKind==='keys'?await recognizeVehicle(file):await recognizeIdentity(file,nativeText);render(lastResult);state('Lectura completada. Revisa los datos antes de aplicarlos.');}catch(e){console.error('Scanner V4',e);render(null);state((e&&e.message?e.message:'No se pudo leer el documento')+'. No se ha modificado el contrato.');}}
 function apply(){if(!lastResult){alert('No hay una lectura suficientemente fiable para aplicar.');return;}let n=0;if(scanKind==='keys'){n+=setField('vehicle_plate',lastResult.plate)?1:0;n+=setField('vehicle_model',lastResult.model)?1:0;n+=setField('fuel_type',lastResult.fuel)?1:0;n+=setField('vehicle_group',lastResult.group)?1:0;n+=setField('vehicle_color',lastResult.color)?1:0;}else if(scanWho==='additional'){n+=setField('additional_name',lastResult.name)?1:0;n+=setField('additional_driving_license',lastResult.license||lastResult.document)?1:0;n+=setField('additional_birth_date',lastResult.birth)?1:0;n+=setField('additional_license_issue',lastResult.issue)?1:0;n+=setField('additional_license_expiry',lastResult.expiry)?1:0;n+=setField('additional_license_issued_by',lastResult.country)?1:0;}else{n+=setField('customer_name',lastResult.name)?1:0;n+=setField('customer_document',lastResult.document)?1:0;n+=setField('driving_license',lastResult.license)?1:0;n+=setField('customer_birth_date',lastResult.birth)?1:0;n+=setField('license_issue',lastResult.issue)?1:0;n+=setField('license_expiry',lastResult.expiry)?1:0;n+=setField('license_issued_by',lastResult.country)?1:0;n+=setField('customer_address',lastResult.address)?1:0;}if(window.LariosContractUX&&LariosContractUX.recalculate)LariosContractUX.recalculate();state(n+' campos aplicados.');base.close();}
 
 window.LariosScanner={...base,open,choose,selected,apply};
