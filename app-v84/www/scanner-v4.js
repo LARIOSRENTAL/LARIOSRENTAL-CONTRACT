@@ -4,7 +4,7 @@ window.LARIOS_SCANNER_VERSION='V4';
 if(!window.LariosScanner)return;
 const base={...window.LariosScanner};
 const $=id=>document.getElementById(id);
-let scanKind='identity',scanWho='main',lastResult=null,ocr=null;
+let scanKind='identity',scanWho='main',lastResult=null,ocr=null,ocrWorkerPromise=null;
 
 function state(t){const e=$('scanState');if(e)e.textContent=t||'';}
 function clean(v){return String(v||'').replace(/\s+/g,' ').trim();}
@@ -45,11 +45,9 @@ function hideLegacyDetectedFields(){const scan=$('scan');if(!scan)return;scan.qu
 function resultBox(){let b=$('scanResult')||$('scanV4Result');if(b)return b;b=document.createElement('div');b.id='scanV4Result';b.className='notice';b.style.margin='10px 0';const btn=[...document.querySelectorAll('#scan button')].find(e=>/Aplicar al contrato/i.test(e.textContent||''));if(btn)btn.parentNode.insertBefore(b,btn);return b;}
 function render(r){const b=resultBox();if(!b)return;if(!r||Object.keys(r).length===0){b.innerHTML='<b>Sin datos fiables</b><div class="muted">No se copiará ningún dato al contrato. Repite la foto más cerca, recta y sin reflejos.</div>';return;}const map=[['Nombre','name'],['Documento','document'],['Permiso','license'],['Nacimiento','birth'],['Expedición','issue'],['Caducidad','expiry'],['País','country'],['Domicilio','address']];b.innerHTML='<b>Datos detectados para revisar</b>'+map.filter(x=>r[x[1]]).map(([l,k])=>`<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;padding:5px 0"><strong>${l}</strong><span>${esc(r[k])}</span></div>`).join('');}
 
-async function getOCR(){if(ocr)return ocr;state('Cargando motor PaddleOCR…');const mod=await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');if(!mod.PaddleOCR)throw new Error('No se pudo cargar PaddleOCR');ocr=await mod.PaddleOCR.create({lang:'en',ocrVersion:'PP-OCRv5',worker:false,ortOptions:{backend:'wasm',wasmPaths:'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',numThreads:1,simd:true}});return ocr;}
-async function recognizeIdentity(file,nativeText){
- let text=String(nativeText||'').trim();
- if(!text){
-  state('Cargando OCR web…');
+async function getTesseractWorker(){
+ if(ocrWorkerPromise)return ocrWorkerPromise;
+ ocrWorkerPromise=(async()=>{
   if(!window.Tesseract){
    await new Promise((resolve,reject)=>{
     const script=document.createElement('script');
@@ -59,18 +57,30 @@ async function recognizeIdentity(file,nativeText){
    });
   }
   if(!window.Tesseract)throw new Error('El motor OCR web no está disponible');
-  const result=await window.Tesseract.recognize(file,'spa+eng',{logger:m=>{
-   if(m&&m.status==='recognizing text')state('Leyendo permiso… '+Math.round((m.progress||0)*100)+'%');
+  state('Preparando OCR en español… la primera carga puede tardar.');
+  return await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{
+   if(m&&m.status==='loading language traineddata')state('Descargando idioma OCR…');
+   else if(m&&m.status==='recognizing text')state('Leyendo permiso… '+Math.round((m.progress||0)*100)+'%');
   }});
+ })().catch(e=>{ocrWorkerPromise=null;throw e;});
+ ocr=await ocrWorkerPromise;
+ return ocr;
+}
+
+async function recognizeIdentity(file,nativeText){
+ let text=String(nativeText||'').trim();
+ if(!text){
+  const worker=await getTesseractWorker();
+  const result=await worker.recognize(file);
   text=String(result?.data?.text||'').trim();
  }
  if(!text)throw new Error('No se detectó texto legible');
  if($('scanText'))$('scanText').value=text;
  if($('scanRaw'))$('scanRaw').textContent=text;
- const items=linesFrom(text.split(/\r?\n/).map(line=>({text:line,score:1})));
+ const items=linesFrom(text.split(/\\r?\\n/).map(line=>({text:line,score:1})));
  const parsed=parseIdentity(items);
- const core=['name','license','birth','issue','expiry','country'].filter(k=>parsed[k]).length;
- if(core<4)throw new Error('La lectura no alcanza suficiente confianza');
+ const hasMinimum=Boolean(parsed.name&&(parsed.license||parsed.document||parsed.birth));
+ if(!hasMinimum)throw new Error('No se reconocieron juntos el nombre y el permiso o la fecha de nacimiento');
  return parsed;
 }
 
@@ -98,7 +108,7 @@ function showWaiting(){
  const box=resultBox();
  box.innerHTML='<b>Esperando captura</b><div class="muted" style="margin-top:5px">Los datos aparecerán después de procesar la fotografía.</div>';
 }
-function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h){if(scanKind==='keys')h.textContent='Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.';else if(window.Capacitor?.isNativePlatform?.())h.textContent='Android usará su escáner nativo. Revisa los datos antes de aplicarlos.';else h.innerHTML='<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';}showWaiting();state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');},0);}
+function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h){if(scanKind==='keys')h.textContent='Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.';else if(window.Capacitor?.isNativePlatform?.())h.textContent='Android usará su escáner nativo. Revisa los datos antes de aplicarlos.';else h.innerHTML='<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';}showWaiting();state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');if(scanKind==='identity'&&!window.Capacitor?.isNativePlatform?.())getTesseractWorker().catch(e=>console.warn('No se pudo precargar OCR',e));},0);}
 async function choose(){
  if(window.Capacitor?.isNativePlatform?.()){
   try{
