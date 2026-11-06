@@ -94,6 +94,13 @@ async function recognizeIdentity(file,nativeText){
   text=String(result?.data?.text||'').trim();
  }
  if(!text)throw new Error('No se detectó texto legible');
+ if($('scanText'))$('scanText').value=text;
+ if($('scanRaw'))$('scanRaw').textContent=text;
+ const items=linesFrom(text.split(/\\r?\\n/).map(line=>({text:line,score:1})));
+ const parsed=parseIdentity(items);
+ if(!Object.keys(parsed).length)throw new Error('El motor no pudo estructurar ningún campo del permiso');
+ return parsed;
+}
 async function decodeQR(file){const bmp=await createImageBitmap(file);if('BarcodeDetector' in window){try{const d=new BarcodeDetector({formats:['qr_code']});const codes=await d.detect(bmp);if(codes&&codes[0]&&codes[0].rawValue)return codes[0].rawValue;}catch(e){}}if(!window.jsQR)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=ok;s.onerror=no;document.head.appendChild(s);});const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;const ctx=c.getContext('2d');ctx.drawImage(bmp,0,0);const im=ctx.getImageData(0,0,c.width,c.height);const q=window.jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});return q&&q.data||'';}
 function regFromQR(raw){const s=clean(raw);let m=s.match(/^LRV:([A-Z0-9-]{4,12})$/i);if(m)return upper(m[1]);try{const j=JSON.parse(s);if(j&&j.registration)return upper(j.registration);}catch(e){}m=s.match(/(?:registration|matricula|plate)=([A-Z0-9-]{4,12})/i);return m?upper(m[1]):'';}
 async function recognizeVehicle(file){state('Leyendo QR del llavero…');const raw=await decodeQR(file);if(!raw)throw new Error('No se detectó ningún QR');const reg=regFromQR(raw);if(!reg)throw new Error('El QR no tiene un identificador de vehículo válido');const rows=await window.api('vehicles?select=registration,make,model,fuel_type,category,color&registration=eq.'+encodeURIComponent(reg)+'&limit=1');const v=rows&&rows[0];if(!v)throw new Error('No existe el vehículo '+reg+' en la flota');return{plate:v.registration,model:clean([v.make,v.model].filter(Boolean).join(' ')),fuel:v.fuel_type||'',group:v.category||'',color:v.color||''};}
