@@ -3,7 +3,7 @@
 function ensureShell(){
   var scan=document.getElementById('scan');
   if(!scan)return null;
-  if(!document.getElementById('scanTitle')){
+  if(!document.getElementById('scanTitle')||!document.getElementById('scanHelp')||!document.getElementById('scanFile')||!document.getElementById('scanChoose')||!document.getElementById('scanApply')){
     scan.innerHTML='<div class="toolbar"><button class="back" type="button" id="scanBack">←</button><b id="scanTitle">Escanear documentación</b></div>'+
       '<div class="notice" style="border:2px solid #16a34a"><b>SCANNER V6 WEB ACTIVO</b><div id="scanHelp" class="muted" style="margin-top:6px">Preparando escáner…</div></div>'+
       '<input id="scanFile" class="hidden" type="file" accept="image/*" capture="environment">'+
