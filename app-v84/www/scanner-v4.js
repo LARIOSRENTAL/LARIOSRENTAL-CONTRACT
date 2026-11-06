@@ -118,7 +118,25 @@ function showWaiting(){
  const box=resultBox();
  box.innerHTML='<b>Esperando captura</b><div class="muted" style="margin-top:5px">Los datos aparecerán después de procesar la fotografía.</div>';
 }
-function open(kind,who){scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;base.open(kind,who);setTimeout(()=>{hideLegacyDetectedFields();prepareWebCameraPicker();const h=$('scanHelp');if(h){if(scanKind==='keys')h.textContent='Escanea el QR del llavero. Los datos del vehículo se cargarán directamente desde la flota.';else if(window.Capacitor?.isNativePlatform?.())h.textContent='Android usará su escáner nativo. Revisa los datos antes de aplicarlos.';else h.innerHTML='<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';}showWaiting();state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');if(scanKind==='identity'&&!window.Capacitor?.isNativePlatform?.())getTesseractWorker().catch(e=>console.warn('No se pudo precargar OCR',e));},0);}
+function open(kind,who){
+ scanKind=kind==='keys'?'keys':'identity';scanWho=who==='additional'?'additional':'main';lastResult=null;
+ let scan=$('scan'),reservation=$('reservation');
+ if(!scan)return false;
+ scan.classList.remove('hidden');if(reservation)reservation.classList.add('hidden');
+ const title=$('scanTitle');if(title)title.textContent=scanKind==='keys'?'Escanear llavero del vehículo':'Escanear documentación';
+ const help=$('scanHelp');
+ if(help)help.innerHTML=scanKind==='keys'?'Escanea el QR del llavero.':'<b>Campos del permiso:</b> 1 apellidos · 2 nombre · 3 nacimiento · 4a expedición · 4b caducidad · 5 número de permiso · 8 domicilio (si aparece).<br>El navegador usa OCR web. Revisa los datos antes de aplicarlos.';
+ const input=$('scanFile'),button=$('scanChoose'),applyButton=$('scanApply'),saveButton=$('scanSave'),back=$('scanBack');
+ if(input){input.onchange=function(){selected(this);};}
+ if(button)button.onclick=choose;
+ if(applyButton)applyButton.onclick=apply;
+ if(saveButton&&base.upload)saveButton.onclick=()=>base.upload();
+ if(back)back.onclick=()=>{if(scan)scan.classList.add('hidden');if(reservation)reservation.classList.remove('hidden');};
+ prepareWebCameraPicker();showWaiting();
+ state(window.Capacitor?.isNativePlatform?.()?'Escáner Android preparado.':'Escáner OCR web preparado.');
+ if(scanKind==='identity'&&!window.Capacitor?.isNativePlatform?.())getTesseractWorker().catch(e=>console.warn('No se pudo precargar OCR',e));
+ return true;
+}
 async function choose(){
  if(window.Capacitor?.isNativePlatform?.()){
   try{
