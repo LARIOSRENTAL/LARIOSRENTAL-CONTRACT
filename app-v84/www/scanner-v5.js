@@ -28,19 +28,7 @@ function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' 
 function goodLicence(v){const raw=upper(v).replace(/[^A-Z0-9.\/-]/g,'');const compact=raw.replace(/[^A-Z0-9]/g,'');return compact.length>=5&&compact.length<=20&&/\d{4,}/.test(compact)?raw:'';}
 function rawLines(items){return(items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text)}function trustedLines(items){return rawLines(items).filter(x=>x.score>=0)}function joined(lines){return lines.map(x=>x.text).join('\n')}
 function numberMarker(label,anchored=true){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp((anchored?'^\\s*':'(?:^|\\s)')+escaped+'(?=\\s|[.):;-]|$)\\s*[.)]?\\s*[:;-]?\\s*','i')}
-function findNumbered(lines,label){
- const stops=['1','2','3','4a','4b','4c','5','7','8','9'].filter(x=>x!==label).map(x=>numberMarker(x,false));
- const marker=numberMarker(label),inline=numberMarker(label,false);
- const nextMarker=(value)=>{let next=-1;for(const re of stops){const hit=re.exec(value);if(hit&&(next<0||hit.index<next))next=hit.index}return next};
- for(let i=0;i<lines.length;i++){
-  const line=lines[i].text;let hit=marker.exec(line);if(!hit){hit=inline.exec(line);if(hit&&line.slice(0,hit.index).trim().length>8)continue;}if(!hit)continue;
-  let value=line.slice(hit.index+hit[0].length),cut=nextMarker(value);if(cut>=0)value=value.slice(0,cut);
-  const parts=[clean(value)];
-  for(let j=i+1;j<lines.length&&j<=i+2;j++){const k=nextMarker(lines[j].text);if(k>=0){if(k>0)parts.push(clean(lines[j].text.slice(0,k)));break}parts.push(clean(lines[j].text))}
-  const result=clean(parts.filter(Boolean).join(' '));if(result)return result;
- }
- return''
-}
+function findNumbered(lines,label){const marker=numberMarker(label),stops=['1','2','3','4a','4b','4c','5','7','8','9'].filter(x=>x!==label).map(numberMarker);for(let i=0;i<lines.length;i++){const hit=marker.exec(lines[i].text);if(!hit)continue;const parts=[clean(lines[i].text.slice(hit.index+hit[0].length))];for(let j=i+1;j<lines.length&&j<=i+2;j++){if(stops.some(re=>re.test(lines[j].text)))break;parts.push(clean(lines[j].text))}return clean(parts.filter(Boolean).join(' '))}return''}
 function findInlineNumbered(lines,label){const marker=numberMarker(label,false);for(const line of lines){const hit=marker.exec(line.text);if(hit)return clean(line.text.slice(hit.index+hit[0].length))}return''}
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab),p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text}}}return''}
 function licenceAfterLabel(lines){for(let i=0;i<lines.length;i++){if(!/LICEN[CS](?:IA|E)/i.test(lines[i].text))continue;for(let j=i;j<lines.length&&j<=i+3;j++){const candidates=String(lines[j].text||'').match(/[A-Z0-9][A-Z0-9.\/-]{4,24}/gi)||[];for(const candidate of candidates){if(/LICEN[CS]|NACIONAL|CONDUCIR/i.test(candidate))continue;const value=goodLicence(candidate);if(value)return value}}}return''}
