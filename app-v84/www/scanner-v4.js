@@ -43,7 +43,7 @@ function parseIdentity(items){const lines=linesFrom(items),text=lines.map(x=>x.t
 
 function hideLegacyDetectedFields(){const scan=$('scan');if(!scan)return;scan.querySelectorAll('[data-legacy-scan],.scanLegacyFields').forEach(e=>e.remove());const heading=[...scan.querySelectorAll('.section')].find(e=>/Datos detectados/i.test(e.textContent||''));if(heading){let n=heading.nextElementSibling;while(n&&!(n.tagName==='BUTTON'&&/Aplicar al contrato/i.test(n.textContent||''))){const next=n.nextElementSibling;if(n.id!=='scanText'&&n.id!=='scanV4Result')n.remove();n=next;}}}
 function resultBox(){let b=$('scanResult')||$('scanV4Result');if(b)return b;b=document.createElement('div');b.id='scanV4Result';b.className='notice';b.style.margin='10px 0';const btn=[...document.querySelectorAll('#scan button')].find(e=>/Aplicar al contrato/i.test(e.textContent||''));if(btn)btn.parentNode.insertBefore(b,btn);return b;}
-function render(r){const b=resultBox();if(!b)return;if(!r||Object.keys(r).length===0){b.innerHTML='<b>Sin datos fiables</b><div class="muted">No se copiará ningún dato al contrato. Repite la foto más cerca, recta y sin reflejos.</div>';return;}const map=[['Nombre','name'],['Documento','document'],['Permiso','license'],['Nacimiento','birth'],['Expedición','issue'],['Caducidad','expiry'],['País','country'],['Domicilio','address']];b.innerHTML='<b>Datos detectados para revisar</b>'+map.filter(x=>r[x[1]]).map(([l,k])=>`<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;padding:5px 0"><strong>${l}</strong><span>${esc(r[k])}</span></div>`).join('');}
+function render(r){const b=resultBox();if(!b)return;if(!r||Object.keys(r).length===0){const raw=String($('scanRaw')?.textContent||'').trim();b.innerHTML='<b>La foto se procesó, pero no se pudieron estructurar los campos.</b><div class="muted">Texto leído por OCR para diagnóstico:</div>'+(raw?'<pre style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:8px">'+esc(raw)+'</pre>':'<div class="muted">El motor no devolvió texto. Revisa la conexión al cargar el idioma OCR.</div>');return;}const map=[['Nombre','name'],['Documento','document'],['Permiso','license'],['Nacimiento','birth'],['Expedición','issue'],['Caducidad','expiry'],['País','country'],['Domicilio','address']];b.innerHTML='<b>Datos detectados para revisar</b>'+map.filter(x=>r[x[1]]).map(([l,k])=>`<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;padding:5px 0"><strong>${l}</strong><span>${esc(r[k])}</span></div>`).join('');}
 
 async function getTesseractWorker(){
  if(ocrWorkerPromise)return ocrWorkerPromise;
@@ -79,8 +79,7 @@ async function recognizeIdentity(file,nativeText){
  if($('scanRaw'))$('scanRaw').textContent=text;
  const items=linesFrom(text.split(/\\r?\\n/).map(line=>({text:line,score:1})));
  const parsed=parseIdentity(items);
- const hasMinimum=Boolean(parsed.name&&(parsed.license||parsed.document||parsed.birth));
- if(!hasMinimum)throw new Error('No se reconocieron juntos el nombre y el permiso o la fecha de nacimiento');
+ if(!Object.keys(parsed).length)throw new Error('El motor no pudo estructurar ningún campo del permiso');
  return parsed;
 }
 
