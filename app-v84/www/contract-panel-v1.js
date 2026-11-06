@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const $=id=>document.getElementById(id);let installed=false,bulkRunning=false,contracts=[],logs=[],serverStatus={configured:false,activation_pending:true,cache:{resources:[]}},panelTotal=0,panelQuery='',panelFrom='',panelTo='',panelMode='contracts',pageSize=60,searchTimer=null,loadingPage=false;
+const $=id=>document.getElementById(id);let installed=false,bulkRunning=false,contracts=[],logs=[],serverStatus={configured:false,activation_pending:true,cache:{resources:[]}},panelTotal=0,panelQuery='',panelFrom='',panelTo='',panelMode='contracts',pageSize=60,searchTimer=null,loadingPage=false,searchVersion=0;
 function headers(){return{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'}}
 async function sessionFetch(url,options={},retry=true){const r=await fetch(url,options);if(retry&&(r.status===401||r.status===403)&&typeof window.refreshSession==='function'&&await window.refreshSession())return sessionFetch(url,{...options,headers:{...(options.headers||{}),Authorization:'Bearer '+token}},false);return r}
 async function rpc(name,body={}){const r=await sessionFetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:headers(),body:JSON.stringify(body||{})});if(!r.ok)throw new Error(await r.text());return r.json()}
@@ -113,8 +113,19 @@ async function loadMore(){
 function search(value){
   panelQuery=String(value||'');
   applyLocalSearch();
+  const version=++searchVersion;
+  const query=panelQuery,from=panelFrom,to=panelTo;
   clearTimeout(searchTimer);
-  searchTimer=setTimeout(()=>refreshPanelBackground(),500);
+  searchTimer=setTimeout(async()=>{
+    try{
+      const data=await rpc('app_contract_panel_rows_page',{p_limit:pageSize,p_offset:0,p_query:query||null,p_from:from||null,p_to:to||null});
+      if(version!==searchVersion||query!==panelQuery||from!==panelFrom||to!==panelTo)return;
+      contracts=newestFirst(data?.rows||[]);
+      panelTotal=Number(data?.total||contracts.length);
+      if(!query)cachePanelRows();
+      render();
+    }catch(e){console.warn('No se pudo buscar contratos',e)}
+  },250);
 }
 function setDates(){panelFrom=$('lrCpFrom')?.value||'';panelTo=$('lrCpTo')?.value||'';refreshPanelBackground()}
 async function load(){const body=$('lrContractPanelBody');const restored=!panelQuery&&!panelFrom&&!panelTo&&restorePanelRows();if(!restored&&body)body.innerHTML='<div class="notice">Cargando panel…</div>';await refreshPanelBackground()}
