@@ -67,22 +67,33 @@ async function getTesseractWorker(){
  return ocr;
 }
 
+async function prepareLicenceImage(file){
+ const bmp=await createImageBitmap(file);
+ const sx=Math.round(bmp.width*0.07), sy=Math.round(bmp.height*0.10);
+ const sw=Math.round(bmp.width*0.86), sh=Math.round(bmp.height*0.80);
+ const scale=Math.min(2,Math.max(1.35,1800/Math.max(sw,sh)));
+ const canvas=document.createElement('canvas');
+ canvas.width=Math.round(sw*scale);canvas.height=Math.round(sh*scale);
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});
+ ctx.drawImage(bmp,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
+ const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;
+ for(let i=0;i<d.length;i+=4){
+  const gray=(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114);
+  const contrast=Math.max(0,Math.min(255,(gray-118)*1.55+128));
+  d[i]=d[i+1]=d[i+2]=contrast;
+ }
+ ctx.putImageData(img,0,0);
+ return canvas;
+}
 async function recognizeIdentity(file,nativeText){
  let text=String(nativeText||'').trim();
  if(!text){
   const worker=await getTesseractWorker();
-  const result=await worker.recognize(file);
+  await worker.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1'});
+  const result=await worker.recognize(await prepareLicenceImage(file));
   text=String(result?.data?.text||'').trim();
  }
  if(!text)throw new Error('No se detectó texto legible');
- if($('scanText'))$('scanText').value=text;
- if($('scanRaw'))$('scanRaw').textContent=text;
- const items=linesFrom(text.split(/\\r?\\n/).map(line=>({text:line,score:1})));
- const parsed=parseIdentity(items);
- if(!Object.keys(parsed).length)throw new Error('El motor no pudo estructurar ningún campo del permiso');
- return parsed;
-}
-
 async function decodeQR(file){const bmp=await createImageBitmap(file);if('BarcodeDetector' in window){try{const d=new BarcodeDetector({formats:['qr_code']});const codes=await d.detect(bmp);if(codes&&codes[0]&&codes[0].rawValue)return codes[0].rawValue;}catch(e){}}if(!window.jsQR)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=ok;s.onerror=no;document.head.appendChild(s);});const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;const ctx=c.getContext('2d');ctx.drawImage(bmp,0,0);const im=ctx.getImageData(0,0,c.width,c.height);const q=window.jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});return q&&q.data||'';}
 function regFromQR(raw){const s=clean(raw);let m=s.match(/^LRV:([A-Z0-9-]{4,12})$/i);if(m)return upper(m[1]);try{const j=JSON.parse(s);if(j&&j.registration)return upper(j.registration);}catch(e){}m=s.match(/(?:registration|matricula|plate)=([A-Z0-9-]{4,12})/i);return m?upper(m[1]):'';}
 async function recognizeVehicle(file){state('Leyendo QR del llavero…');const raw=await decodeQR(file);if(!raw)throw new Error('No se detectó ningún QR');const reg=regFromQR(raw);if(!reg)throw new Error('El QR no tiene un identificador de vehículo válido');const rows=await window.api('vehicles?select=registration,make,model,fuel_type,category,color&registration=eq.'+encodeURIComponent(reg)+'&limit=1');const v=rows&&rows[0];if(!v)throw new Error('No existe el vehículo '+reg+' en la flota');return{plate:v.registration,model:clean([v.make,v.model].filter(Boolean).join(' ')),fuel:v.fuel_type||'',group:v.category||'',color:v.color||''};}
