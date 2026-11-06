@@ -26,13 +26,12 @@ function numbered(lines,label){
  for(let i=0;i<lines.length;i++){
   const line=lines[i].text,hit=marker.exec(line);if(!hit)continue;
   let value=line.slice(hit.index+hit[0].length),cut=next(value);if(cut>=0)value=value.slice(0,cut);
-  const parts=[clean(value)];
-  for(let j=i+1;j<lines.length&&j<=i+2;j++){
-   const k=next(lines[j].text);
-   if(k>=0){const prefix=clean(lines[j].text.slice(0,k));if(/[A-Za-zÀ-ÿ]{3,}/.test(prefix))parts.push(prefix);break;}
-   parts.push(clean(lines[j].text));
+  value=clean(value);
+  if(label==='1'&&i+1<lines.length&&!next(lines[i+1].text)){
+   const continuation=clean(lines[i+1].text);
+   if(continuation.length<=30&&/^[A-Za-zÀ-ÿ' -]+$/.test(continuation)&&continuation.split(/\s+/).length<=3)value=clean(value+' '+continuation);
   }
-  const result=clean(parts.filter(Boolean).join(' '));if(result)return result;
+  if(value)return value;
  }
  return'';
 }
@@ -58,7 +57,7 @@ async function getTesseractWorker(){
   }
   if(!window.Tesseract)throw new Error('El motor OCR web no está disponible');
   state('Preparando OCR en español… la primera carga puede tardar.');
-  return await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{
+  return await window.Tesseract.createWorker('eng',1,{logger:m=>{
    if(m&&m.status==='loading language traineddata')state('Descargando idioma OCR…');
    else if(m&&m.status==='recognizing text')state('Leyendo permiso… '+Math.round((m.progress||0)*100)+'%');
   }});
@@ -69,8 +68,8 @@ async function getTesseractWorker(){
 
 async function prepareLicenceImage(file){
  const bmp=await createImageBitmap(file);
- const sx=Math.round(bmp.width*0.07), sy=Math.round(bmp.height*0.10);
- const sw=Math.round(bmp.width*0.86), sh=Math.round(bmp.height*0.80);
+ const sx=Math.round(bmp.width*0.04), sy=Math.round(bmp.height*0.16);
+ const sw=Math.round(bmp.width*0.92), sh=Math.round(bmp.height*0.80);
  const scale=Math.min(2,Math.max(1.35,1800/Math.max(sw,sh)));
  const canvas=document.createElement('canvas');
  canvas.width=Math.round(sw*scale);canvas.height=Math.round(sh*scale);
