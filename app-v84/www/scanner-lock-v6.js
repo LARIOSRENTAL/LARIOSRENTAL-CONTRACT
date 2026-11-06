@@ -11,8 +11,9 @@ try{
   });
 }catch(e){
   console.warn('Could not hard-lock LariosScanner',e);
+  window.LariosScanner=active;
 }
-const mark=function(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · '+(window.Capacitor?.isNativePlatform?.()?'ESCÁNER NATIVO ML KIT':'ESCÁNER WEB LOCAL');};
+const mark=function(){const f=document.querySelector('.foot');if(f)f.textContent='Larios Rental · V8.4 · Scanner V6 WEB · LLAVERO OCR · LOCKED';};
 mark();
 window.addEventListener('load',function(){setTimeout(mark,1500);});
 console.log('Scanner V6 locked against legacy overrides');
