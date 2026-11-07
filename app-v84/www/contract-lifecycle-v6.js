@@ -111,13 +111,13 @@ function decorateAgenda(){
 }
 async function refreshAgenda(){if(typeof changeAgendaDate==='function')await changeAgendaDate();setTimeout(decorateAgenda,120);void refreshData().catch(e=>console.warn('Actualización de contratos',e))}
 const returningIds=new Set();
-async function markReturned(id,depositConfirmed){
+async function markReturned(id,depositConfirmed,fuelCharge=null){
  if(returningIds.has(id))return;
  returningIds.add(id);
  const buttons=[...document.querySelectorAll('.agendaItem.rich button')].filter(b=>(b.getAttribute('onclick')||'').includes(id)&&/recogid|devolver/i.test(b.textContent||''));
  buttons.forEach(b=>{b.disabled=true;b.dataset.lrPendingReturn='1';b.textContent='Guardando...'});
  try{
-  await rpc('app_mark_contract_returned',{p_contract_id:id,p_deposit_confirmed:!!depositConfirmed});
+  await rpc('app_mark_contract_returned_with_fuel',{p_contract_id:id,p_deposit_confirmed:!!depositConfirmed,p_fuel_charge:fuelCharge});
   closePage();
   // The server has now confirmed the return. Update button state immediately.
   buttons.forEach(b=>{b.textContent='Vehículo recogido';b.dataset.lrPendingReturn='';b.disabled=true});
@@ -127,7 +127,36 @@ async function markReturned(id,depositConfirmed){
   alert('No se pudo marcar la recogida: '+e.message);
  }finally{returningIds.delete(id)}
 }
-async function collected(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden gestionar la recogida del vehículo.');if(!contracts.length)await refreshData();const x=contract(id);if(!x)return;if(x.deposit_method==='preauthorization'&&window.LariosGuarantees){await window.LariosGuarantees.completeReturn(id);return}if(number(x.deposit)>0&&!x.deposit_return_confirmed_at){showPage('Confirmar devolución del depósito',`<div class="lrDepositConfirm"><b>DEPÓSITO · ${money(x.deposit)} €</b><p>Confirma que se ha gestionado la devolución de este depósito antes de marcar el vehículo como recogido.</p><div class="lrLifecycleActions"><button class="secondary" type="button" onclick="LariosLifecycle.close()">Cancelar</button><button class="lrAcceptDeposit" type="button" onclick="LariosLifecycle.confirmDeposit('${x.id}')">Aceptar y marcar recogido</button></div></div>`);return}await markReturned(id,false)}
+function returnFuelChargeEstimate(x){
+ const saved=x?.return_fuel_charge_amount??x?.app_payload?.return_fuel_charge_amount;
+ const group=String(x?.vehicle_group||x?.category||'').toUpperCase().replace(/^GRUPO\s*/,'');
+ const tank={A:100,B:100,C:100,D:100,F:100,J:100,K:100,G:120,I:120,L:120,H:140,Q:140,'50CC':8,'125CC':8,M1:8,M2:8}[group];
+ if(!tank)return Math.max(0,number(saved));
+ const eighths=v=>{const m=String(v||'').match(/^\s*([0-8])\s*\/\s*8\s*$/);return m?Number(m[1]):null};
+ let out=eighths(x?.fuel_out||x?.delivery_fuel),inside=eighths(x?.fuel_in||x?.return_fuel);
+ if(out===null||inside===null){
+  const reason=String(x?.return_payment_reason||x?.app_payload?.return_payment_reason||x?.return_finance_alert||'');
+  const m=reason.match(/COMBUSTIBLE\s+([0-8])\/8\s*\(ENTREGA\s+([0-8])\/8/i);
+  if(m){inside=Number(m[1]);out=Number(m[2])}
+ }
+ const calculated=out!==null&&inside!==null&&inside<out?Math.round(((out-inside)*tank/8)*100)/100:0;
+ return Math.max(0,Number(saved)||0,calculated);
+}
+async function requestFuelChargeConfirmation(id,depositConfirmed){
+ const x=contract(id);if(!x)return alert('No se encontró el contrato para confirmar el combustible.');
+ const amount=returnFuelChargeEstimate(x);
+ if(amount<=0)return markReturned(id,depositConfirmed,null);
+ const buttonId=String(id).replace(/[^a-zA-Z0-9-]/g,'');
+ const html='<div class="lrFuelReturnConfirm"><b>COMBUSTIBLE · '+escapeHtml(x.contract_number||'')+'</b><p>¿Se ha realizado el cobro de la gasolina faltante? Revisa o edita el importe antes de confirmar.</p><label>Importe cobrado (€)<input id="lrFuelChargeAmount" type="number" min="0.01" step="0.01" inputmode="decimal" value="'+amount.toFixed(2)+'"></label><div class="lrLifecycleActions"><button type="button" class="secondary" onclick="LariosLifecycle.close()">Cancelar</button><button type="button" class="lrAcceptFuel" onclick="LariosLifecycle.confirmFuelReturn(\''+buttonId+'\','+(depositConfirmed?'true':'false')+')">Sí, cobrado y marcar como recogido</button></div></div>';
+ showPage('Confirmar cobro de combustible',html);
+}
+async function confirmFuelReturn(id,depositConfirmed){
+ const raw=String($('lrFuelChargeAmount')?.value||'').trim().replace(',','.');
+ const amount=Number(raw);
+ if(!Number.isFinite(amount)||amount<=0){alert('Introduce el importe de combustible que se ha cobrado.');return}
+ await markReturned(id,depositConfirmed,amount);
+}
+async function collected(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden gestionar la recogida del vehículo.');if(!contracts.length)await refreshData();const x=contract(id);if(!x)return;if(x.deposit_method==='preauthorization'&&window.LariosGuarantees){await window.LariosGuarantees.completeReturn(id);return}if(number(x.deposit)>0&&!x.deposit_return_confirmed_at){showPage('Confirmar devolución del depósito',`<div class="lrDepositConfirm"><b>DEPÓSITO · ${money(x.deposit)} €</b><p>Confirma que se ha gestionado la devolución de este depósito antes de marcar el vehículo como recogido.</p><div class="lrLifecycleActions"><button class="secondary" type="button" onclick="LariosLifecycle.close()">Cancelar</button><button class="lrAcceptDeposit" type="button" onclick="LariosLifecycle.confirmDeposit('${x.id}')">Aceptar y marcar recogido</button></div></div>`);return}await requestFuelChargeConfirmation(id,false)}
 function selectedExtrasUi(){let total=0;for(const key of Object.keys(extraDefinitions)){if(!$('v2_'+key)?.checked)continue;const qty=Math.max(1,number($('v2_'+key+'_qty')?.value)||1),price=number($('v2_'+key+'_price')?.value);total+=qty*price;const out=$('v2_'+key+'_total');if(out)out.textContent=money(qty*price).replace('.',',')+' €'}for(const n of [1,2]){const name=$('v2_custom'+n+'_name')?.value.trim(),qty=Math.max(1,number($('v2_custom'+n+'_qty')?.value)||1),price=number($('v2_custom'+n+'_price')?.value),value=name?qty*price:0;total+=value;const out=$('v2_custom'+n+'_total');if(out)out.textContent=money(value).replace('.',',')+' €'}return total}
 function calculateTotal({rent=0,insuranceTotal=0,youngTotal=0,extrasTotal=0,parking=0,discountPercent=0}){const discount=number(rent)*Math.max(0,number(discountPercent))/100,total=Math.max(0,number(rent)-discount+number(insuranceTotal)+number(youngTotal)+number(extrasTotal)+number(parking));return{discount,total}}
 function authoritativeTotal(){if(window.LariosWebBooking?.preservePrice())return;const rent=number($('rental_price')?.value),insuranceTotal=number($('insurance_total')?.value),youngTotal=$('young_driver')?.checked?number($('young_driver_amount')?.value):0,extrasTotal=selectedExtrasUi(),parking=['50CC','125CC','BICICLETA','E-BIKE'].includes(String($('vehicle_group')?.value||'').toUpperCase())?0:(/aeropuerto|airport|easy\s*parking/i.test($('return_location')?.value||'')?15:0),result=calculateTotal({rent,insuranceTotal,youngTotal,extrasTotal,parking,discountPercent:$('discount_percent')?.value});if($('contract_total'))$('contract_total').value=money(result.total);const box=$('priceBreakdown');if(box){const html=`<div class="priceLine"><span>Alquiler</span><b>${money(rent)} €</b></div><div class="priceLine"><span>Seguro</span><b>${money(insuranceTotal)} €</b></div><div class="priceLine"><span>Conductor &lt;25</span><b>${money(youngTotal)} €</b></div><div class="priceLine"><span>Extras</span><b>${money(extrasTotal)} €</b></div><div class="priceLine"><span>Easy Parking</span><b>${money(parking)} €</b></div><div class="priceLine"><span>Descuento (solo alquiler)</span><b>-${money(result.discount)} €</b></div><div class="priceLine priceTotal"><span>Total</span><b>${money(result.total)} €</b></div>`;if(box.innerHTML!==html)box.innerHTML=html}return result.total}
@@ -228,7 +257,7 @@ function install(){
 }
 function css(){const s=document.createElement('style');s.textContent='.agendaLifecycleActions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}.agendaLifecycleActions button{display:block!important;width:100%!important;background:#fff!important;color:#166534!important;border:1px solid #86b99b!important}.agendaReturnCollectedAction,.agendaReturnCollectedActions button{color:#b91c1c!important;border-color:#fecaca!important;background:#fff!important}.lrDepositBadge,.lrPendingBadge,.lrStripePaidBadge,.lrStripePendingBadge{padding:10px;margin:8px 0;border-radius:9px;font-weight:900;text-align:center}.lrDepositBadge{background:#fef08a;color:#713f12;border:1px solid #eab308}.lrReturnPaymentBadge{padding:10px;margin:8px 0;border-radius:9px;font-weight:900;text-align:center;background:#ffedd5;color:#9a3412;border:1px solid #f97316}.lrPendingBadge{background:#fed7aa;color:#9a3412;border:1px solid #f97316}.lrStripePaidBadge{background:#dcfce7;color:#166534;border:1px solid #22c55e}.lrStripePendingBadge{background:#dbeafe;color:#1e40af;border:1px solid #60a5fa}.lrLifecyclePage{position:fixed;inset:0;z-index:100000;background:#f4f6f8;overflow:auto;padding:env(safe-area-inset-top) 14px 30px}.lrLifecyclePage.hidden{display:none}.lrLifecycleShell{max-width:900px;margin:auto;background:#fff;min-height:100%;padding:18px}.lrLifecycleHead{display:flex;align-items:center;gap:12px;border-bottom:1px solid #e5e7eb;margin-bottom:15px}.lrLifecycleHead button{border:0;border-radius:9px;padding:10px 14px;font-size:20px}.lrPanel{padding:14px 0;border-bottom:1px solid #e5e7eb}.lrPanel h3{margin:0 0 12px}.lrLifecycleActions{display:flex;gap:10px;margin-top:18px}.lrLifecycleActions button{flex:1;padding:13px;border-radius:10px;font-weight:800}.lrDepositConfirm{max-width:600px;margin:60px auto;padding:25px;background:#fef9c3;border:2px solid #eab308;border-radius:16px}.lrDepositConfirm>b{display:block;font-size:24px;color:#713f12}.lrAcceptDeposit{background:#ca8a04;color:#fff;border:0}@media(max-width:600px){.agendaLifecycleActions,.lrLifecycleActions{grid-template-columns:1fr;flex-direction:column}.lrLifecycleShell{padding:12px}}';document.head.appendChild(s)}
 function statusCss(){const s=document.createElement('style');s.textContent='.lrLifecycleStatus{margin-top:14px;padding:12px;border:1px solid #86b99b;background:#f0fdf4;color:#166534;border-radius:10px;font-weight:700}.lrLifecycleStatus.error{border-color:#fca5a5;background:#fef2f2;color:#b91c1c}';document.head.appendChild(s)}
-window.LariosLifecycle={extend:openExtension,generateExtension:generateExtensionById,changeVehicle:openVehicleChange,close:closePage,confirmDeposit:id=>markReturned(id,true),__test:{baseRental,extensionCalculation,extensionDaysBetween,calculateTotal,setPricing:rows=>{pricing=rows}}};
+window.LariosLifecycle={extend:openExtension,generateExtension:generateExtensionById,changeVehicle:openVehicleChange,close:closePage,confirmDeposit:id=>requestFuelChargeConfirmation(id,true),confirmFuelReturn,__test:{baseRental,extensionCalculation,extensionDaysBetween,calculateTotal,setPricing:rows=>{pricing=rows}}};
 if(!document.querySelector?.('script[data-renthub-manual]')){const renthubScript=document.createElement('script');renthubScript.src='renthub-manual-v1.js?v=sync-status-fuel-cancel-20261008-1';renthubScript.dataset.renthubManual='1';document.head.appendChild(renthubScript)}
 if(!document.querySelector?.('script[data-contract-panel]')){const panelScript=document.createElement('script');panelScript.src='contract-panel-v1.js?v=pdf-required-send-20260929';panelScript.dataset.contractPanel='1';document.head.appendChild(panelScript)}
 css();statusCss();if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,3800));else setTimeout(install,3800);
