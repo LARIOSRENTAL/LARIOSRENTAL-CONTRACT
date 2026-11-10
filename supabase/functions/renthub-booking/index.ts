@@ -13,6 +13,15 @@ function parseMap(n:string){try{const v=JSON.parse(env(n)||"{}");return Object.f
 // `model` field expects an internal model ID.  These are the canonical models
 // configured in Larios Rental; RENTHUB_MODEL_MAP can override them without a
 // deployment if the catalogue changes.
+function mixedBikeCounts(contract:any) {
+  const payload = contract?.app_payload || {};
+  const units = payload.vehicle_units || contract?.vehicle_units || {};
+  const bicycle = Math.max(0, Number(units.bicycle || units.bicicleta || 0));
+  const ebike = Math.max(0, Number(units.ebike || units.e_bike || 0));
+  const modelText = norm(payload.vehicle_model || contract?.vehicle_model || "");
+  const combined = (bicycle > 0 && ebike > 0) || /bicicleta.*e.?bike|e.?bike.*bicicleta/.test(modelText);
+  return combined ? { bicycle: Math.max(1, bicycle), ebike: Math.max(1, ebike), combined: true } : { bicycle, ebike, combined: false };
+}
 const defaultModelMap:Record<string,string>={a:"20",b:"2",c:"3",d:"22",f:"11",g:"21",h:"19",i:"4",j:"6",k:"9",l:"7",q:"31",m1:"16",m2:"15",b1:"17",b2:"18"};
 async function loadSecret(s:any,retry=true){if(secret)return secret;const{data,error}=await s.rpc("app_get_renthub_secret");if(error&&retry)return loadSecret(s,false);if(error)throw Error(`No se pudo leer la credencial Partner de Renthub: ${error.message}`);if(data)secret=String(data).trim();return secret;}
 async function partnerToken(force=false){if(!force&&tokenCache&&tokenCache.expires>Date.now()+60000)return tokenCache.token;if(!secret)throw Error("Renthub secret no configurado");const r=await fetch(`${base()}/api/partner/token/${encodeURIComponent(secret)}`,{headers:{Accept:"application/json"}}),d=await r.json().catch(()=>({}));if(!r.ok||!d?.result?.token)throw Error(`Autenticación Renthub fallida (${r.status})`);tokenCache={token:d.result.token,expires:d.result.expires_at?Date.parse(d.result.expires_at):Date.now()+600000};return tokenCache.token;}
@@ -63,12 +72,23 @@ function tariffBaseGross(row:any,daysValue:unknown,quantityValue:unknown,season9
   return Math.round(gross*100)/100;
 }
 async function resolveBaseTariff(actor:any,c:any,payload:any){
+  const mixed=mixedBikeCounts(c);
   const category=pricingCategoryForGroup(c.category||payload.vehicle_group);
   const {data,error}=await actor.from("pricing").select("*").eq("active",true);
   if(error)throw Error("No se pudo consultar la tarifa base de Larios Rental: "+error.message);
+  const season94=!!c.season_94||payload.tariff94===true||String(payload.tariff94||"").toLowerCase()==="true";
+  if(mixed.combined){
+    const rows=data||[];
+    const bicycleRow=rows.find((x:any)=>norm(x?.category)==="bicicleta");
+    const ebikeRow=rows.find((x:any)=>norm(x?.category)==="e-bike");
+    if(!bicycleRow||!ebikeRow)throw Error("Faltan tarifas activas de BICICLETA o E-BIKE para calcular la reserva mixta.");
+    const days=c.rental_days||payload.rental_days;
+    const gross=tariffBaseGross(bicycleRow,days,mixed.bicycle,season94)+tariffBaseGross(ebikeRow,days,mixed.ebike,season94);
+    if(!Number.isFinite(gross)||gross<=0)throw Error("La tarifa base de la reserva mixta no devolvió un precio válido.");
+    return {gross,row:null,category:"FIIDO (BICICLETA + E-BIKE)",season94};
+  }
   const row=(data||[]).find((x:any)=>norm(x?.category)===norm(category));
   if(!row)throw Error("No hay una tarifa activa configurada para "+(category||c.category||"este grupo")+". No se enviará un precio inventado a Renthub.");
-  const season94=!!c.season_94||payload.tariff94===true||String(payload.tariff94||"").toLowerCase()==="true";
   const gross=tariffBaseGross(row,c.rental_days||payload.rental_days,c.quantity||payload.vehicle_quantity,season94);
   if(!Number.isFinite(gross)||gross<=0)throw Error("La tarifa base de "+category+" no devolvió un precio válido. No se enviará la reserva a Renthub sin precio.");
   return {gross,row,category,season94};
@@ -130,11 +150,11 @@ async function mappings(c:any){
     rh("/module/rental/api/partner/locations"),
   ]);
   const items=Array.isArray(cats?.result)?cats.result:[],apiLocations=Array.isArray(locs?.result)?locs.result:[],locations=[...internalLocationCatalog,...apiLocations.filter((x:any)=>!internalLocationCatalog.some((y:any)=>String(y.id)===String(x?.id)))],target=groupName(c.category),cat=items.find((x:any)=>norm(x?.name)===target),models={...defaultModelMap,...parseMap("RENTHUB_MODEL_MAP")};
-  const payload=c.app_payload||{};
+  const payload=c.app_payload||{},mixedBikes=mixedBikeCounts(c);
   const pickupRaw=String(c.delivery_location||payload.pickup_location||"").trim();
   const dropoffRaw=String(c.return_location||payload.return_location||pickupRaw).trim();
   const pickup=bestLocation(pickupRaw,locations),dropoff=bestLocation(dropoffRaw,locations);
-  return{model:String(models[target]||""),categoryId:String(cat?.id||""),group:target,pickup:pickup.id,dropoff:dropoff.id,pickupAddress:pickup.address,dropoffAddress:dropoff.address,pickupMatched:pickup.matched,dropoffMatched:dropoff.matched,minimum:String(params?.result?.opening?.min_date||"").slice(0,16),opening:params?.result?.opening||{}};
+  return{model:String(mixedBikes.combined?(models.fiido||models.b2||""):models[target]||""),categoryId:String(cat?.id||""),group:mixedBikes.combined?"FIIDO":target,pickup:pickup.id,dropoff:dropoff.id,pickupAddress:pickup.address,dropoffAddress:dropoff.address,pickupMatched:pickup.matched,dropoffMatched:dropoff.matched,minimum:String(params?.result?.opening?.min_date||"").slice(0,16),opening:params?.result?.opening||{}};
 }
 function addIsoDays(isoDate:string,days:number){
   const d=new Date(isoDate+"T12:00:00Z");
@@ -235,6 +255,9 @@ function exactPriceMatch(candidate:any,targetPrice:number){
   if(!Number.isFinite(targetPrice)||targetPrice<=0)return false;
   return candidatePrices(candidate).some((x:number)=>Math.abs(x-targetPrice)<=0.05);
 }
+function exactAnyPriceMatch(candidate:any,targetPrices:number[]){
+  return (targetPrices||[]).some((price:number)=>exactPriceMatch(candidate,price));
+}
 function sameDateTime(v:any,targetStart:string){
   return minuteKey(bookingStart(v))===minuteKey(targetStart);
 }
@@ -262,13 +285,67 @@ async function userApiFetch(path:string,init:RequestInit={},retry=true){
   if(!response.ok||data?.status===false)throw Error(`Renthub User API ${response.status} en ${path.split("?")[0]}`);
   return data;
 }
-async function findExistingBookings(target:{phone:string,name:string,start:string,price:number,date:string}){
+let gmailTokenCache:{token:string;expires:number}|null=null;
+async function gmailToken(){
+  if(gmailTokenCache&&gmailTokenCache.expires>Date.now()+60000)return gmailTokenCache.token;
+  const clientId=env("GMAIL_CLIENT_ID"),clientSecret=env("GMAIL_CLIENT_SECRET"),refreshToken=env("GMAIL_REFRESH_TOKEN");
+  if(!clientId||!clientSecret||!refreshToken)throw Error("Gmail OAuth no configurado");
+  const response=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,refresh_token:refreshToken,grant_type:"refresh_token"})});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok||!data?.access_token)throw Error(`Gmail OAuth ${response.status}`);
+  gmailTokenCache={token:String(data.access_token),expires:Date.now()+Math.max(300,Number(data.expires_in||3600))*1000};
+  return gmailTokenCache.token;
+}
+function decodeGmail(value:unknown){
+  const encoded=String(value||"").replace(/-/g,"+").replace(/_/g,"/");
+  if(!encoded)return "";
+  try{
+    const binary=atob(encoded.padEnd(Math.ceil(encoded.length/4)*4,"="));
+    return new TextDecoder().decode(Uint8Array.from(binary,(char)=>char.charCodeAt(0)));
+  }catch{return "";}
+}
+function gmailMessageText(payload:any):string{
+  const chunks:string[]=[];
+  const visit=(part:any)=>{if(!part)return;const decoded=decodeGmail(part?.body?.data);if(decoded)chunks.push(decoded);for(const child of (part?.parts||[]))visit(child);};
+  visit(payload);return chunks.join("\n");
+}
+function htmlText(value:string){return value.replace(/<[^>]+>/g," ").replace(/&nbsp;|&#160;/gi," ").replace(/&amp;/gi,"&").replace(/\s+/g," ").trim();}
+async function findConfirmationBookings(target:{name:string;start:string;date:string;price:number;prices:number[]}){
+  const targetName=String(target.name||"").trim();
+  const nameToken=targetName.split(/\s+/).filter(Boolean).pop()||"";
+  if(!nameToken)return [];
+  const token=await gmailToken();
+  const q=new URLSearchParams({q:`newer_than:30d from:info@lariosrental.com subject:"Reserva realizada con éxito" "${nameToken.replace(/["\\]/g,"")}"`,maxResults:"20"});
+  const listResponse=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${q.toString()}`,{headers:{Authorization:`Bearer ${token}`}});
+  const list=await listResponse.json().catch(()=>({}));
+  if(!listResponse.ok)throw Error(`Gmail search ${listResponse.status}`);
+  const expectedDate=String(target.date||"").split("-").reverse().join("/");
+  const expectedTime=String(target.start||"").slice(11,16);
+  const rows:any[]=[];
+  for(const item of (Array.isArray(list?.messages)?list.messages:[])){
+    const response=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(String(item.id))}?format=full`,{headers:{Authorization:`Bearer ${token}`}});
+    const message=await response.json().catch(()=>({}));
+    if(!response.ok)continue;
+    const plain=htmlText(gmailMessageText(message?.payload));
+    const code=String((plain.match(/C[oó]digo de reserva:\s*([A-Z0-9]+-[A-Z0-9]+)/i)||[])[1]||"").toUpperCase();
+    const name=String((plain.match(/Nombre:\s*(.*?)\s*Correo electr[oó]nico:/i)||[])[1]||"").trim();
+    const pickup=(plain.match(/Recogida:.*?Fecha y hora:\s*(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2})/i)||[]);
+    const price=amount((plain.match(/\d+\s*d[ií]as?\s*-\s*€\s*([0-9]+(?:[.,][0-9]{1,2})?)/i)||[])[1]||0);
+    if(!code||pickup[1]!==expectedDate||pickup[2]!==expectedTime)continue;
+    const candidate={code,start_datetime:`${target.date} ${pickup[2]}:00`,total:price,customer_name:name};
+    if(exactNameMatch(candidate,target.name)&&exactAnyPriceMatch(candidate,target.prices))rows.push(candidate);
+  }
+  return rows;
+}
+async function findExistingBookings(target:{phone:string,name:string,start:string,price:number,prices:number[],date:string}){
   const byCode=new Map<string,any>();
   let complete=false,partnerChecked=false;
+  const dayCandidates:any[]=[];
   const inspect=(rows:any[],source:string)=>{
     for(const v of rows){
+      if(String(bookingStart(v)).slice(0,10)===String(target.date||""))dayCandidates.push({code:bookingCode(v),start:bookingStart(v),prices:candidatePrices(v),model_ids:candidateModelIds(v),category_ids:candidateCategoryIds(v),pickup_ids:candidatePickupIds(v),source});
       if(!sameDateTime(v,target.start))continue;
-      const phoneMatch=exactPhoneMatch(v,target.phone),nameMatch=exactNameMatch(v,target.name),priceMatch=exactPriceMatch(v,target.price);
+      const phoneMatch=exactPhoneMatch(v,target.phone),nameMatch=exactNameMatch(v,target.name),priceMatch=exactAnyPriceMatch(v,target.prices);
       if(!(phoneMatch||nameMatch||priceMatch))continue;
       const code=bookingCode(v);
       if(code)byCode.set(code,{...v,_lr_phone_match:phoneMatch,_lr_name_match:nameMatch,_lr_price_match:priceMatch,_lr_source:source});
@@ -290,9 +367,16 @@ async function findExistingBookings(target:{phone:string,name:string,start:strin
     console.warn("Renthub User API duplicate precheck failed",e);
   }
 
-  return {matches:[...byCode.values()],complete,partnerChecked};
+  try{
+    inspect(await findConfirmationBookings(target),"gmail_confirmation");
+    complete=true;
+  }catch(e){console.warn("Renthub confirmation duplicate precheck failed",e);}
+
+  return {matches:[...byCode.values()],dayCandidates:dayCandidates.slice(0,100),complete,partnerChecked};
 }
-function selectExistingBookings(matches:any[],target:{phone:string,name:string,price:number}){
+function selectExistingBookings(matches:any[],target:{phone:string,name:string,price:number,allowPriceOnly?:boolean}){
+  const verifiedExplicit=matches.filter((row:any)=>row?._lr_source==="verified_web_confirmation");
+  if(verifiedExplicit.length===1)return verifiedExplicit;
   const targetName=norm(target.name);
   const genericNames=new Set(["","particular","pendiente larios rental","city expert"]);
   const hasSpecificName=!genericNames.has(targetName);
@@ -305,7 +389,13 @@ function selectExistingBookings(matches:any[],target:{phone:string,name:string,p
   }
   const byPhoneAndPrice=matches.filter((row:any)=>!!row?._lr_phone_match&&!!row?._lr_price_match);
   if(byPhoneAndPrice.length)return byPhoneAndPrice;
-  return matches.filter((row:any)=>!!row?._lr_phone_match||!!row?._lr_name_match);
+  const strongMatches=matches.filter((row:any)=>!!row?._lr_phone_match||!!row?._lr_name_match);
+  if(strongMatches.length)return strongMatches;
+  if(target.allowPriceOnly){
+    const byPrice=matches.filter((row:any)=>!!row?._lr_price_match);
+    if(byPrice.length===1)return byPrice;
+  }
+  return [];
 }
 Deno.serve(async(req:Request)=>{
   if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
@@ -338,12 +428,14 @@ Deno.serve(async(req:Request)=>{
   await loadSecret(service);if(!secret)return json({error:"Renthub no está configurado"},503);
   const{data:c,error:ce}=await service.from("contracts").select("*").eq("id",id).single();
   if(ce||!c)return json({error:"Contrato no encontrado"},404);
-  const bridgeAmend=bridge&&(action==="amend_whatsapp"||!!c.app_payload?.whatsapp_amendment_message_id);
+  const bridgeAmend=bridge&&(action==="amend_whatsapp"||(action==="create_whatsapp"&&!!c.app_payload?.whatsapp_amendment_message_id));
   if(bridge){
     const p=c.app_payload||{};
-    if(p.source!=="whatsapp_group"||!p.source_whatsapp_group||!p.source_whatsapp_message_id||
-       !body.import_token||p.renthub_local_only===true||p.time_pending===true||p.time_inferred===true||
-       c.status!=="draft"||c.pdf_path||p.renthub_created_from_web===true)
+    const explicitExistingReconcile=(reconcile||inspectReconcile)&&!!String(body.external_reference||"").trim()&&!c.renthub_contract_id&&!!p.renthub_reconcile_nonce_sha256;
+    if(!body.import_token||(!explicitExistingReconcile&&(
+       p.source!=="whatsapp_group"||!p.source_whatsapp_group||!p.source_whatsapp_message_id||
+       p.renthub_local_only===true||p.time_pending===true||p.time_inferred===true||
+       c.status!=="draft"||c.pdf_path||p.renthub_created_from_web===true)))
       return json({error:"Reserva WhatsApp no apta para creación automática"},409);
     if(reconcile||rollbackReconcile||inspectReconcile||inspectSearch){
       const expected=String(p.renthub_reconcile_nonce_sha256||"");
@@ -362,7 +454,7 @@ Deno.serve(async(req:Request)=>{
     // For multi-vehicle messages, the inbox stores the first contract ID. The
     // contract's own source fields and token-scoped inbox row bind each unit.
     const madrid=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Madrid",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date());
-    if(`${c.delivery_date} ${String(c.delivery_time||"").slice(0,5)}`<=madrid)
+    if(`${c.delivery_date} ${String(c.delivery_time||"").slice(0,5)}`<=madrid&&!reconcile&&!inspectReconcile&&!inspectSearch)
       return json({error:"La recogida ya no es futura"},409);
     if(inspectReconcile){
       const code=String(body.external_reference||"").trim().toUpperCase();
@@ -373,10 +465,18 @@ Deno.serve(async(req:Request)=>{
       return json({
         found:String(booking?.code||"")===code,
         external_reference:String(booking?.code||code),
+        customer_id:String(linkedCustomer?.id||""),
         customer_name:String(linkedCustomer?.full_name||[linkedCustomer?.name,linkedCustomer?.surname].filter(Boolean).join(" ")||""),
         customer_phone:String(linkedCustomer?.mobile||linkedCustomer?.phone||""),
+        customer_email:String(linkedCustomer?.email||""),
+        customer_address:String(linkedCustomer?.address||linkedCustomer?.full_address||linkedCustomer?.street_address||linkedCustomer?.address_line_1||""),
+        customer_city:String(linkedCustomer?.city||linkedCustomer?.town||""),
+        customer_postal_code:String(linkedCustomer?.postal_code||linkedCustomer?.postcode||linkedCustomer?.zip||""),
+        customer_country:String(linkedCustomer?.country||linkedCustomer?.country_name||""),
         start_datetime:String(booking?.start_datetime||""),
         end_datetime:String(booking?.end_datetime||""),
+        pickup_location:String(booking?.pickup_location?.name||booking?.pickup_location||""),
+        model:String(booking?.model?.name||booking?.model||""),
         total:booking?.total_amount??booking?.total??null
       });
     }
@@ -429,6 +529,8 @@ Deno.serve(async(req:Request)=>{
     const baseTariff=localPriceMissing?await resolveBaseTariff(actor,c,payload):null;
     const rentalGross=localPriceMissing?Number(baseTariff?.gross||0):explicitGross;
     const priceSource=localPriceMissing?"base_tariff":"explicit";
+    const matchingPrices=[...new Set([amount(c.total),amount(c.rental_total),amount(payload.total),Number(rentalGross||0)].filter((x:number)=>Number.isFinite(x)&&x>0))];
+    const paidExistingHint=bridge&&(payload.paid_mentioned===true||["paid","pagado","pending_payment","pending"].includes(norm(payload.payment_status))||/\b(pagado|pendiente\s+de\s+pago|pte\.?\s*pago)\b/i.test(String(payload.whatsapp_message||"")));
     if(localPriceMissing){
       payload.rental_price=rentalGross.toFixed(2);
       payload.total=rentalGross.toFixed(2);
@@ -445,6 +547,7 @@ Deno.serve(async(req:Request)=>{
         name:String(customer?.full_name||payload.customer_name||""),
         start:realStart,
         price:Number(rentalGross||0),
+        prices:matchingPrices,
         date:String(c.delivery_date||"")
       });
       const q=new URLSearchParams({page:"1",per_page:"50",start_date_from:String(c.delivery_date||""),start_date_to:String(c.delivery_date||"")});
@@ -465,7 +568,15 @@ Deno.serve(async(req:Request)=>{
         for(const item of Object.values(value))visit(item);
       };
       visit(rawList);
+      const dayCandidates=collectBookings(rawList)
+        .filter((row:any)=>String(bookingStart(row)).slice(0,10)===String(c.delivery_date||""))
+        .map((row:any)=>({code:bookingCode(row),start:bookingStart(row),prices:candidatePrices(row),model_ids:candidateModelIds(row),category_ids:candidateCategoryIds(row),pickup_ids:candidatePickupIds(row)}))
+        .slice(0,100);
+      const userResult=rawList?.result, userData=rawList?.result?.data;
+      const userShape={root_keys:Object.keys(rawList||{}),result_type:Array.isArray(userResult)?"array":typeof userResult,result_keys:userResult&&typeof userResult==="object"&&!Array.isArray(userResult)?Object.keys(userResult):[],data_type:Array.isArray(userData)?"array":typeof userData,data_length:Array.isArray(userData)?userData.length:null,data_first_keys:Array.isArray(userData)&&userData[0]&&typeof userData[0]==="object"?Object.keys(userData[0]):[]};
       return json({
+        user_shape:userShape,
+        day_candidates:[...lookup.dayCandidates,...dayCandidates].slice(0,100),
         complete:lookup.complete,
         partner_checked:lookup.partnerChecked,
         matches:lookup.matches.map((row:any)=>({
@@ -527,13 +638,31 @@ Deno.serve(async(req:Request)=>{
     if(franchiseToSend>0)form.set("overwrite_damage_franchise",franchiseToSend.toFixed(2));
     console.log(JSON.stringify({event:"renthub_booking_create",endpoint:"partner_booking_insert",availability:"renthub_freesale_rule",contract_number:c.contract_number,group:map.group,partner_category_id:map.categoryId,renthub_model_id:map.model,vehicle_assignment:"unassigned",pickup:map.pickup,dropoff:map.dropoff,pickup_match:map.pickupMatched,dropoff_match:map.dropoffMatched,fallback_pickup_text:!!pickupAddress,fallback_dropoff_text:!!dropoffAddress,price_override:true,price_source:priceSource,rental_gross:rentalGross,tariff_category:baseTariff?.category||null,tariff_season_94:baseTariff?.season94??null}));
     const currentPickup=String(map.pickup),currentDropoff=String(map.dropoff);
-    const precheck=bridgeAmend?{matches:[],complete:true,partnerChecked:true}:await findExistingBookings({
-      phone:String(customer?.phone||payload.customer_phone||""),
-      name:String(customer?.full_name||payload.customer_name||""),
-      start:realStart,
-      price:Number(rentalGross||0),
-      date:String(c.delivery_date||"")
-    });
+    const explicitExistingCode=String(body.external_reference||"").trim().toUpperCase();
+    let precheck:any;
+    if(bridgeAmend){
+      precheck={matches:[],complete:true,partnerChecked:true};
+    }else if(reconcile&&explicitExistingCode){
+      const confirmedDetail=await rh("/module/rental/api/partner/booking/details/"+encodeURIComponent(explicitExistingCode));
+      const confirmedBooking=confirmedDetail?.result?.booking||{};
+      const confirmedCode=bookingCode(confirmedBooking);
+      const confirmedPickupIds=candidatePickupIds(confirmedBooking),confirmedModelIds=candidateModelIds(confirmedBooking);
+      const validExisting=confirmedCode===explicitExistingCode&&sameDateTime(confirmedBooking,realStart)&&
+        exactAnyPriceMatch(confirmedBooking,matchingPrices)&&
+        (!confirmedPickupIds.length||confirmedPickupIds.includes(String(map.pickup)))&&
+        (!confirmedModelIds.length||confirmedModelIds.includes(String(map.model)));
+      if(!validExisting)throw Error("La referencia indicada no coincide con fecha, hora, importe, ubicación o grupo de esta reserva. No se enlazará.");
+      precheck={matches:[{...confirmedBooking,_lr_phone_match:false,_lr_name_match:false,_lr_price_match:true,_lr_source:"verified_web_confirmation"}],complete:true,partnerChecked:true};
+    }else{
+      precheck=await findExistingBookings({
+        phone:String(customer?.phone||payload.customer_phone||""),
+        name:String(customer?.full_name||payload.customer_name||""),
+        start:realStart,
+        price:Number(rentalGross||0),
+        prices:matchingPrices,
+        date:String(c.delivery_date||"")
+      });
+    }
 
     // Mirror local de reservas web ya importadas: cubre las reservas que entraron
     // previamente desde la web de Renthub y ya tienen código Renthub en la app.
@@ -569,17 +698,62 @@ Deno.serve(async(req:Request)=>{
     const existing=selectExistingBookings(precheck.matches,{
       phone:String(customer?.phone||payload.customer_phone||""),
       name:String(customer?.full_name||payload.customer_name||""),
-      price:Number(rentalGross||0)
+      price:Number(rentalGross||0),
+      allowPriceOnly:paidExistingHint
     });
     if(existing.length===1){
       const existingCode=bookingCode(existing[0]);
       if(existingCode){
+        const remoteDetail=await rh("/module/rental/api/partner/booking/details/"+encodeURIComponent(existingCode)).catch((error:any)=>{console.warn("Renthub linked booking detail read failed",String(error));return null;});
+        const remoteRoot=remoteDetail?.result||{},remoteBooking=remoteRoot.booking||{},remoteCustomer=remoteRoot.customer||{};
+        const firstText=(...values:any[])=>values.map((value:any)=>String(value||"").trim()).find((value:string)=>!!value)||"";
+        const remoteName=firstText(remoteCustomer.full_name,[remoteCustomer.name,remoteCustomer.surname].filter(Boolean).join(" "));
+        const remotePhone=firstText(remoteCustomer.mobile,remoteCustomer.phone,remoteCustomer.telephone);
+        const remoteEmail=firstText(remoteCustomer.email);
+        const remoteAddress=firstText(remoteCustomer.address,remoteCustomer.full_address,remoteCustomer.street_address,remoteCustomer.address_line_1);
+        const cityValue=remoteCustomer.city,postalValue=remoteCustomer.postal_code,countryValue=remoteCustomer.country;
+        const remoteCity=firstText(typeof cityValue==="object"&&cityValue?(cityValue.name||cityValue.label||cityValue.city||cityValue.value):cityValue,remoteCustomer.town);
+        const remotePostal=firstText(typeof postalValue==="object"&&postalValue?(postalValue.name||postalValue.code||postalValue.value):postalValue,remoteCustomer.postcode,remoteCustomer.zip);
+        const remoteCountry=firstText(typeof countryValue==="object"&&countryValue?(countryValue.name||countryValue.label||countryValue.value):countryValue,remoteCustomer.country_name);
+        const currentName=String(customer?.full_name||payload.customer_name||"").trim();
+        const pendingName=!currentName||/^(pendiente larios rental|cliente pendiente larios rental|pendiente)$/i.test(currentName);
+        const resolvedName=pendingName?remoteName:currentName;
+        const resolvedPhone=firstText(customer?.phone,payload.customer_phone,remotePhone);
+        const resolvedEmail=firstText(customer?.email,payload.customer_email,remoteEmail);
+        const localAddressParts=payload.customer_address_parts||{};
+        const addressFromLocalParts=firstText(localAddressParts.street,localAddressParts.street_number,localAddressParts.number);
+        const hasLocalAddress=!!(addressFromLocalParts||localAddressParts.city||localAddressParts.city_postal||localAddressParts.postal_code);
+        const resolvedAddress=firstText(customer?.address,payload.customer_address,addressFromLocalParts,hasLocalAddress?"":remoteAddress);
+        const resolvedCity=firstText(customer?.city,localAddressParts.city,localAddressParts.city_postal,hasLocalAddress?"":remoteCity);
+        const resolvedPostal=firstText(customer?.postal_code,localAddressParts.postal_code,hasLocalAddress?"":remotePostal);
+        const customerPatch:any={};
+        if(pendingName&&remoteName)customerPatch.full_name=remoteName;
+        if(!firstText(customer?.phone,payload.customer_phone)&&remotePhone)customerPatch.phone=remotePhone;
+        if(!firstText(customer?.email,payload.customer_email)&&remoteEmail)customerPatch.email=remoteEmail;
+        if(!hasLocalAddress&&!firstText(customer?.address,payload.customer_address)&&remoteAddress)customerPatch.address=remoteAddress;
+        if(!hasLocalAddress&&!firstText(customer?.city,payload.customer_address_parts?.city)&&remoteCity)customerPatch.city=remoteCity;
+        if(!hasLocalAddress&&!firstText(customer?.postal_code,payload.customer_address_parts?.postal_code)&&remotePostal)customerPatch.postal_code=remotePostal;
+        if(!firstText(customer?.country)&&remoteCountry)customerPatch.country=remoteCountry;
+        if(remoteCustomer.id&&!customer?.renthub_customer_id)customerPatch.renthub_customer_id=String(remoteCustomer.id);
+        if(Object.keys(customerPatch).length&&c.customer_id){
+          const customerWrite=await actor.from("customers").update({...customerPatch,updated_at:new Date().toISOString()}).eq("id",c.customer_id);
+          if(customerWrite.error)console.warn("Renthub link: customer-table fields kept in contract payload",customerWrite.error.message);
+        }
+        if(pendingName&&remoteName&&c.main_driver_id){
+          const driverWrite=await actor.from("drivers").update({full_name:remoteName}).eq("id",c.main_driver_id);
+          if(driverWrite.error)console.warn("Renthub link: driver-table name kept in contract payload",driverWrite.error.message);
+        }
+        const endMatch=String(remoteBooking.end_datetime||remoteBooking.return_datetime||"").match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+        const returnDateFromWeb=endMatch?.[1]||null,returnTimeFromWeb=endMatch?.[2]||null;
+        const linkedPayload={...payload,...(resolvedName?{customer_name:resolvedName}:{}),...(resolvedPhone?{customer_phone:resolvedPhone}:{}),...(resolvedEmail?{customer_email:resolvedEmail}:{}),...(resolvedAddress?{customer_address:resolvedAddress}:{}),...(resolvedCity||resolvedPostal?{customer_address_parts:{...(payload.customer_address_parts||{}),...(resolvedCity?{city:resolvedCity}:{}),...(resolvedPostal?{postal_code:resolvedPostal}:{})}}:{}),...(remoteCountry?{customer_nationality:firstText(payload.customer_nationality,remoteCountry)}:{}),renthub_linked_details_imported_at:remoteDetail?new Date().toISOString():payload.renthub_linked_details_imported_at||null};
         await requireWrite(actor.from("contracts").update({
           renthub_contract_id:existingCode,
           renthub_sync_status:"linked_existing",
           renthub_last_sync_at:new Date().toISOString(),
           renthub_sync_error:null,
-          app_payload:{...payload,
+          ...(returnDateFromWeb?{return_date:returnDateFromWeb}:{}),
+          ...(returnTimeFromWeb?{return_time:returnTimeFromWeb+":00"}:{}),
+          app_payload:{...linkedPayload,
             renthub_linked_existing_code:existingCode,
             renthub_linked_existing_at:new Date().toISOString(),
             renthub_existing_precheck:true,
@@ -604,11 +778,6 @@ Deno.serve(async(req:Request)=>{
     if(reconcile){
       throw Error("No se ha localizado por nombre la reserva original de Renthub. No se crea ninguna reserva nueva.");
     }
-    const paidExistingHint=bridge&&(
-      payload.paid_mentioned===true||
-      ["paid","pagado","pending_payment"].includes(norm(payload.payment_status))||
-      /\b(pagado|pendiente\s+de\s+pago|pte\.?\s*pago)\b/i.test(String(payload.whatsapp_message||""))
-    );
     if(paidExistingHint){
       throw Error("El mensaje indica que la reserva ya existe o está pagada en Renthub. No se crea otra; queda pendiente de enlazar la original por nombre.");
     }
