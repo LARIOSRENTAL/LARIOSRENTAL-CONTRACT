@@ -1,0 +1,1 @@
+alter table public.contracts add column if not exists renthub_payment_attempted_at timestamptz;
