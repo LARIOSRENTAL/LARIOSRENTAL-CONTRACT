@@ -1,30 +1,35 @@
 (function(){
  'use strict';
+ const languages={
+  es:{label:'Español',title:'Condiciones generales',url:'https://www.lariosrental.com/condiciones-generales/'},
+  en:{label:'English',title:'Rental Agreement Conditions',url:'https://www.lariosrental.com/en/rental-agreement-conditions/'},
+  fr:{label:'Français',title:'Conditions de location',url:'https://www.lariosrental.com/fr/conditions-de-location/'},
+  de:{label:'Deutsch',title:'Mietvertragsbedingungen',url:'https://www.lariosrental.com/de/mietvertragsbedingungen/'},
+  it:{label:'Italiano',title:'Condizioni generali',url:'https://www.lariosrental.com/it/condizioni-generali/'}
+ };
  let panel=null,language='es',previousFocus=null;
  function setLanguage(value){
-  language=value==='en'?'en':'es';
+  language=languages[value]?value:'es';
   if(!panel)return;
   panel.dataset.language=language;
-  panel.querySelectorAll('[data-terms-language]').forEach(button=>{
-   const active=button.dataset.termsLanguage===language;
-   button.setAttribute('aria-pressed',String(active));
-  });
-  const image=panel.querySelector('.lrTermsPage');
-  if(image){image.style.transform=language==='en'?'translateX(-50%)':'translateX(0)';image.alt=language==='en'?'Rental agreement general conditions in English':'Condiciones generales del contrato en español'}
-  panel.querySelector('.lrTermsTitle').textContent=language==='en'?'General conditions':'Condiciones generales';
+  const item=languages[language],frame=panel.querySelector('.lrTermsFrame');
+  panel.querySelector('.lrTermsTitle').textContent=item.title;
+  panel.querySelector('.lrTermsLanguage').value=language;
+  panel.querySelector('.lrTermsOpenPage').href=item.url;
+  frame.title=item.title;
+  if(frame.src!==item.url)frame.src=item.url;
  }
  function close(){if(!panel)return;panel.remove();panel=null;document.body.style.overflow='';document.removeEventListener('keydown',onKey);previousFocus?.focus?.()}
  function onKey(event){if(event.key==='Escape')close()}
  function open(){
   if(panel){panel.remove();panel=null}
   previousFocus=document.activeElement;
-  panel=document.createElement('div');panel.className='lrTermsOverlay';panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Condiciones generales / General conditions');
-  panel.innerHTML='<section class="lrTermsDialog"><header class="lrTermsHeader"><div><h2 class="lrTermsTitle"></h2><p>Segunda página del contrato / Second page of the rental agreement</p></div><button type="button" class="lrTermsClose" aria-label="Cerrar / Close">×</button></header><nav class="lrTermsLanguages" aria-label="Idioma / Language"><button type="button" data-terms-language="es">Español</button><button type="button" data-terms-language="en">English</button></nav><div class="lrTermsViewport"><img class="lrTermsPage" alt=""></div><footer class="lrTermsFooter"><a href="https://www.lariosrental.com/condiciones-generales/" target="_blank" rel="noopener">Consultar las condiciones completas en la web / View the full conditions online</a></footer></section>';
-  const style=document.createElement('style');style.textContent='.lrTermsOverlay{position:fixed;inset:0;z-index:100600;background:#111827b8;display:flex;align-items:center;justify-content:center;padding:12px;font-family:system-ui,-apple-system,sans-serif}.lrTermsDialog{width:min(900px,100%);height:min(94dvh,1000px);background:#fff;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 70px #0005}.lrTermsHeader{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid #e5e7eb;gap:12px}.lrTermsHeader h2{font-size:19px;margin:0;color:#111827}.lrTermsHeader p{font-size:12px;color:#6b7280;margin:3px 0 0}.lrTermsClose{border:0;border-radius:50%;width:40px;height:40px;background:#f3f4f6;font-size:27px;color:#111827;flex:0 0 auto}.lrTermsLanguages{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid #e5e7eb}.lrTermsLanguages button{flex:1;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#334155;padding:10px;font-weight:700}.lrTermsOverlay[data-language="es"] [data-terms-language="es"],.lrTermsOverlay[data-language="en"] [data-terms-language="en"]{background:#166534;color:#fff;border-color:#166534}.lrTermsViewport{flex:1;overflow:auto;overscroll-behavior:contain;background:#fff}.lrTermsPage{display:block;width:200%;max-width:none;height:auto;transition:transform .15s ease}.lrTermsFooter{padding:10px 14px;border-top:1px solid #e5e7eb;text-align:center;font-size:13px}.lrTermsFooter a{color:#166534;font-weight:700}.lrTermsOverlay:focus{outline:none}@media(max-width:600px){.lrTermsOverlay{padding:0}.lrTermsDialog{height:100dvh;max-height:none;border-radius:0}.lrTermsHeader{padding-top:calc(12px + env(safe-area-inset-top))}}';
+  panel=document.createElement('div');panel.className='lrTermsOverlay';panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Términos y condiciones / Terms and conditions');
+  panel.innerHTML='<section class="lrTermsDialog"><header class="lrTermsHeader"><div class="lrTermsHeading"><label for="lrTermsLanguage">Idioma / Language</label><select class="lrTermsLanguage" id="lrTermsLanguage"><option value="es">Español</option><option value="en">English</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option></select><h2 class="lrTermsTitle"></h2></div><button type="button" class="lrTermsClose" aria-label="Cerrar / Close">×</button></header><div class="lrTermsViewport"><iframe class="lrTermsFrame" loading="eager" referrerpolicy="strict-origin-when-cross-origin" allow="fullscreen"></iframe></div><footer class="lrTermsFooter"><span>Texto publicado en la web oficial de Larios Rental.</span> <a class="lrTermsOpenPage" target="_blank" rel="noopener">Abrir esta versión en una pestaña completa</a></footer></section>';
+  const style=document.createElement('style');style.textContent='.lrTermsOverlay{position:fixed;inset:0;z-index:100600;background:#111827b8;display:flex;align-items:center;justify-content:center;padding:12px;font-family:system-ui,-apple-system,sans-serif}.lrTermsDialog{width:min(1100px,100%);height:min(96dvh,1100px);background:#fff;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 70px #0005}.lrTermsHeader{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid #e5e7eb;gap:12px}.lrTermsHeading{display:grid;grid-template-columns:auto minmax(160px,240px);align-items:center;gap:6px 10px;flex:1}.lrTermsHeading label{font-size:13px;font-weight:700;color:#374151}.lrTermsLanguage{width:100%;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#111827;padding:9px 10px;font-size:16px}.lrTermsHeader h2{grid-column:1/-1;font-size:17px;margin:0;color:#111827}.lrTermsClose{border:0;border-radius:50%;width:40px;height:40px;background:#f3f4f6;font-size:27px;color:#111827;flex:0 0 auto}.lrTermsViewport{flex:1;min-height:0;background:#fff}.lrTermsFrame{display:block;width:100%;height:100%;border:0;background:#fff}.lrTermsFooter{padding:8px 12px;border-top:1px solid #e5e7eb;text-align:center;font-size:12px;color:#6b7280}.lrTermsFooter a{display:inline-block;color:#166534;font-weight:700;margin-left:6px}.lrTermsOverlay:focus{outline:none}@media(max-width:600px){.lrTermsOverlay{padding:0}.lrTermsDialog{height:100dvh;max-height:none;border-radius:0}.lrTermsHeader{padding-top:calc(10px + env(safe-area-inset-top))}.lrTermsHeading{grid-template-columns:auto minmax(130px,1fr)}.lrTermsFooter{padding-bottom:calc(8px + env(safe-area-inset-bottom))}}';
   panel.appendChild(style);
-  const image=panel.querySelector('.lrTermsPage');image.src=new URL('assets/rental-terms-page2.png',document.baseURI).href;
   panel.querySelector('.lrTermsClose').addEventListener('click',close);
-  panel.querySelectorAll('[data-terms-language]').forEach(button=>button.addEventListener('click',()=>setLanguage(button.dataset.termsLanguage)));
+  panel.querySelector('.lrTermsLanguage').addEventListener('change',event=>setLanguage(event.target.value));
   panel.addEventListener('click',event=>{if(event.target===panel)close()});
   document.body.appendChild(panel);document.body.style.overflow='hidden';document.addEventListener('keydown',onKey);setLanguage(language);panel.querySelector('.lrTermsClose').focus();
  }
