@@ -21,6 +21,15 @@ function parseMap(name: string): Record<string, string> {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [normalize(key), String(item)]));
   } catch { return {}; }
 }
+function mixedBikeCounts(contract: any) {
+  const payload = contract?.app_payload || {};
+  const units = payload.vehicle_units || contract?.vehicle_units || {};
+  const bicycle = Math.max(0, Number(units.bicycle || units.bicicleta || 0));
+  const ebike = Math.max(0, Number(units.ebike || units.e_bike || 0));
+  const modelText = normalize(payload.vehicle_model || contract?.vehicle_model || "");
+  const combined = (bicycle > 0 && ebike > 0) || /bicicleta.*e.?bike|e.?bike.*bicicleta/.test(modelText);
+  return combined ? { bicycle: Math.max(1, bicycle), ebike: Math.max(1, ebike), combined: true } : { bicycle, ebike, combined: false };
+}
 const defaultModelMap: Record<string, string> = {
   a: "20", b: "2", c: "3", d: "22", f: "11", g: "21", h: "19", i: "4",
   j: "6", k: "9", l: "7", q: "31", m1: "16", m2: "15", b1: "17", b2: "18",
@@ -332,7 +341,7 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   }
 
   // A durable atomic claim prevents concurrent inserts and prevents a retry after an ambiguous POST.
-  if (contract?.app_payload?.renthub_payment_attempted_at) {
+  if (contract?.renthub_payment_attempted_at || contract?.app_payload?.renthub_payment_attempted_at) {
     return { pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
       reason: "previous_payment_attempt_requires_verification",
       error: "Existe un intento previo sin confirmar. Revisar el pago antes de permitir otra inserción." };
@@ -342,10 +351,12 @@ async function syncRenthubAccountingPayment(contract: any, bookingDetail: any, m
   const paymentService = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"),
     { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: claimed, error: claimError } = await paymentService.from("contracts")
-    .update({ app_payload: claimedPayload }).eq("id", contract.id)
-    .is("app_payload->renthub_payment_attempted_at", null)
-    .eq("app_payload", JSON.stringify(contract.app_payload || {})).select("id").maybeSingle();
+    .update({ app_payload: claimedPayload, renthub_payment_attempted_at: attemptedAt })
+    .eq("id", contract.id).is("renthub_payment_attempted_at", null)
+    .select("id").maybeSingle();
   if (claimError || !claimed) {
+    console.warn(JSON.stringify({ event: "renthub_payment_attempt_claim_failed", contract_number: contract?.contract_number,
+      detail: claimError?.message || "Atomic claim already held" }));
     return { pending: true, verified: false, booking_id: bookingId, method, amount: paymentAmount,
       reason: "payment_attempt_not_claimed", error: "No se pudo reservar un intento único de pago." };
   }
@@ -1164,6 +1175,7 @@ async function automaticMappings(contract: any) {
   const category = categories.find((item: any) => normalize(item?.name) === target);
   const modelMap = { ...defaultModelMap, ...parseMap("RENTHUB_MODEL_MAP") };
   const group = normalize(contract.category).replace(/^grupo\s+/, "");
+  const mixedBikes = mixedBikeCounts(contract);
   const payload = contract.app_payload || {};
   const pickupRaw = contract.delivery_location || payload.pickup_location || "";
   const dropoffRaw = contract.return_location || payload.return_location || pickupRaw;
@@ -1191,7 +1203,8 @@ async function automaticMappings(contract: any) {
   return {
     // Los grupos visibles de la app deben traducirse a las claves internas de Renthub:
     // 50cc -> M1, 125cc -> M2, BICICLETA -> B1, E-BIKE -> B2.
-    model: modelMap[target] || modelMap[group] || modelMap[normalize(contract.category)] || "",
+    model: mixedBikes.combined ? (modelMap.fiido || modelMap.b2 || "") : (modelMap[target] || modelMap[group] || modelMap[normalize(contract.category)] || ""),
+    reservedGroup: mixedBikes.combined ? "FIIDO" : group,
     pickup: pickupResolved.id,
     dropoff: dropoffResolved.id,
     pickupAddress: pickupResolved.address,
@@ -1440,11 +1453,13 @@ async function handler(req: Request) {
   const start = `${contract.delivery_date} ${String(contract.delivery_time || "").slice(0, 5)}`;
   const end = `${contract.return_date} ${String(contract.return_time || "").slice(0, 5)}`;
   const expectedTotal = Number(contract.total || 0);
-  // Renthub must receive the final contract total as a single rental amount.
-  // Insurance, young driver, extras and discounts remain internal breakdowns in Larios Rental.
-  const renthubRentalRate = netFromGross(expectedTotal, contract.vat_percent);
+  // Renthub adds a 10 EUR + VAT charge when the return location is Easy Parking.
+  // Subtract it from the gross rental base so the Renthub final total stays equal to the contract.
+  const isEasyParkingDropoff = normalize(contract.return_location || contract.app_payload?.return_location).includes("easy parking");
+  const renthubSurchargeGross = isEasyParkingDropoff ? 10 * (1 + Math.max(0, amount(contract.vat_percent)) / 100) : 0;
+  const renthubRentalRate = netFromGross(Math.max(0, expectedTotal - renthubSurchargeGross), contract.vat_percent);
   const pricelist = renthubPricelist(contract);
-  const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, total_gross: expectedTotal, total_net: renthubRentalRate, deposit: Number(contract.deposit || 0), resource: "freesale" });
+  const verificationHash = await digest({ contract_id: contract.id, start, end, model: verificationModel, pickup, dropoff, pricelist, total_gross: expectedTotal, renthub_surcharge_gross: renthubSurchargeGross, total_net: renthubRentalRate, deposit: Number(contract.deposit || 0), resource: "freesale" });
 
   const replacementStart = renthubReplacementStart(contract, latestPartnerStart);
   // Partner API payment fields remain disabled. Accounting payment is handled separately
@@ -1463,6 +1478,8 @@ async function handler(req: Request) {
     replacement_start: replacementStart,
     end,
     total: expectedTotal,
+    renthub_surcharge_gross: renthubSurchargeGross,
+    renthub_rental_rate: renthubRentalRate,
     model,
     pickup,
     dropoff,
@@ -1544,7 +1561,13 @@ async function handler(req: Request) {
       expected_total: expectedTotal,
       checks,
     }));
-    return { detail, booking, checks, verified: Object.values(checks).every(Boolean) };
+    return {
+      detail,
+      booking,
+      checks,
+      totalCandidates: totalCandidates.map((value) => String(value)),
+      verified: Object.values(checks).every(Boolean),
+    };
   }
 
   function technicalEndForRenthub(realEnd: string) {
@@ -1647,7 +1670,10 @@ async function handler(req: Request) {
     return m ? `${m[3]}/${m[2]}/${m[1]}` : String(value || "");
   };
 
-  async function updateExistingRenthubBooking(detail: any) {
+  async function updateExistingRenthubBooking(
+    detail: any,
+    options: { start?: string; end?: string; status?: string } = {},
+  ) {
     const booking = detail?.result?.booking || {};
     const bookingId = String(booking?.id || "");
     const registryId = String(detail?.result?.customer?.id || "");
@@ -1656,6 +1682,9 @@ async function handler(req: Request) {
     if (!fleetMatch?.vehicle) throw new Error("No se encontró el vehículo asignado en la flota de Renthub.");
 
     const form = new URLSearchParams();
+    const status = String(options.status || "in_corso");
+    const [startDate = "", startTime = ""] = String(options.start || start).split(" ");
+    const [endDate = "", endTime = ""] = String(options.end || end).split(" ");
     const values: Record<string,string> = {
       dr_group: crypto.randomUUID(),
       dr_to_delete: "",
@@ -1664,9 +1693,9 @@ async function handler(req: Request) {
       pm_cancel_reason_id: "",
       calc_auto_tar: "non_attivo",
       pm_imr_id: "",
-      pm_stato_prenotazione: "in_corso",
+      pm_stato_prenotazione: status,
       pm_list_id: String(booking?.pricelist?.id || pricelist || "1"),
-      pm_tariffa_manuale: "0",
+      pm_tariffa_manuale: "1",
       pm_monthly_fee: "0",
       pm_monthly_duration: "0",
       tariffa_tot: renthubRentalRate.toFixed(4),
@@ -1696,12 +1725,12 @@ async function handler(req: Request) {
       pickup_at_location: String(pickupAddress || ""),
       dropoff_at_location: String(dropoffAddress || ""),
       pm_consegna_effettiva_l_id: "",
-      pm_data_inizio: renthubPanelDate(String(contract.delivery_date || "").slice(0,10)),
-      pm_ora_inizio: String(contract.delivery_time || "").slice(0,5),
+      pm_data_inizio: renthubPanelDate(startDate),
+      pm_ora_inizio: String(startTime || "").slice(0,5),
       pm_actual_end_date: "",
       pm_actual_end_time: "",
-      pm_data_fine: renthubPanelDate(String(contract.return_date || "").slice(0,10)),
-      pm_ora_fine: String(contract.return_time || "").slice(0,5),
+      pm_data_fine: renthubPanelDate(endDate),
+      pm_ora_fine: String(endTime || "").slice(0,5),
       ...(renthubFuelLevel !== "" ? { pm_benzina_ritiro: renthubFuelLevel } : {}),
       pm_benzina_consegna: "",
       pm_km_included: String(booking?.kms?.included || 0),
@@ -1761,7 +1790,7 @@ async function handler(req: Request) {
       headers: {
         Accept: "application/json, text/javascript, */*; q=0.01",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-PartnerToken": await partnerToken(),
+        "X-UserAuthToken": await userToken(),
         "X-Requested-With": "XMLHttpRequest",
       },
       body: form,
@@ -1781,8 +1810,11 @@ async function handler(req: Request) {
       vehicle_id: String(fleetMatch.vehicle),
       pickup_location: String(pickup),
       dropoff_location: String(dropoff),
-      start,
-      end,
+      start: options.start || start,
+      end: options.end || end,
+      total_gross: expectedTotal,
+      total_net_sent: renthubRentalRate,
+      status,
       deposit: Number(contract.deposit || 0),
       damage_franchise: desiredFranchise,
       fuel_out: lariosFuelLabel || null,
@@ -1922,7 +1954,7 @@ async function handler(req: Request) {
 
     const newCode = String(insertedBooking?.result?.booking?.code || insertedBooking?.booking?.code || insertedBooking?.code || "");
     if (!newCode) throw new Error("Renthub did not return a booking code");
-    return { code: newCode, inserted: insertedBooking, vehicleRequested, actualStart };
+    return { code: newCode, inserted: insertedBooking, vehicleRequested, actualStart, actualEnd };
   }
 
   if (action === "send") {
@@ -1931,6 +1963,39 @@ async function handler(req: Request) {
     // del contrato y después se cancela la anterior. Si no existe, se crea directamente.
     let code = String(contract.renthub_contract_id || ""), inserted: any = null, updated: any = null, payment: any = null;
     try {
+      const pendingCleanupCodes = Array.isArray(contract.app_payload?.renthub_pending_cleanup_codes)
+        ? contract.app_payload.renthub_pending_cleanup_codes.map((value: unknown) => String(value || "").trim()).filter(Boolean)
+        : [];
+      if (pendingCleanupCodes.length) {
+        const cleanedCodes: string[] = [];
+        for (const staleCode of pendingCleanupCodes) {
+          const stale = await verify(staleCode, {
+            expectedStart: replacementStart,
+            expectedEnd: end,
+            checkStart: true,
+            expectedModel: model,
+            checkVehicle: false,
+          });
+          const safeToCancel = stale.checks.code && stale.checks.customer_email &&
+            stale.checks.start && stale.checks.end && stale.checks.model && !stale.checks.total;
+          if (!safeToCancel) {
+            throw new Error(`No se pudo verificar con seguridad la reserva fallida ${staleCode}; no se creó otra reserva.`);
+          }
+          await renthubFetch(`/module/rental/api/partner/booking/cancel/${encodeURIComponent(staleCode)}`, { method: "DELETE" });
+          cleanedCodes.push(staleCode);
+          console.log(JSON.stringify({ event: "renthub_failed_replacement_cleaned", contract_number: contract.contract_number, code: staleCode }));
+        }
+        const nextPayload = {
+          ...(contract.app_payload || {}),
+          renthub_pending_cleanup_codes: [],
+          renthub_cleaned_failed_replacements: [
+            ...(Array.isArray(contract.app_payload?.renthub_cleaned_failed_replacements) ? contract.app_payload.renthub_cleaned_failed_replacements : []),
+            ...cleanedCodes,
+          ].slice(-10),
+        };
+        await requireWrite(actor.from("contracts").update({ app_payload: nextPayload }).eq("id", contract.id), "No se pudo registrar la limpieza de la reserva fallida");
+        contract.app_payload = nextPayload;
+      }
       if (!code) {
         const missing = [!model && "model", !pickup && "pickup_location", !dropoff && "dropoff_location", !customer?.email && "customer_email", !customer?.phone && "customer_phone"].filter(Boolean);
         if (missing.length) throw new Error(`Missing Renthub mapping/data: ${missing.join(", ")}`);
@@ -2179,6 +2244,10 @@ async function handler(req: Request) {
       //   para evitar cancelaciones no permitidas.
       if (!checked.verified) {
         const currentStatus = normalize(checked.booking?.status || checked.booking?.state || checked.booking?.booking_status || checked.booking?.pm_stato_prenotazione || "");
+        if (["in_progress", "in corso", "in_corso"].includes(currentStatus)) {
+          const mismatchKeys = Object.entries(checked.checks).filter(([, ok]) => !ok).map(([key]) => key);
+          throw new Error(`Renthub muestra la reserva ${code} como en curso, pero no coincide con LR-${String(contract.contract_number).padStart(6, "0")} en: ${mismatchKeys.join(", ")}. No se ha modificado ni cancelado la reserva de Renthub.`);
+        }
         const lockedExisting = ["in_progress","confirmed","in corso","in_corso"].includes(currentStatus);
         if (lockedExisting) {
           try {
@@ -2252,6 +2321,46 @@ async function handler(req: Request) {
         checkPayment: true,
         checkVehicle: false,
       });
+      // Partner insert accepts the booking but may retain its own pricelist total.
+      // Apply the exact contract rate through Renthub's booking editor before
+      // deciding whether the original booking can be replaced.
+      if (!replacementChecked.checks.total) {
+        const booking = replacementChecked.booking || {};
+        const rawStatus = booking?.pm_stato_prenotazione
+          ?? booking?.status?.key
+          ?? booking?.status?.code
+          ?? booking?.status?.value
+          ?? booking?.status
+          ?? booking?.state
+          ?? booking?.booking_status;
+        const replacementStatus = String(rawStatus ?? "").trim();
+        if (!replacementStatus || replacementStatus === "[object Object]") {
+          throw new Error("Renthub devolvió un total distinto y no expuso el estado de la nueva reserva; se conserva la reserva original sin modificar.");
+        }
+        console.log(JSON.stringify({
+          event: "renthub_replacement_total_adjustment_start",
+          contract_number: contract.contract_number,
+          code: replacement.code,
+          expected_total: expectedTotal,
+          current_total: replacementChecked.totalCandidates,
+          status_preserved: replacementStatus,
+          start: replacement.actualStart,
+          end: replacement.actualEnd,
+        }));
+        updated = await updateExistingRenthubBooking(replacementChecked.detail, {
+          start: replacement.actualStart,
+          end: replacement.actualEnd,
+          status: replacementStatus,
+        });
+        replacementChecked = await verify(replacement.code, {
+          expectedStart: replacement.actualStart,
+          expectedEnd: replacement.actualEnd,
+          checkStart: true,
+          expectedModel: model,
+          checkPayment: true,
+          checkVehicle: false,
+        });
+      }
       const replacementCustomerCode = String(replacementChecked.detail?.result?.customer?.code || customerCode || "");
       if (replacementCustomerCode && customer) {
         updated = await syncPartnerCustomer(replacementCustomerCode, contract, customer, driver, replacementChecked.detail);
