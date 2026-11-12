@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261112-ocrspace-diagnostics-17';
+const CACHE = 'larios-rental-pro-20261112-ocrspace-diagnostics-18';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
