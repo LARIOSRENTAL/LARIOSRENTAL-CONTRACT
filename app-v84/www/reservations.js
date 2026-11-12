@@ -184,12 +184,7 @@ function bindEditableMaskedCard(el){
 }
 function fill(x){
   if(!x)return;
-  const isPlaceholderName=v=>/^pendiente(?:\\s+larios\\s+rental)?$/i.test(String(v||'').trim());
-  const storedName=String(x.customer_name||'').trim();
-  const payloadName=String(x.app_payload?.customer_name||'').trim();
-  const resolvedName=isPlaceholderName(storedName)?(isPlaceholderName(payloadName)?'':payloadName):(storedName|| (isPlaceholderName(payloadName)?'':payloadName));
-  x={...x,customer_name:resolvedName};
-  if(x.app_payload&&isPlaceholderName(payloadName))x.app_payload={...x.app_payload,customer_name:resolvedName};
+  x={...x,customer_name:x.customer_name??x.app_payload?.customer_name??''};
   setEditingId(x.id);
   window.LariosCurrentContract=x;
   window.LariosWebBooking?.open(x);
@@ -197,6 +192,16 @@ function fill(x){
   if($('reservationTitle'))$('reservationTitle').textContent=generated?'Editar contrato '+(x.contract_number||''):'Editar reserva';
   const plain=['customer_name','customer_document','customer_email','customer_phone','customer_nationality','customer_address','driving_license','license_issued_by','additional_name','additional_driving_license','additional_license_issued_by','vehicle_group','assigned_vehicle_group','vehicle_quantity','vehicle_plate','vehicle_model','vehicle_color','fuel_type','km_out','km_in','fuel_out','fuel_in','pickup_location','return_location','rental_days','rental_price','insurance_total','young_driver_amount','discount_percent','vat_percent','deposit','franchise','payment_method','billing_notes','accessories_notes','agency','card_number','card_expiry'];
   plain.forEach(k=>{const el=$(k);if(!el||x[k]===undefined||x[k]===null)return;if(k==='vehicle_group')ensureVehicleGroupValue(x[k]);else{if(k==='payment_method'&&el.tagName==='SELECT'&&!Array.from(el.options||[]).some(o=>String(o.value)===String(x[k]))){const option=document.createElement('option');option.value=x[k];option.textContent=x[k];el.appendChild(option)}el.value=x[k]}});
+  const customerNameField=$('customer_name');
+  if(customerNameField&&customerNameField.dataset.lrClearPlaceholderOnFocus!=='1'){
+    customerNameField.dataset.lrClearPlaceholderOnFocus='1';
+    customerNameField.addEventListener('focus',()=>{
+      if(/^pendiente(?:\\s+larios\\s+rental)?$/i.test(String(customerNameField.value||'').trim())){
+        customerNameField.value='';
+        customerNameField.dispatchEvent(new Event('input',{bubbles:true}));
+      }
+    });
+  }
   const cardField=$('card_number'),expiryField=$('card_expiry'),cardClosed=['returned','collected'].includes(String(x.status||'').toLowerCase()),storedDigits=String(x.card_number||'').replace(/\D/g,''),last4=String(x.card_last4||'').replace(/\D/g,'').slice(-4)||(storedDigits.length>=12?storedDigits.slice(-4):'');
   if(cardField){cardField.readOnly=cardClosed;cardField.disabled=cardClosed;delete cardField.dataset.stripeMasked;delete cardField.dataset.lrMaskedLast4}
   if(expiryField){expiryField.readOnly=cardClosed;expiryField.disabled=cardClosed}
