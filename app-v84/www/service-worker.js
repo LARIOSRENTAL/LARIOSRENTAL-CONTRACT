@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261112-unicode-pdf-19';
+const CACHE = 'larios-rental-pro-20261112-unicode-pdf-20';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
