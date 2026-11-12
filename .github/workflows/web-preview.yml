@@ -39,7 +39,9 @@ jobs:
       - uses: actions/configure-pages@v5
       - name: Prepare production and isolated test site
         run: |
+          npm ci --prefix app-v84
           mkdir -p app-v84/www/assets app-v84/www/vendor
+          cp app-v84/node_modules/@pdf-lib/fontkit/dist/fontkit.umd.min.js app-v84/www/vendor/
           cp static/assets/contrato-larios-normalizado.pdf app-v84/www/assets/
           cp static/assets/damage-map.png app-v84/www/assets/
           cp static/assets/icon-192.png app-v84/www/assets/

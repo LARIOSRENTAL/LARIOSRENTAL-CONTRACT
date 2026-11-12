@@ -11,7 +11,7 @@
     "android:open": "npx cap open android",
     "ios:add": "npm run native:prepare && node scripts/create-ios.mjs",
     "ios:open": "npx cap open ios",
-    "native:prepare": "node scripts/prepare-terminal.mjs && esbuild native/tap-to-pay.js --bundle --format=iife --target=es2020 --outfile=www/native-terminal.js",
+    "native:prepare": "node scripts/prepare-terminal.mjs && esbuild native/tap-to-pay.js --bundle --format=iife --target=es2020 --outfile=www/native-terminal.js && mkdir -p www/vendor && cp node_modules/@pdf-lib/fontkit/dist/fontkit.umd.min.js www/vendor/fontkit.umd.min.js",
     "ios:prepare": "python3 scripts/prepare-ios.py && npx cap sync ios"
   },
   "dependencies": {
@@ -23,6 +23,8 @@
     "@capacitor/core": "8.0.0",
     "@capacitor/device": "8.0.0",
     "@capacitor/ios": "8.0.0",
+    "@fontsource/noto-sans": "^5.2.6",
+    "@pdf-lib/fontkit": "^1.1.1",
     "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
