@@ -2,44 +2,32 @@
 'use strict';
 const bridge=window.LariosAndroidKiosk;
 if(!bridge)return;
-let card=null,holdTimer=null;
-function status(){
-  let enabled=false,owner=false;
-  try{enabled=!!bridge.isEnabled();owner=!!bridge.isDeviceOwner()}catch(_){}
-  return{enabled,owner};
-}
-function render(){
-  if(!card)return;
-  const state=status(),title=card.querySelector('b'),note=card.querySelector('span'),button=card.querySelector('button');
-  if(state.enabled){
-    title.textContent=state.owner?'Modo kiosco definitivo activo':'Modo kiosco fijado activo';
-    note.textContent=state.owner?'La tablet está bloqueada para uso exclusivo de Larios Rental.':'Android mantendrá Larios Rental fijada. Confirma “Fijar aplicación” si aparece el aviso del sistema.';
-    button.hidden=true;
-    card.classList.add('active');
-  }else{
-    title.textContent='Modo kiosco de la tablet';
-    note.textContent='Pulsa para fijar Larios Rental y evitar salir accidentalmente a otras aplicaciones.';
-    button.hidden=false;
-    card.classList.remove('active');
-  }
+const $=id=>document.getElementById(id);
+function currentEmail(){return window.LariosAccess?.current?.().email||''}
+function jwtRole(token){try{const part=String(token||'').split('.')[1];const normalized=part.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(part.length/4)*4,'=');return JSON.parse(atob(normalized))?.app_metadata?.role||''}catch(_){return''}}
+async function exitKiosk(){
+ if(window.LariosAccess?.isAdmin?.()!==true){alert('Solo una cuenta administradora puede salir del modo kiosco.');return}
+ const password=prompt('Contraseña de administrador para salir del modo kiosco');
+ if(password===null||!password)return;
+ try{
+  const r=await fetch(cfg.supabaseUrl+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,'Content-Type':'application/json'},body:JSON.stringify({email:currentEmail(),password})});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok||!data.access_token||jwtRole(data.access_token)!=='admin')throw new Error('Contraseña incorrecta o cuenta sin permisos de administrador.');
+  bridge.disableToSettings();
+ }catch(e){alert(e.message||'No se pudo validar la cuenta administradora.')}
 }
 function install(){
-  // Kiosk startup is managed by Android natively. Do not display any banner,
-  // activation button, or Android screen-pinning instructions inside the app.
-  document.getElementById('lrAndroidKioskCard')?.remove();
-  const release=document.getElementById('lrReleaseVersion');
-  if(release&&release.dataset.lrKioskExitBound!=='1'){
-    release.dataset.lrKioskExitBound='1';
-    const start=()=>{clearTimeout(holdTimer);holdTimer=setTimeout(()=>{
-      const code=prompt('Clave para salir del modo kiosco');
-      if(code==='1')bridge.disableToSettings();
-    },5000)};
-    const cancel=()=>clearTimeout(holdTimer);
-    release.addEventListener('pointerdown',start);
-    release.addEventListener('pointerup',cancel);
-    release.addEventListener('pointercancel',cancel);
-    release.addEventListener('pointerleave',cancel);
-  }
+ document.getElementById('lrAndroidKioskCard')?.remove();
+ const head=document.querySelector('header.top');if(!head)return;
+ if(!document.getElementById('lrAndroidControls')){
+  const wrap=document.createElement('div');wrap.id='lrAndroidControls';
+  wrap.innerHTML='<button type="button" id="lrRestartApp">↻ Reiniciar</button><button type="button" id="lrExitKiosk">Salir del kiosco</button>';
+  head.appendChild(wrap);
+  const css=document.createElement('style');css.textContent='header.top{position:relative;padding-right:20px}#lrAndroidControls{position:absolute;right:16px;top:calc(14px + env(safe-area-inset-top));display:flex;gap:7px;z-index:5}#lrAndroidControls button{border:1px solid #64748b;border-radius:9px;padding:9px 11px;background:#243247;color:white;font-size:13px;font-weight:700}#lrAndroidControls button:active{opacity:.75}@media(max-width:600px){#lrAndroidControls{top:calc(12px + env(safe-area-inset-top));right:10px;flex-direction:column}#lrAndroidControls button{padding:7px 9px;font-size:11px}header.top h1{padding-right:115px}}';document.head.appendChild(css);
+  $('lrRestartApp').onclick=()=>bridge.restart();
+  $('lrExitKiosk').onclick=exitKiosk;
+ }
+ try{bridge.enable()}catch(_){}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
 setTimeout(install,500);

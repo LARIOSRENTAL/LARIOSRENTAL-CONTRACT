@@ -75,6 +75,11 @@ public class MainActivity extends BridgeActivity {
     }
 
     @JavascriptInterface
+    public void restart() {
+      runOnUiThread(() -> recreate());
+    }
+
+    @JavascriptInterface
     public void disableToSettings() {
       runOnUiThread(() -> {
         LariosKioskController.exit(MainActivity.this);
