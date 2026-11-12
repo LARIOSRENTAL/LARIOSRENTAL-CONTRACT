@@ -196,7 +196,7 @@ function fill(x){
   if(customerNameField&&customerNameField.dataset.lrClearPlaceholderOnFocus!=='1'){
     customerNameField.dataset.lrClearPlaceholderOnFocus='1';
     customerNameField.addEventListener('focus',()=>{
-      if(/^pendiente(?:\\s+larios\\s+rental)?$/i.test(String(customerNameField.value||'').trim())){
+      if(/^pendiente(?: +larios +rental)?$/i.test(String(customerNameField.value||'').trim())){
         customerNameField.value='';
         customerNameField.dispatchEvent(new Event('input',{bubbles:true}));
       }
