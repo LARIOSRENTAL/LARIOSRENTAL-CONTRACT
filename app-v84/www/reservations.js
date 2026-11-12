@@ -183,6 +183,13 @@ function bindEditableMaskedCard(el){
  });
 }
 function fill(x){
+  if(!x)return;
+  const isPlaceholderName=v=>/^pendiente(?:\\s+larios\\s+rental)?$/i.test(String(v||'').trim());
+  const storedName=String(x.customer_name||'').trim();
+  const payloadName=String(x.app_payload?.customer_name||'').trim();
+  const resolvedName=isPlaceholderName(storedName)?(isPlaceholderName(payloadName)?'':payloadName):(storedName|| (isPlaceholderName(payloadName)?'':payloadName));
+  x={...x,customer_name:resolvedName};
+  if(x.app_payload&&isPlaceholderName(payloadName))x.app_payload={...x.app_payload,customer_name:resolvedName};
   setEditingId(x.id);
   window.LariosCurrentContract=x;
   window.LariosWebBooking?.open(x);
