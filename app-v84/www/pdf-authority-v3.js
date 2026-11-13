@@ -12,14 +12,22 @@ const defs=[
  ['additional_driver','Conductor adicional',5,null],['child_seat','Sillita',6,40],['carplay','CarPlay',6,40],['gps','GPS',6,40],['booster','Elevador',5,25],['gloves','Guantes',5,25],['bike_seat','Sillita bici',5,25],['phone_holder','Soporte móvil',5,25]
 ];
 function days(){return Math.max(1,Math.floor(num('rental_days')||1))}
-function toIso(v){const s=String(v||'').trim();let m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2})$/);if(m){const y=+m[3]<=40?2000+(+m[3]):1900+(+m[3]);return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`}m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);return m?`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`:s}
+function toIso(v,id=''){const shared=window.LariosDateValidationV2?.iso?.(String(v||'').trim(),id);if(shared)return shared;const s=String(v||'').trim();let m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);if(!m)return s;let y=Number(m[3]);if(m[3].length===2){const current=new Date().getFullYear()%100;y=y<=current?2000+y:1900+y}return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`}
 function validIsoDate(v){const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)return false;const y=Number(m[1]),mo=Number(m[2]),d=Number(m[3]),date=new Date(Date.UTC(y,mo-1,d));return date.getUTCFullYear()===y&&date.getUTCMonth()===mo-1&&date.getUTCDate()===d}
 function validateTypedDates(){
  const fields=[['customer_birth_date','fecha de nacimiento del cliente'],['license_issue','fecha de expedición del permiso'],['license_expiry','fecha de caducidad del permiso'],['additional_birth_date','fecha de nacimiento del conductor adicional'],['additional_license_issue','fecha de expedición del conductor adicional'],['additional_license_expiry','fecha de caducidad del conductor adicional']];
- for(const [id,label] of fields){const raw=val(id);if(!raw)continue;const iso=toIso(raw);if(!validIsoDate(iso)){const el=$(id);if(el){el.focus();el.style.borderColor='#dc2626'}alert('Revisa la '+label+'. Debe estar completa en formato dd/mm/aaaa.');return false}if($(id))$(id).value=iso.split('-').reverse().join('/')}
+ for(const [id,label] of fields){const raw=val(id);if(!raw)continue;const iso=toIso(raw,id);if(!validIsoDate(iso)){const el=$(id);if(el){el.focus();el.style.borderColor='#dc2626'}alert('Revisa la '+label+'. Debe estar completa en formato dd/mm/aaaa.');return false}if($(id))$(id).value=iso.split('-').reverse().join('/')}
  return true
 }
-function markRequired(id){const el=$(id);if(el){el.focus();el.style.borderColor='#dc2626'}return el}
+function markRequired(id){
+ const el=$(id);if(!el)return null;
+ el.classList.add('lrRequiredError');el.dataset.lrRequiredError='1';el.setAttribute('aria-invalid','true');
+ const wrap=el.closest('.lrConsentLine')||el.closest('label');if(wrap)wrap.classList.add('lrRequiredError');
+ let style=$('lrRequiredFieldStyle');if(!style){style=document.createElement('style');style.id='lrRequiredFieldStyle';style.textContent='.lrRequiredError{outline:2px solid #dc2626!important;outline-offset:2px!important;background:#fef2f2!important;border-radius:8px}.lrConsentLine.lrRequiredError{padding:8px!important;color:#991b1b!important}';document.head.appendChild(style)}
+ el.scrollIntoView?.({behavior:'auto',block:'center'});setTimeout(()=>el.focus?.({preventScroll:true}),50);
+ return el
+}
+if(!document.documentElement.dataset.lrRequiredClear){document.documentElement.dataset.lrRequiredClear='1';['input','change'].forEach(type=>document.addEventListener(type,event=>{const el=event.target;if(!el?.dataset?.lrRequiredError)return;el.classList.remove('lrRequiredError');delete el.dataset.lrRequiredError;el.removeAttribute('aria-invalid');const wrap=el.closest('.lrConsentLine')||el.closest('label');wrap?.classList.remove('lrRequiredError')},true))}
 function captureSignature(){
  const canvas=$('signatureCanvas');
  if(!canvas||!canvas.width||!canvas.height)return null;

@@ -79,7 +79,7 @@ function onDateInput(e){
   const digits=rawDigits.slice(0,8);
   el.value=partialFormat(digits);
   if(digits.length===8){normalizeField(el);return}
-  if(digits.length===6){const normalized=iso(digits,el.id);if(normalized&&valid(normalized,el.id)){el.value=fromIso(normalized);clearError(el)}return}
+  // Keep a two-digit year editable while typing. Expand it on blur or when the full date is pasted.
   if(valid(el.value,el.id))clearError(el);
 }
 function configureField(el){
