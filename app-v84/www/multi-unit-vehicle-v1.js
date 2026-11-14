@@ -27,13 +27,21 @@ function parseUnits(raw){
 function modelText(c){return c.bicycle&&c.ebike?'BICICLETA · E-BIKE':c.ebike?'E-BIKE':c.bicycle?'BICICLETA':''}
 function recordUnits(record){
  const x=record||window.LariosCurrentContract||{};
+ const rawGroup=String(x.vehicle_group||x.category||$('vehicle_group')?.value||'').trim().toUpperCase().replace(/^GRUPO\s+/,'').replace(/[_ ]/g,'-');
+ const g=({M1:'50CC',M2:'125CC',B1:'BICICLETA',B2:'E-BIKE','50':'50CC','125':'125CC'})[rawGroup]||rawGroup;
+ // La categoría reservada manda: el modelo enlazado puede pertenecer por error a otra clase.
+ if(g&&!['BICICLETA','E-BIKE'].includes(g))return null;
+ const model=String(x.vehicle_model||'').toUpperCase();
+ const q=Math.max(1,asCount(x.vehicle_quantity)||asCount($('vehicle_quantity')?.value)||1);
  const saved=parseUnits(x.vehicle_units||x.app_payload?.vehicle_units||x.app_payload?.bike_units);
  if(saved)return saved;
- const model=String(x.vehicle_model||'').toUpperCase(),g=String(x.vehicle_group||'').toUpperCase().replace(/^GRUPO\s+/,'');
- const q=Math.max(1,asCount(x.vehicle_quantity)||asCount($('vehicle_quantity')?.value)||1);
- if(/BICICLETA/.test(model)&&/E[\s-]?BIKE/.test(model))return{bicycle:1,ebike:Math.max(1,q-1)};
- if(g==='E-BIKE'||/E[\s-]?BIKE/.test(model))return{bicycle:0,ebike:q};
- if(g==='BICICLETA'||/BICICLETA|BICI/.test(model))return{bicycle:q,ebike:0};
+ const mixed=/BICICLETA|BICI/.test(model)&&/E[\s-]?BIKE/.test(model);
+ if(['BICICLETA','E-BIKE'].includes(g)&&mixed)return{bicycle:1,ebike:Math.max(1,q-1)};
+ if(g==='E-BIKE')return{bicycle:0,ebike:q};
+ if(g==='BICICLETA')return{bicycle:q,ebike:0};
+ if(mixed)return{bicycle:1,ebike:Math.max(1,q-1)};
+ if(/E[\s-]?BIKE/.test(model))return{bicycle:0,ebike:q};
+ if(/BICICLETA|BICI/.test(model))return{bicycle:q,ebike:0};
  return null;
 }
 function countsFromInputs(){
