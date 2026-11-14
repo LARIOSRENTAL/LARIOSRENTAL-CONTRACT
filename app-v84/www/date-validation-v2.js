@@ -90,7 +90,6 @@ function configureField(el){
   try{el.type='text'}catch(_){ }
   el.inputMode='numeric';el.setAttribute('inputmode','numeric');el.setAttribute('autocomplete','off');el.setAttribute('maxlength','10');el.placeholder='dd/mm/aaaa';
   if(current){el.value=current;normalizeField(el)}
-  el.addEventListener('input',onDateInput,{capture:true});
   el.addEventListener('blur',()=>normalizeField(el));
   el.addEventListener('change',()=>normalizeField(el));
   el.addEventListener('paste',()=>setTimeout(()=>normalizeField(el),0));
@@ -105,7 +104,8 @@ function patchValidation(){
 }
 function install(){configureAll();normalizeAll();patchValidation();const form=$('reservationForm');if(form&&!form.dataset.dateV2){form.dataset.dateV2='1';form.addEventListener('submit',normalizeAll,true)}console.log('Date validation V2 scanner-safe 6/8 digit installed')}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
-new MutationObserver(()=>configureAll()).observe(document.documentElement,{subtree:true,childList:true});
-let n=0,t=setInterval(()=>{configureAll();patchValidation();if(++n>80)clearInterval(t)},100);
+document.addEventListener('larios:reservation-opened',configureAll);
+const reservationRoot=$('reservationForm')||$('reservation');
+if(reservationRoot)new MutationObserver(()=>configureAll()).observe(reservationRoot,{subtree:true,childList:true});
 window.LariosDateValidationV2={iso,valid,display,normalizeAll,configureAll,expandYear,partialFormat};
 })();
