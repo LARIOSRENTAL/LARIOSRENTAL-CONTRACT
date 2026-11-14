@@ -45,6 +45,7 @@ function patchForm(){patchDates();patchFuel();patchExtras();patchDamage();patchS
  if(['BICICLETA','E-BIKE','B1','B2'].includes(group)){
   const birth=$('customer_birth_date');
   if(birth){window.LariosValidation?.clearError?.(birth);birth.classList.remove('field-error');birth.removeAttribute('aria-invalid');birth.style.borderColor='';birth.style.background=''}
+  renderAgeRule('none',0);
   return true;
  }
  const birth=$('customer_birth_date'),raw=val('customer_birth_date'),age=customerAge();
