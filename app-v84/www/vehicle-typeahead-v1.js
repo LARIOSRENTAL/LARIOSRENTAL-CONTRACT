@@ -10,22 +10,25 @@ const search=(rows,query,limit=12)=>{
     .sort((a,b)=>String(a.registration||'').localeCompare(String(b.registration||''),'es',{numeric:true,sensitivity:'base'}))
     .slice(0,limit);
 };
-let fleetPromise=null,fleet=[],observer=null;
+let fleetPromise=null,fleet=[],observer=null,lastFleetAttempt=0;
 const bound=new WeakSet();
 function styles(){
   if(document.getElementById('lrPlateTypeaheadStyle'))return;
   const style=document.createElement('style');style.id='lrPlateTypeaheadStyle';
   style.textContent='.lrPlateTypeaheadWrap{position:relative;width:100%}.lrPlateSuggestions{position:absolute;left:0;right:0;top:calc(100% - 1px);z-index:10050;max-height:min(300px,45vh);overflow:auto;background:#fff;border:1px solid #94a3b8;border-radius:0 0 10px 10px;box-shadow:0 12px 28px rgba(15,23,42,.18)}.lrPlateSuggestions[hidden]{display:none}.lrPlateSuggestion{display:flex;width:100%;justify-content:space-between;align-items:center;gap:12px;padding:11px 12px;border:0;border-bottom:1px solid #e5e7eb;background:#fff;text-align:left;font:inherit;color:#111827;cursor:pointer}.lrPlateSuggestion:last-child{border-bottom:0}.lrPlateSuggestion:hover,.lrPlateSuggestion[aria-selected="true"]{background:#eff6ff}.lrPlateSuggestion strong{font-size:15px;letter-spacing:.02em}.lrPlateSuggestion span{font-size:12px;color:#64748b;text-align:right}.lrPlateEmpty{padding:12px;color:#64748b;font-size:13px}';document.head.appendChild(style);
 }
-async function loadFleet(){
-  if(fleetPromise)return fleetPromise;
+async function loadFleet(force=false){
+  if(fleet.length)return fleet;
+  if(fleetPromise&&(!force||Date.now()-lastFleetAttempt<2000))return fleetPromise;
+  if(force&&Date.now()-lastFleetAttempt<2000&&fleetPromise)return fleetPromise;
+  lastFleetAttempt=Date.now();
   fleetPromise=(async()=>{
     const core=window.LariosVehicleCore;
-    let rows=core&&typeof core.load==='function'?await core.load():[];
-    if(!rows?.length&&typeof core?.refresh==='function')rows=await core.refresh();
+    let rows=force&&typeof core?.refresh==='function'?await core.refresh():core&&typeof core.load==='function'?await core.load():[];
+    if(!rows?.length&&typeof core?.refresh==='function'&&!force)rows=await core.refresh();
     fleet=Array.isArray(rows)?rows:[];
     return fleet;
-  })().catch(error=>{console.warn('No se pudo cargar la flota para el desplegable',error);fleet=[];return fleet;});
+  })().catch(error=>{console.warn('No se pudo cargar la flota para el desplegable',error);fleet=[];fleetPromise=null;return fleet;});
   return fleetPromise;
 }
 function close(wrap){const box=wrap?.querySelector('.lrPlateSuggestions');if(box){box.hidden=true;box.innerHTML=''}const input=wrap?.querySelector('#vehicle_plate');if(input)input.setAttribute('aria-expanded','false');if(wrap)wrap.__lrActive=-1}
@@ -69,7 +72,7 @@ function bind(input){
   if(!box){box=document.createElement('div');box.className='lrPlateSuggestions';box.id='lrPlateSuggestions';box.setAttribute('role','listbox');box.hidden=true;wrap.appendChild(box)}
   bound.add(input);
   input.dataset.lrPlateTypeahead='1';input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',box.id);input.setAttribute('aria-expanded','false');input.autocomplete='off';
-  input.addEventListener('focus',()=>{void loadFleet().then(()=>{if(input.isConnected&&input.value.trim())draw(wrap,input.value)})});
+  input.addEventListener('focus',()=>{void loadFleet(!fleet.length).then(()=>{if(input.isConnected&&input.value.trim())draw(wrap,input.value)})});
   input.addEventListener('input',()=>{if(wrap.__lrChoosing)return;delete input.dataset.lrSelectedRegistration;void loadFleet().then(()=>draw(wrap,input.value))});
   input.addEventListener('keydown',event=>{
     if(event.key==='ArrowDown'&&moveActive(wrap,1)){event.preventDefault();return}
