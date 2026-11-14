@@ -10,7 +10,7 @@ declare
 begin
   if new.status in ('confirmed','active','rented')
      and old.status is distinct from new.status
-     and upper(trim(coalesce(new.category, ''))) not in ('BICICLETA', 'E-BIKE', 'EBIKE', 'B1', 'B2') then
+     and upper(trim(coalesce(new.category, ''))) not in ('BICICLETA', 'E-BIKE', 'EBIKE') then
     select coalesce(d.birth_date, c.birth_date) into dob
     from public.customers c
     left join public.drivers d on d.id = new.main_driver_id
