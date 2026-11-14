@@ -10,7 +10,7 @@ const search=(rows,query,limit=12)=>{
     .sort((a,b)=>String(a.registration||'').localeCompare(String(b.registration||''),'es',{numeric:true,sensitivity:'base'}))
     .slice(0,limit);
 };
-let fleetPromise=null,fleet=[],observer=null,lastFleetAttempt=0;
+let fleetPromise=null,fleet=[],observer=null,lastFleetAttempt=0,fleetLoading=false;
 const bound=new WeakSet();
 function styles(){
   if(document.getElementById('lrPlateTypeaheadStyle'))return;
@@ -19,16 +19,18 @@ function styles(){
 }
 async function loadFleet(force=false){
   if(fleet.length)return fleet;
-  if(fleetPromise&&(!force||Date.now()-lastFleetAttempt<2000))return fleetPromise;
-  if(force&&Date.now()-lastFleetAttempt<2000&&fleetPromise)return fleetPromise;
+  if(fleetPromise&&fleetLoading)return fleetPromise;
+  if(fleetPromise&&!force)return fleetPromise;
+  if(force&&Date.now()-lastFleetAttempt<750&&fleetPromise)return fleetPromise;
   lastFleetAttempt=Date.now();
+  fleetLoading=true;
   fleetPromise=(async()=>{
     const core=window.LariosVehicleCore;
     let rows=force&&typeof core?.refresh==='function'?await core.refresh():core&&typeof core.load==='function'?await core.load():[];
     if(!rows?.length&&typeof core?.refresh==='function'&&!force)rows=await core.refresh();
     fleet=Array.isArray(rows)?rows:[];
     return fleet;
-  })().catch(error=>{console.warn('No se pudo cargar la flota para el desplegable',error);fleet=[];fleetPromise=null;return fleet;});
+  })().catch(error=>{console.warn('No se pudo cargar la flota para el desplegable',error);fleet=[];fleetPromise=null;return fleet;}).finally(()=>{fleetLoading=false});
   return fleetPromise;
 }
 function close(wrap){const box=wrap?.querySelector('.lrPlateSuggestions');if(box){box.hidden=true;box.innerHTML=''}const input=wrap?.querySelector('#vehicle_plate');if(input)input.setAttribute('aria-expanded','false');if(wrap)wrap.__lrActive=-1}
@@ -73,7 +75,7 @@ function bind(input){
   bound.add(input);
   input.dataset.lrPlateTypeahead='1';input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',box.id);input.setAttribute('aria-expanded','false');input.autocomplete='off';
   input.addEventListener('focus',()=>{void loadFleet(!fleet.length).then(()=>{if(input.isConnected&&input.value.trim())draw(wrap,input.value)})});
-  input.addEventListener('input',()=>{if(wrap.__lrChoosing)return;delete input.dataset.lrSelectedRegistration;void loadFleet().then(()=>draw(wrap,input.value))});
+  input.addEventListener('input',()=>{if(wrap.__lrChoosing)return;delete input.dataset.lrSelectedRegistration;void loadFleet(!fleet.length).then(()=>draw(wrap,input.value))});
   input.addEventListener('keydown',event=>{
     if(event.key==='ArrowDown'&&moveActive(wrap,1)){event.preventDefault();return}
     if(event.key==='ArrowUp'&&moveActive(wrap,-1)){event.preventDefault();return}
@@ -93,5 +95,6 @@ function boot(){
   const form=$('reservation');if(form)new MutationObserver(()=>install(form)).observe(form,{subtree:true,childList:true});
 }
 window.LariosVehicleTypeahead={install,load:loadFleet,__test:{norm,search}};
+window.addEventListener('larios:access-ready',()=>{if(!fleet.length)void loadFleet(true)});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
