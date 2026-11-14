@@ -46,8 +46,8 @@ begin
   -- Explicit office or street address takes precedence over collaborator.
   if v_raw_norm ~ '(^|[^A-Z])OFI(CINA)?([^A-Z]|$)' then
     v_loc := 'OFICINA';
-    v_match := regexp_match(coalesce(p_raw,''),'(^|[^[:alpha:]])(calle|c/|avenida|avda?\.?|plaza|paseo)[[:space:]]+([[:alpha:]ÁÉÍÓÚÜÑáéíóúüñ]+([[:space:]-]+[[:alpha:]ÁÉÍÓÚÜÑáéíóúüñ]+){0,3})');
-    if v_match is not null then v_loc := upper(v_match[3]||' '||v_match[4]); end if;
+    v_match := regexp_match(coalesce(p_raw,''),'(^|[^[:alpha:]])((calle|c/|avenida|avda?\\.?|plaza|paseo)[[:space:]]+[[:alpha:]ÁÉÍÓÚÜÑáéíóúüñ]+([[:space:]-]+[[:alpha:]ÁÉÍÓÚÜÑáéíóúüñ]+){0,3})');
+    if v_match is not null then v_loc := upper(trim(v_match[2])); end if;
   end if;
 
   -- A hotel room number is a reference, not part of the physical place.
