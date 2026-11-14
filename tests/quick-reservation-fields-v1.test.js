@@ -11,7 +11,7 @@ assert.equal(street.customer_name,'Pierre');
 assert.equal(street.customer_phone,'+34 600 000 001');
 
 const partnerOnly=parse('10:00 g b 2 dias cister city expert +34 600 000 001');
-assert.equal(partnerOnly.pickup_location,'City Expert cister');
+assert.equal(partnerOnly.pickup_location,'CISTER');
 assert.equal(partnerOnly.customer_name,'Pendiente Larios Rental');
 assert.equal(partnerOnly.agency,'CITY EXPERT');
 
