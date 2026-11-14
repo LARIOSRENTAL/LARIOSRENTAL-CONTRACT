@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261113-age-date-validation-21';
+const CACHE = 'larios-rental-pro-20261114-agenda-performance-22';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
