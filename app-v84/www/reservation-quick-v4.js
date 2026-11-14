@@ -57,7 +57,7 @@ function parseQuick(raw){
  }
  if(isNow){p.pickup_date=madridDate();p.pickup_time=madridTime();p.return_date=addDays(p.pickup_date,Math.max(1,Number(p.rental_days)||1));p.return_time=p.pickup_time}
  p.whatsapp_message=raw;
- return p;
+  return window.LariosQuickFields?.clean?.(raw,p)||p;
 }
 async function savePayload(p){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_save_contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_payload:p})});if(!r.ok)throw Error(await r.text());return r.json()}
 function split(raw,p){const s=scooterInfo(raw);if(!s||s.quantity<=1)return[p];const total=Number(String(p.total||0).replace(',','.'))||0,rental=Number(String(p.rental_price||0).replace(',','.'))||0;return Array.from({length:s.quantity},()=>({...p,vehicle_group:s.group,vehicle_quantity:'1',total:total>0?(total/s.quantity).toFixed(2):p.total,rental_price:rental>0?(rental/s.quantity).toFixed(2):p.rental_price}))}
