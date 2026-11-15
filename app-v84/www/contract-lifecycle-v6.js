@@ -16,6 +16,7 @@ async function sessionFetch(url,options={},retry=true){const r=await fetch(url,o
 async function rpc(name,body={}){const r=await sessionFetch(cfg.supabaseUrl+'/rest/v1/rpc/'+name,{method:'POST',headers:headers(),body:JSON.stringify(body)});if(!r.ok)throw new Error(readableError(await r.text()));return r.json()}
 async function rest(path,options={}){const r=await sessionFetch(cfg.supabaseUrl+'/rest/v1/'+path,{...options,headers:{...headers(),...(options.headers||{})}});if(!r.ok)throw new Error(readableError(await r.text()));return r.status===204?null:r.json()}
 async function refreshData(){const [rows,rates]=await Promise.all([rpc('app_list_contracts'),rest('pricing?select=*&active=eq.true&order=category')]);contracts=Array.isArray(rows)?rows:[];pricing=Array.isArray(rates)?rates:[];return contracts}
+async function refreshAgendaData(){const snapshot=window.LariosReservations?.getAgendaSnapshot?.();if(snapshot)contracts=[...(snapshot.deliveries||[]),...(snapshot.returns||[])];if(!pricing)pricing=await rest('pricing?select=*&active=eq.true&order=category');return contracts}
 function contract(id){return contracts.find(x=>x.id===id)}
 function categoryKey(group){const g=String(group||'').toUpperCase().replace(/^GRUPO\s+/,'');if(g==='50CC')return'50cc';if(g==='125CC')return'125cc';return['BICICLETA','E-BIKE'].includes(g)?g:(g?'Grupo '+g:'')}
 function priceRow(group){return pricing.find(x=>String(x.category).toUpperCase()===categoryKey(group).toUpperCase())}
@@ -103,13 +104,12 @@ function decorateAgenda(){
       if(isReturn)card.querySelectorAll('button').forEach(el=>el.remove());
     }
     if(isReturn&&number(x.deposit)>0&&x.deposit_method!=='preauthorization'&&!card.querySelector('.lrDepositBadge')){const badge=document.createElement('div');badge.className='lrDepositBadge';badge.textContent=x.deposit_return_confirmed_at?'DEPÓSITO DEVUELTO · '+money(x.deposit)+' €':'⚠ DEPÓSITO PENDIENTE DE DEVOLUCIÓN · '+money(x.deposit)+' €';card.insertBefore(badge,card.querySelector('button'))}
-    if(isReturn&&number(x.pending_payment_amount)>0){const badge=document.createElement('div');badge.className='lrPendingBadge';badge.textContent='PENDIENTE DE PAGO · '+money(x.pending_payment_amount)+' €';card.insertBefore(badge,card.querySelector('button'))}
-    if(x.payment_status==='paid'){const badge=document.createElement('div');badge.className='lrStripePaidBadge';badge.textContent='PAGADO CON STRIPE · '+money(number(x.stripe_amount_cents)/100)+' €';card.insertBefore(badge,card.querySelector('button'))}
-    else if(x.payment_status==='pending'){const badge=document.createElement('div');badge.className='lrStripePendingBadge';badge.textContent='PAGO STRIPE PENDIENTE · '+money(number(x.stripe_amount_cents)/100)+' €';card.insertBefore(badge,card.querySelector('button'))}
+    const pendingBadge=card.querySelector('.lrPendingBadge');if(isReturn&&number(x.pending_payment_amount)>0){const label='PENDIENTE DE PAGO · '+money(x.pending_payment_amount)+' €';if(pendingBadge){pendingBadge.textContent=label}else{const badge=document.createElement('div');badge.className='lrPendingBadge';badge.textContent=label;card.insertBefore(badge,card.querySelector('button'))}}else pendingBadge?.remove();
+    const paidBadge=card.querySelector('.lrStripePaidBadge'),stripePendingBadge=card.querySelector('.lrStripePendingBadge');if(x.payment_status==='paid'){stripePendingBadge?.remove();const label='PAGADO CON STRIPE · '+money(number(x.stripe_amount_cents)/100)+' €';if(paidBadge)paidBadge.textContent=label;else{const badge=document.createElement('div');badge.className='lrStripePaidBadge';badge.textContent=label;card.insertBefore(badge,card.querySelector('button'))}}else if(x.payment_status==='pending'){paidBadge?.remove();const label='PAGO STRIPE PENDIENTE · '+money(number(x.stripe_amount_cents)/100)+' €';if(stripePendingBadge)stripePendingBadge.textContent=label;else{const badge=document.createElement('div');badge.className='lrStripePendingBadge';badge.textContent=label;card.insertBefore(badge,card.querySelector('button'))}}else{paidBadge?.remove();stripePendingBadge?.remove()}
     if(isAdmin&&isReturn&&x.status!=='draft'&&x.status!=='returned'&&x.status!=='collected'&&!card.querySelector('.agendaLifecycleActions')){const actions=document.createElement('div');actions.className='agendaLifecycleActions';actions.innerHTML=`<button type="button" onclick="LariosLifecycle.extend('${x.id}')">Ampliar reserva</button><button type="button" onclick="LariosLifecycle.changeVehicle('${x.id}')">Cambio de vehículo</button>`;card.appendChild(actions)}
   })
 }
-async function refreshAgenda(){if(typeof changeAgendaDate==='function')await changeAgendaDate();setTimeout(decorateAgenda,120);void refreshData().catch(e=>console.warn('Actualización de contratos',e))}
+async function refreshAgenda(){if(typeof changeAgendaDate==='function')await changeAgendaDate();setTimeout(decorateAgenda,120);void refreshAgendaData().catch(e=>console.warn('Actualización de agenda',e))}
 const returningIds=new Set();
 async function markReturned(id,depositConfirmed,fuelCharge=null){
  if(returningIds.has(id))return;
@@ -200,7 +200,7 @@ function install(){
     if(agendaRefresh)return agendaRefresh;
     if(!force&&Date.now()-lastAgendaRefresh<1200){decorateAgenda();return}
     lastAgendaRefresh=Date.now();
-    agendaRefresh=refreshData()
+    agendaRefresh=refreshAgendaData()
       .then(()=>{decorateAgenda();window.dispatchEvent(new CustomEvent('larios:agenda-controls-ready'))})
       .catch(e=>console.warn('Agenda lifecycle',e))
       .finally(()=>{agendaRefresh=null});
