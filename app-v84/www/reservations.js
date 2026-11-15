@@ -350,8 +350,7 @@ function handleAgendaEditActivation(event){
   const button=event.target?.closest?.('.agendaReservationEdit');
   if(!button||button.disabled)return;
   const inline=button.getAttribute('onclick')||'';
-  const match=inline.match(/LariosReservations\\.edit\\('([^']+)'\\)/);
-  const id=match?.[1];if(!id)return;
+  const id=inline.split("LariosReservations.edit('")[1]?.split("')")[0];if(!id)return;
   const now=Date.now();
   // En iOS el mismo toque suele llegar como pointerup y después como click.
   if(event.type==='click'&&event.detail>0&&id===lastAgendaEditId&&now-lastAgendaEditAt<900){event.preventDefault();event.stopImmediatePropagation();return}
