@@ -39,5 +39,6 @@ window.addEventListener('larios:access-ready',schedule);
 window.addEventListener('focus',()=>setTimeout(unlockAdminForm,0));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(unlockAdminForm,0)});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',schedule,{once:true});else schedule();
-window.LariosInteractionFix={run:unlockAdminForm,version:'20260928-admin-unlock1'};
+function recoverPage(){clearStrayOverlays();document.documentElement.style.pointerEvents='';document.body.style.pointerEvents='';document.body.style.overflow='';document.documentElement.removeAttribute('inert');document.body.removeAttribute('inert');}
+window.LariosInteractionFix={run:unlockAdminForm,recoverPage,version:'20261115-agenda-recovery1'};
 })();
