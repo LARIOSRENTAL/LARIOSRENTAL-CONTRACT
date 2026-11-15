@@ -259,26 +259,69 @@ document.addEventListener('larios:client-tablet-completed',async function(){
     }
   }catch(e){console.warn('No se pudo refrescar el contrato tras la tablet',e)}
 });
+function reservationEditFeedback(message,sectionId){
+  const target=$(sectionId||'agenda');if(!target)return;
+  let box=$('lrReservationEditFeedback');
+  if(!box){box=document.createElement('div');box.id='lrReservationEditFeedback';box.className='notice';box.setAttribute('role','status')}
+  box.textContent=String(message||'No se pudo abrir la reserva.');
+  if(box.parentElement!==target)target.prepend(box);
+}
 async function edit(id){
-  if(!id)return;
-  if(editFlight&&editFlightId===id)return editFlight;
-  const seq=++editOpenSeq;editFlightId=id;setEditingId(id);
-  const cached=cache.find(v=>v.id===id)||null;
-  if(cached){fill(cached);openEditorAtTop(id)}
-  editFlight=(async()=>{
-    let record=null;
-    try{record=await rpc('app_contract_record',{p_contract_id:id})}catch(e){console.warn('No se pudo refrescar la reserva',e)}
-    if(seq!==editOpenSeq||window.LariosCurrentContractId!==id)return;
-    const chosen=record?.id?record:cached;
-    if(!chosen){setEditingId(null);alert('No se pudo abrir la reserva. Actualiza la agenda y vuelve a intentarlo.');return}
-    if(window.LariosAccess?.isEmployee?.()&&chosen.status!=='draft'){
-      setEditingId(null);
-      alert('Este contrato ya está generado. Solo los administradores pueden editarlo.');
+  const key=String(id||'').trim();if(!key)return;
+  if(editFlight&&String(editFlightId)===key)return editFlight;
+  const seq=++editOpenSeq;editFlightId=key;setEditingId(key);
+  $('lrReservationEditFeedback')?.remove();
+  const cached=cache.find(v=>String(v.id)===key)||null;
+  let opened=false;
+  if(cached&&window.LariosAccess?.isEmployee?.()&&cached.status!=='draft'){
+    setEditingId(null);
+    reservationEditFeedback('Este contrato ya está generado. Solo los administradores pueden editarlo.','agenda');
+    editFlightId='';
+    return;
+  }
+  if(cached){
+    try{
+      fill(cached);opened=true;emitReservationOpened(cached);openEditorAtTop(key);
+      try{window.LariosInteractionFix?.run?.()}catch(_){}
+    }catch(e){
+      console.error('No se pudo abrir la reserva desde la agenda',e);
+      setEditingId(null);$('reservation')?.classList.add('hidden');$('home')?.classList.remove('hidden');$('list')?.classList.add('hidden');
+      reservationEditFeedback('No se pudo abrir la reserva. La agenda sigue disponible; vuelve a intentarlo.', 'agenda');
+      editFlight=null;editFlightId='';
       return;
     }
-    upsertCache(chosen);fill(chosen);emitReservationOpened(chosen);openEditorAtTop(id);
+  }
+  const task=(async()=>{
+    try{
+      const record=await rpc('app_contract_record',{p_contract_id:key});
+      if(seq!==editOpenSeq||String(window.LariosCurrentContractId||'')!==key)return;
+      const chosen=record?.id?record:cached;
+      if(!chosen)throw new Error('No se encontró el registro. Actualiza la agenda y vuelve a intentarlo.');
+      if(window.LariosAccess?.isEmployee?.()&&chosen.status!=='draft'){
+        if(opened){$('reservation')?.classList.add('hidden');$('home')?.classList.remove('hidden')}
+        setEditingId(null);
+        reservationEditFeedback('Este contrato ya está generado. Solo los administradores pueden editarlo.','agenda');
+        return;
+      }
+      upsertCache(chosen);window.LariosCurrentContract=chosen;
+      // The agenda record already contains the editable fields. Rehydrate only
+      // when the database has a newer version, avoiding a second form rebuild.
+      const newer=!opened||!cached||String(chosen.updated_at||'')!==String(cached.updated_at||'');
+      if(newer){fill(chosen);emitReservationOpened(chosen);openEditorAtTop(key)}
+      try{window.LariosInteractionFix?.run?.()}catch(_){}
+    }catch(e){
+      if(seq!==editOpenSeq||String(window.LariosCurrentContractId||'')!==key)return;
+      console.warn('No se pudo refrescar la reserva al abrirla',e);
+      if(opened){
+        reservationEditFeedback('No se pudo actualizar desde el servidor. Se mantienen los datos de la agenda y el formulario sigue disponible.','reservation');
+      }else{
+        setEditingId(null);$('reservation')?.classList.add('hidden');$('home')?.classList.remove('hidden');$('list')?.classList.add('hidden');
+        reservationEditFeedback('No se pudo abrir la reserva. Actualiza la agenda y vuelve a intentarlo.','agenda');
+      }
+    }
   })().finally(()=>{if(seq===editOpenSeq){editFlight=null;editFlightId=''}});
-  return editFlight;
+  editFlight=task;
+  return task;
 }
 async function printContract(id){if(window.LariosContractDownload?.print)return LariosContractDownload.print(id);alert('El módulo de impresión todavía no está disponible. Vuelve a intentarlo en unos segundos.')}
 async function cancelReservation(id){if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden cancelar reservas.');let x=cache.find(v=>v.id===id)||null;if(!x){try{x=await rpc('app_contract_record',{p_contract_id:id})}catch(e){console.warn('No se pudo cargar la reserva para cancelar',e)}}if(!x?.id)return alert('No se encuentra la reserva. Actualiza la agenda.');const futureDraft=!!(x.renthub_id||x.renthub_contract_id)&&x.status==='draft'&&!x.pdf_path&&Date.parse(x.pickup_at||x.delivery_date||'')>Date.now();try{const r=await fetch(cfg.supabaseUrl+'/functions/v1/renthub-transfer',{method:'POST',headers:h(),body:JSON.stringify({action:'cancel',contract_id:id})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||d.error||'No se pudo cancelar la reserva');alert(d.renthub_cancelled?'Reserva cancelada en Larios Rental y en Renthub ('+d.external_reference+').':'Reserva cancelada en Larios Rental. La reserva de Renthub no se ha tocado porque no cumplía las condiciones de cancelación automática.');await loadAgenda(selectedAgendaDate())}catch(e){alert('No se ha cancelado la reserva. '+e.message)}}
