@@ -11,7 +11,8 @@ function extraKey(item){
  const raw=typeof item==='string'?item:(item?.key||item?.label||item?.name||'');
  const s=normText(raw).replace(/\s+/g,' ');
  if(/additional driver|conductor adicional|segundo conductor/.test(s))return 'additional_driver';
- if(/child seat|baby seat|sillita(?! bici)|silla nino|elevador|booster/.test(s))return 'child_seat';
+ if(/^(booster|elevador)$/.test(s))return 'booster';
+ if(/child seat|baby seat|sillita(?! bici)|silla nino/.test(s))return 'child_seat';
  if(/bike seat|sillita bici|silla bici/.test(s))return 'bike_seat';
  if(/phone holder|soporte movil/.test(s))return 'phone_holder';
  if(/carplay/.test(s))return 'carplay';
