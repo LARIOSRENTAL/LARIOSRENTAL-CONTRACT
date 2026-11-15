@@ -1,4 +1,4 @@
-const CACHE = 'larios-rental-pro-20261115-agenda-edit-recovery-1';
+const CACHE = 'larios-rental-pro-20261115-agenda-edit-recovery-2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './assets/icon-192.png', './assets/icon-512.png'];
 
 self.addEventListener('install', event => {
