@@ -345,6 +345,26 @@ async function collected(id){
  }catch(e){alert('No se pudo completar la recogida: '+e.message)}finally{editId=null}
 }
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+let lastAgendaEditId='',lastAgendaEditAt=0;
+function handleAgendaEditActivation(event){
+  const button=event.target?.closest?.('.agendaReservationEdit');
+  if(!button||button.disabled)return;
+  const inline=button.getAttribute('onclick')||'';
+  const match=inline.match(/LariosReservations\\.edit\\('([^']+)'\\)/);
+  const id=match?.[1];if(!id)return;
+  const now=Date.now();
+  // En iOS el mismo toque suele llegar como pointerup y después como click.
+  if(event.type==='click'&&event.detail>0&&id===lastAgendaEditId&&now-lastAgendaEditAt<900){event.preventDefault();event.stopImmediatePropagation();return}
+  if(event.type==='pointerup'){lastAgendaEditId=id;lastAgendaEditAt=now}
+  else if(event.detail===0||id!==lastAgendaEditId||now-lastAgendaEditAt>=900){lastAgendaEditId=id;lastAgendaEditAt=now}
+  event.preventDefault();event.stopImmediatePropagation();
+  edit(id).catch(error=>{console.error('No se pudo abrir la reserva',error);reservationEditFeedback('No se pudo abrir la reserva. Pulsa de nuevo «Editar reserva».','agenda')});
+}
+const agendaEditRoot=$('agenda');
+if(agendaEditRoot){
+  agendaEditRoot.addEventListener('pointerup',handleAgendaEditActivation,true);
+  agendaEditRoot.addEventListener('click',handleAgendaEditActivation,true);
+}
 return {openNew,closeQuick,example,createQuick,close,save,loadAgenda,edit,printContract,cancelReservation,collected,reservationDate,getAgendaSnapshot:agendaSnapshot,returnLocationNeedsAttention,__coreEdit:edit,__coreVersion:'20260918-stable1'};
 })();
 
