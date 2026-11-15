@@ -286,6 +286,7 @@ async function edit(id){
     }catch(e){
       console.error('No se pudo abrir la reserva desde la agenda',e);
       setEditingId(null);$('reservation')?.classList.add('hidden');$('home')?.classList.remove('hidden');$('list')?.classList.add('hidden');
+      try{window.LariosInteractionFix?.recoverPage?.()}catch(_){}
       reservationEditFeedback('No se pudo abrir la reserva. La agenda sigue disponible; vuelve a intentarlo.', 'agenda');
       editFlight=null;editFlightId='';
       return;
