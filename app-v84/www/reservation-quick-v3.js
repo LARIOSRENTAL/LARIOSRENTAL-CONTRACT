@@ -85,7 +85,7 @@ async function resolveCollaborator(raw,p){
   p.agency=match.name;
   let place=String(p.pickup_location||'');
   const aliasText=String(match.alias||'').trim();
-  if(aliasText)place=place.toLowerCase().split(aliasText.toLowerCase()).join(' ');
+  if(aliasText){const at=place.toLowerCase().indexOf(aliasText.toLowerCase());if(at>=0)place=place.slice(0,at)+' '+place.slice(at+aliasText.length)}
   place=place.replace(/city\s+expert/ig,' ').replace(/\s+/g,' ').trim();
   if(/\b(?:ofi|oficina)\b/i.test(raw)){p.pickup_location='OFICINA';p.return_location='OFICINA'}
   else if(place){p.pickup_location=place;p.return_location=place}
