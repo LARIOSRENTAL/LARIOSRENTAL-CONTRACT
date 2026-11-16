@@ -111,20 +111,22 @@ async function resumeContract(id){
 }
 async function markDone(id){
  if(window.LariosAccess?.isAdmin?.()!==true)return alert('Solo los administradores pueden marcar un contrato como ya realizado.');
+ const target=id||window.LariosCurrentContractId||'';
+ if(!target)return alert('No hay una reserva abierta.');
  const button=$('lrAlreadyDoneEditor');if(button?.disabled)return;const originalLabel=button?.textContent||'Contrato ya realizado';if(button){button.disabled=true;button.textContent='Guardando contrato…';button.setAttribute('aria-busy','true');}
  try{
-  const saved=await saveOpenReservation();
-  const fresh=await rpc('app_contract_record',{p_contract_id:saved.id});
-  const p={...(fresh||{}),id:saved.id,status:'confirmed',contract_already_done:true,contract_done_source:'manual_or_renthub',payment_status:'paid',pending_payment_amount:0,return_payment_status:'clear',return_payment_due:0,return_finance_alert:null};
-  if(['pickup_date','pickup_time','return_date','return_time'].some(key=>!p[key]))throw Error('Faltan fechas u horas: no se ha confirmado el contrato.');
+  // This action only flags the existing record. It must not validate or save
+  // the PDF form, whose customer and card fields are not required here.
+  const fresh=await rpc('app_contract_record',{p_contract_id:target});
+  if(!fresh?.id)throw Error('No se encontró la reserva.');
+  const p={...(fresh||{}),id:target,status:'confirmed',contract_already_done:true,contract_done_source:'manual_or_renthub',payment_status:'paid',pending_payment_amount:0,return_payment_status:'clear',return_payment_due:0,return_finance_alert:null};
   const confirmed=await rpc('app_save_contract',{p_payload:window.LariosWebBooking?.preservePayload(p)||p});
-  if(!confirmed?.id||confirmed.status!=='confirmed'||!confirmed.pickup_date||!confirmed.return_date)throw Error('No se confirmó correctamente el contrato o faltan fechas.');
+  if(!confirmed?.id||confirmed.status!=='confirmed')throw Error('No se pudo confirmar el contrato como ya realizado.');
   record=null;recordId='';sessionStorage.removeItem('lr_resume_contract');sessionStorage.removeItem('lr_force_resume_contract');
   $('lrAlreadyDoneEditor')?.remove();
-  // close() already restores the agenda and starts its refresh: never wait for a second refresh.
   window.LariosReservations?.close?.();
-  const activeDate=$('agendaDate')?.value||confirmed.pickup_date;
-  if($('agendaDate')&&!$('agendaDate').value)$('agendaDate').value=activeDate;
+  const activeDate=$('agendaDate')?.value||confirmed.pickup_date||'';
+  if($('agendaDate')&&!$('agendaDate').value&&activeDate)$('agendaDate').value=activeDate;
   decorateAgenda();
  }catch(e){alert('No se pudo marcar el contrato como realizado: '+e.message)}
  finally{if(button?.isConnected){button.disabled=false;button.textContent=originalLabel;button.removeAttribute('aria-busy')}}
