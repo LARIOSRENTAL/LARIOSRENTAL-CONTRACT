@@ -63,6 +63,33 @@ function parseQuick(raw){
  if(p.vehicle_group)pendingServiceContext=null;
  return p
 }
+let collaboratorLookup=null;
+async function resolveCollaborator(raw,p){
+ try{
+  if(!collaboratorLookup){
+   collaboratorLookup=(async()=>{
+    const headers={apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token};
+    const [ar,cr]=await Promise.all([
+     fetch(cfg.supabaseUrl+'/rest/v1/collaborator_aliases?select=alias,normalized_alias,collaborator_id',{headers}),
+     fetch(cfg.supabaseUrl+'/rest/v1/collaborators?select=id,name,active&active=eq.true',{headers})
+    ]);
+    if(!ar.ok||!cr.ok)throw Error('No se pudieron leer los colaboradores activos');
+    const [aliases,collabs]=await Promise.all([ar.json(),cr.json()]);
+    const names=new Map(collabs.map(c=>[String(c.id),c.name]));
+    return aliases.map(a=>({alias:a.alias,normalized:a.normalized_alias||norm(a.alias),name:names.get(String(a.collaborator_id))})).filter(a=>a.name&&a.normalized).sort((a,b)=>b.normalized.length-a.normalized.length)
+   })()
+  }
+  const aliases=await collaboratorLookup,t=' '+norm(raw)+' ';
+  const match=aliases.find(a=>t.includes(' '+a.normalized+' '))||aliases.find(a=>t.includes(a.normalized));
+  if(!match)return p.agency||collaborator(raw)||'';
+  p.agency=match.name;
+  const escape=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\async function savePayload(p){');
+  const place=String(p.pickup_location||'').replace(new RegExp('\\b'+escape(match.alias)+'\\b','ig'),' ').replace(/\\bcity\\s+expert\\b/ig,' ').replace(/\\s+/g,' ').replace(/^[\\s,;:+-]+|[\\s,;:+-]+$/g,'');
+  if(/\\b(?:ofi|oficina)\\b/i.test(raw)){p.pickup_location='OFICINA';p.return_location='OFICINA'}
+  else if(place){p.pickup_location=place;p.return_location=place}
+  return p.agency
+ }catch(e){return p.agency||collaborator(raw)||''}
+}
 async function savePayload(p){const r=await fetch(cfg.supabaseUrl+'/rest/v1/rpc/app_save_contract',{method:'POST',headers:{apikey:cfg.supabasePublishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_payload:p})});if(!r.ok)throw Error(await r.text());return r.json()}
 function splitScooterReservations(raw,p){
  const gi=groupInfo(raw),g=String(p.vehicle_group||gi.group||'').toUpperCase().replace(/\s+/g,'');
@@ -70,7 +97,7 @@ function splitScooterReservations(raw,p){
  const count=Math.max(1,gi.quantity),total=Number(String(p.total||'0').replace(',','.'))||0,rental=Number(String(p.rental_price||'0').replace(',','.'))||0;
  return Array.from({length:count},()=>({...p,vehicle_quantity:'1',total:total>0?(total/count).toFixed(2):p.total,rental_price:rental>0?(rental/count).toFixed(2):p.rental_price}));
 }
-async function createQuick(){if(window.LariosAccess?.isEmployee?.())return alert('Solo los administradores pueden crear reservas manualmente.');const btn=document.querySelector('.qrCreate'),err=$('quickError');if(err)err.textContent='';try{const raw=$('quickMessage')?.value||'',p=parseQuick(raw),payloads=splitScooterReservations(raw,p);if(btn){btn.disabled=true;btn.textContent=payloads.length>1?'Creando '+payloads.length+' reservas…':'Creando…'}for(const item of payloads)await savePayload(item);window.LariosReservations?.closeQuick?.();if($('agendaDate'))$('agendaDate').value=p.pickup_date;await window.LariosReservations?.loadAgenda?.(p.pickup_date);if(typeof window.changeAgendaDate==='function')window.changeAgendaDate()}catch(e){if(err)err.textContent=e.message||String(e)}finally{if(btn){btn.disabled=false;btn.textContent='✧ Crear reserva'}}}
+async function createQuick(){if(window.LariosAccess?.isEmployee?.())return alert('Solo los administradores pueden crear reservas manualmente.');const btn=document.querySelector('.qrCreate'),err=$('quickError');if(err)err.textContent='';try{const raw=$('quickMessage')?.value||'',p=parseQuick(raw);await resolveCollaborator(raw,p);const payloads=splitScooterReservations(raw,p);if(btn){btn.disabled=true;btn.textContent=payloads.length>1?'Creando '+payloads.length+' reservas…':'Creando…'}for(const item of payloads)await savePayload(item);window.LariosReservations?.closeQuick?.();if($('agendaDate'))$('agendaDate').value=p.pickup_date;await window.LariosReservations?.loadAgenda?.(p.pickup_date);if(typeof window.changeAgendaDate==='function')window.changeAgendaDate()}catch(e){if(err)err.textContent=e.message||String(e)}finally{if(btn){btn.disabled=false;btn.textContent='✧ Crear reserva'}}}
 function install(){if(window.LariosReservations)window.LariosReservations.createQuick=createQuick;if(window.LariosQuickReservationV2)window.LariosQuickReservationV2.parseQuick=parseQuick}
 window.LariosQuickReservationV3={parseQuick,collaborator,createQuick,groupInfo,followupInfo,splitScooterReservations,install,version:'flow2b-service-context-20261001'};install();setTimeout(install,250);setTimeout(install,1200);
 })();
