@@ -55,6 +55,7 @@ async function snapshot(){
     rental_days:val('rental_days'),
     rental_price:num('rental_price'),
     full_insurance:checked('full_insurance'),
+    service_email_notice_acknowledged:checked('service_email_notice_acknowledged'),
     insurance_total:num('insurance_total'),
     full_insurance_quote:p.quote,
     franchise:p.franchise,
@@ -152,6 +153,10 @@ function applyResponse(r){
   if(typeof r.insurance_total!=='undefined'&&num('insurance_total')===Number(base.insurance_total||0))setField('insurance_total',r.insurance_total);
   if(typeof r.franchise!=='undefined'&&num('franchise')===Number(base.franchise||0))setField('franchise',r.franchise);
   if(typeof r.total!=='undefined'&&num('contract_total')===Number(base.total||0))setField('contract_total',r.total);
+  if(typeof r.service_email_notice_acknowledged!=='undefined'){
+    var emailNotice=$('service_email_notice_acknowledged');
+    if(emailNotice&&emailNotice.checked===!!base.service_email_notice_acknowledged){emailNotice.checked=!!r.service_email_notice_acknowledged;emailNotice.dispatchEvent(new Event('input',{bubbles:true}));emailNotice.dispatchEvent(new Event('change',{bubbles:true}));}
+  }
   var drawn=drawSignature(r.signature_data_url);
   var form=$('reservationForm');
   if(form){
