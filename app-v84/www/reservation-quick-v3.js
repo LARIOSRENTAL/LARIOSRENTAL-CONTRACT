@@ -76,14 +76,23 @@ async function resolveCollaborator(raw,p){
     if(!ar.ok||!cr.ok)throw Error('No se pudieron leer los colaboradores activos');
     const [aliases,collabs]=await Promise.all([ar.json(),cr.json()]);
     const names=new Map(collabs.map(c=>[String(c.id),c.name]));
-    return aliases.map(a=>({alias:a.alias,normalized:a.normalized_alias||norm(a.alias),name:names.get(String(a.collaborator_id))})).filter(a=>a.name&&a.normalized).sort((a,b)=>b.normalized.length-a.normalized.length)
+    return aliases.map(a=>({alias:a.alias,normalized:a.normalized_alias||norm(a.alias),name:names.get(String(a.collaborator_id))})).filter(a=>a.name&&a.normalized).sort((x,y)=>y.normalized.length-x.normalized.length)
    })()
   }
   const aliases=await collaboratorLookup,t=' '+norm(raw)+' ';
   const match=aliases.find(a=>t.includes(' '+a.normalized+' '))||aliases.find(a=>t.includes(a.normalized));
   if(!match)return p.agency||collaborator(raw)||'';
   p.agency=match.name;
-  const escape=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\async function savePayload(p){');
+  let place=String(p.pickup_location||'');
+  const aliasText=String(match.alias||'').trim();
+  if(aliasText)place=place.toLowerCase().split(aliasText.toLowerCase()).join(' ');
+  place=place.replace(/city\s+expert/ig,' ').replace(/\s+/g,' ').trim();
+  if(/\b(?:ofi|oficina)\b/i.test(raw)){p.pickup_location='OFICINA';p.return_location='OFICINA'}
+  else if(place){p.pickup_location=place;p.return_location=place}
+  return p.agency
+ }catch(e){return p.agency||collaborator(raw)||''}
+}
+async function savePayload(p){');
   const place=String(p.pickup_location||'').replace(new RegExp('\\b'+escape(match.alias)+'\\b','ig'),' ').replace(/\\bcity\\s+expert\\b/ig,' ').replace(/\\s+/g,' ').replace(/^[\\s,;:+-]+|[\\s,;:+-]+$/g,'');
   if(/\\b(?:ofi|oficina)\\b/i.test(raw)){p.pickup_location='OFICINA';p.return_location='OFICINA'}
   else if(place){p.pickup_location=place;p.return_location=place}
