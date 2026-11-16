@@ -95,7 +95,7 @@ async function generateVehicleChange(x){
     alert(warnings.length?'Cambio de vehículo guardado correctamente. '+warnings.join(' '):'Cambio de vehículo guardado y enviado correctamente.');
   }catch(e){alert('No se pudo generar el cambio: '+e.message)}finally{btn.disabled=false;btn.textContent='Generar cambio de vehículo'}
 }
-function recordByNumber(text){const normalize=v=>String(v||'').trim().toUpperCase().replace(/^LR-/,'').replace(/^0+(?=\\d)/,'');const normalized=normalize(text);return contracts.find(x=>normalize(x.contract_number)===normalized)}
+function recordByNumber(text){const normalize=v=>String(v||'').trim().toUpperCase().replace(/^LR-/,'').replace(/^0+(?=\d)/,'');const normalized=normalize(text);return contracts.find(x=>normalize(x.contract_number)===normalized)}
 function decorateAgenda(){
   const isAdmin=window.LariosAccess?.isAdmin?.()===true;
   document.querySelectorAll('.agendaItem.rich').forEach(card=>{const x=recordByNumber(card.querySelector('.agendaNumber')?.textContent);if(!x)return;card.dataset.lifecycle='1';const isReturn=/Devoluciones/i.test(card.closest('.agendaCol')?.querySelector('.agendaHead')?.textContent||'');
@@ -237,17 +237,17 @@ function install(){
       const isReturn=card&&/Devoluciones/i.test(card.closest('.agendaCol')?.querySelector('.agendaHead')?.textContent||'');
       if(!btn||!isReturn)return;
       const onclick=btn.getAttribute('onclick')||'';
-      if(/LariosReservations\\.collected\\(/.test(onclick)){
+      if(/LariosReservations\.collected\(/.test(onclick)){
         e.preventDefault();e.stopImmediatePropagation();
         if(window.LariosAccess?.isAdmin?.()!==true)return;
-        const direct=onclick.match(/LariosReservations\\.collected\\(['\"]([0-9a-f-]{36})['\"]\\)/i);
+        const direct=onclick.match(/LariosReservations\.collected\(['\"]([0-9a-f-]{36})['\"]\)/i);
         const x=direct?null:recordByNumber(card.querySelector('.agendaNumber')?.textContent);
         const id=direct?.[1]||x?.id;
         if(id)Promise.resolve(collected(id)).catch(err=>alert(err?.message||String(err)));
         else alert('No se encontró el contrato de esta devolución. Actualiza la agenda e inténtalo de nuevo.');
         return;
       }
-      const modify=onclick.match(/LariosLifecycle\\.(extend|changeVehicle)\\(['"]([0-9a-f-]{36})['"]\\)/i);
+      const modify=onclick.match(/LariosLifecycle\.(extend|changeVehicle)\(['"]([0-9a-f-]{36})['"]\)/i);
       if(modify){
         e.preventDefault();e.stopImmediatePropagation();
         if(window.LariosAccess?.isAdmin?.()!==true)return;
