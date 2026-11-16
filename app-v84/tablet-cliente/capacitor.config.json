@@ -1,0 +1,13 @@
+{
+  "appId": "com.lariosrental.clienttablet",
+  "appName": "Larios Rental Cliente",
+  "webDir": "www",
+  "server": {
+    "url": "https://lariosrental.github.io/LARIOSRENTAL-CONTRACT/cliente.html",
+    "cleartext": false,
+    "androidScheme": "https",
+    "allowNavigation": [
+      "lariosrental.github.io"
+    ]
+  }
+}
