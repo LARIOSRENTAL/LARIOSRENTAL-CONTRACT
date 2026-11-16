@@ -247,14 +247,19 @@ function openEditorAtTop(id){
  // never on tablet refreshes, validations or while filling in the contract.
  if(window.requestAnimationFrame)window.requestAnimationFrame(()=>window.requestAnimationFrame(reset));
 }
-document.addEventListener('larios:client-tablet-completed',async function(){
-  const id=window.LariosCurrentContractId||editId;
+document.addEventListener('larios:client-tablet-completed',async function(event){
+  const id=event?.detail?.contract_id||window.LariosCurrentContractId||editId;
   if(!id)return;
   try{
     const fresh=await rpc('app_contract_record',{p_contract_id:id});
     if(fresh&&fresh.id){
       upsertCache(fresh);
-      fill(fresh);
+      // The operator may have unsaved edits in this form while the customer
+      // completes the tablet flow. Refresh the backing record/cache only;
+      // filling the whole editor here resets every field to its saved value.
+      if(String(window.LariosCurrentContractId||'')===String(id)){
+        window.LariosCurrentContract=fresh;
+      }
       emitReservationOpened(fresh);
     }
   }catch(e){console.warn('No se pudo refrescar el contrato tras la tablet',e)}

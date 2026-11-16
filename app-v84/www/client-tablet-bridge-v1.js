@@ -1,5 +1,5 @@
 (function(){'use strict';
-var currentJob=null,pollTimer=null,devices=[];
+var currentJob=null,pollTimer=null,devices=[],activeContractId=null,sentSnapshot=null,latestClientResponse={},liveViewOpen=false,jobCompleted=false;
 function $(id){return document.getElementById(id)}
 function val(id){return String($(id)?.value||'').trim()}
 function num(id){return Number(String($(id)?.value||'0').replace(',','.'))||0}
@@ -67,6 +67,12 @@ function modal(){var m=$('lrTabletModal');if(m)return m;m=document.createElement
 function closeModal(){var m=$('lrTabletModal');if(m)m.classList.remove('show')}
 function setBody(html){modal().classList.add('show');$('lrTabletBody').innerHTML=html}
 function fresh(x){return!!x&&Date.now()-new Date(x).getTime()<20000}
+function currentEditorMatches(){var section=$('reservation');return !!activeContractId&&String(window.LariosCurrentContractId||'')===String(activeContractId)&&section&&!section.classList.contains('hidden')}
+function addressText(r){var p=r&&r.customer_address_parts||{},street=[p.street||'',p.number||''].filter(Boolean).join(' '),city=[p.city||'',p.postal_code||''].filter(Boolean).join(' ');return [street,city].filter(Boolean).join(', ')||r?.customer_address||''}
+function liveRow(label,value){return '<div class="lrTabletLiveRow"><span>'+esc(label)+'</span><b>'+esc(value||'—')+'</b></div>'}
+function liveMarkup(r){r=r||{};var insurance=typeof r.full_insurance==='boolean'?(r.full_insurance?'Seguro completo':'Seguro estándar'):'Aún sin elegir';var terms=r.accepted_terms?'Aceptadas':'Pendiente';var signature=r.has_signature?'Firma iniciada':'Pendiente';return '<div id="lrTabletLiveContent">'+liveRow('Teléfono',r.customer_phone)+liveRow('Email',r.customer_email)+liveRow('Domicilio',addressText(r))+liveRow('Seguro mostrado',insurance)+liveRow('Total mostrado',r.total==null?'':money(r.total))+liveRow('Condiciones',terms)+liveRow('Firma',signature)+'<div class="lrTabletLiveFoot">Actualizado en directo · la pantalla se refresca automáticamente</div></div>'}
+function refreshLiveView(r){if(r)latestClientResponse=r;var slot=$('lrTabletLiveContent');if(slot)slot.outerHTML=liveMarkup(latestClientResponse)}
+function showLiveView(){if(!activeContractId||!currentJob)return alert('Primero envía la reserva a una tablet.');liveViewOpen=true;setBody('<div class="lrTabletLiveTitle">Datos que está completando el cliente</div><div id="lrTabletLiveState" class="lrTabletState">'+(jobCompleted?'✓ Datos recibidos':'Esperando actividad de la tablet…')+'</div>'+liveMarkup(latestClientResponse));}
 async function showTabletPicker(){
   try{
     setBody('<div class="lrTabletState">Buscando tablets…</div>');
@@ -91,8 +97,10 @@ async function sendToTablet(deviceId){
     setBody('<div class="lrTabletState">Enviando contrato…</div>');
     var snap=await snapshot();
     currentJob=await rpc('app_tablet_assign',{p_device_id:deviceId,p_contract_id:id,p_payload:snap});
+    activeContractId=id;sentSnapshot=snap;latestClientResponse={customer_phone:snap.customer_phone,customer_email:snap.customer_email,customer_address:snap.customer_address,customer_address_parts:snap.customer_address_parts,full_insurance:snap.full_insurance,insurance_total:snap.insurance_total,franchise:snap.franchise,total:snap.total};jobCompleted=false;liveViewOpen=false;
+    ensureViewButton();
     var device=devices.find(function(x){return x.id===deviceId})||{};
-    setBody('<div class="lrTabletState lrTabletDone">✓ Enviado a '+esc(device.label||('Tablet '+(device.pair_code||'')))+'</div><div id="lrTabletLive" class="lrTabletState">Cliente completando datos…</div>');
+    setBody('<div class="lrTabletState lrTabletDone">✓ Enviado a '+esc(device.label||('Tablet '+(device.pair_code||'')))+'</div><div id="lrTabletLive" class="lrTabletState">Cliente completando datos…</div><button type="button" class="lrTabletLiveButton" onclick="LariosClientTablet.viewLive()">Ver lo que rellena el cliente</button>');
     if(pollTimer)clearInterval(pollTimer);
     pollTimer=setInterval(checkStatus,2500);
     checkStatus();
@@ -105,12 +113,19 @@ async function checkStatus(){
     var s=Array.isArray(d)?d[0]:d;
     if(!s)return;
     var live=$('lrTabletLive');
-    if(s.status==='pending'&&live)live.textContent='Cliente completando datos…';
+    if(s.status==='pending'){
+      if(live)live.textContent='Cliente completando datos…';
+      if(s.response)refreshLiveView(s.response);
+      var state=$('lrTabletLiveState');if(state)state.textContent='Cliente completando los datos…';
+    }
     if(s.status==='completed'){
       if(pollTimer){clearInterval(pollTimer);pollTimer=null}
-      applyResponse(s.response||{});
+      latestClientResponse=Object.assign({},latestClientResponse,s.response||{},{has_signature:!!(s.response&&s.response.signature_data_url)});jobCompleted=true;refreshLiveView(latestClientResponse);
+      if(currentEditorMatches())applyResponse(s.response||{});
+      else document.dispatchEvent(new CustomEvent('larios:client-tablet-completed',{detail:Object.assign({contract_id:activeContractId},s.response||{})}));
       try{await rpc('app_tablet_ack',{p_job_id:currentJob})}catch(e){}
       if(live){live.className='lrTabletState lrTabletDone';live.textContent='✓ Datos y firma recibidos en el contrato'}
+      var state=$('lrTabletLiveState');if(state)state.textContent='✓ Datos recibidos. La reserva sigue abierta en la oficina.';
     }
   }catch(e){console.warn('Tablet status',e)}
 }
@@ -122,18 +137,21 @@ function drawSignature(dataUrl){
   img.onload=function(){var x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);var scale=Math.min(c.width/img.width,c.height/img.height),w=img.width*scale,h=img.height*scale;x.drawImage(img,(c.width-w)/2,(c.height-h)/2,w,h);c.dataset.clientSignature='1'};
   img.src=dataUrl;return true;
 }
+function sameValue(id,value){var e=$(id);return !!e&&String(e.value||'').trim()===String(value==null?'':value).trim()}
 function applyResponse(r){
-  setField('customer_phone',r.customer_phone);
-  setField('customer_email',r.customer_email);
-  setField('customer_address',r.customer_address);
-  if(r.customer_address_parts&&window.LariosAddress?.setParts)window.LariosAddress.setParts(r.customer_address_parts);
+  var base=sentSnapshot||{};
+  if(sameValue('customer_phone',base.customer_phone))setField('customer_phone',r.customer_phone);
+  if(sameValue('customer_email',base.customer_email))setField('customer_email',r.customer_email);
+  var addressUntouched=sameValue('customer_address',base.customer_address);
+  if(addressUntouched)setField('customer_address',r.customer_address);
+  if(addressUntouched&&r.customer_address_parts&&window.LariosAddress?.setParts)window.LariosAddress.setParts(r.customer_address_parts);
   if(typeof r.full_insurance!=='undefined'){
     var fi=$('full_insurance');
-    if(fi){fi.checked=!!r.full_insurance;fi.dispatchEvent(new Event('change',{bubbles:true}));}
+    if(fi&&fi.checked===!!base.full_insurance){fi.checked=!!r.full_insurance;fi.dispatchEvent(new Event('change',{bubbles:true}));}
   }
-  if(typeof r.insurance_total!=='undefined')setField('insurance_total',r.insurance_total);
-  if(typeof r.franchise!=='undefined')setField('franchise',r.franchise);
-  if(typeof r.total!=='undefined')setField('contract_total',r.total);
+  if(typeof r.insurance_total!=='undefined'&&num('insurance_total')===Number(base.insurance_total||0))setField('insurance_total',r.insurance_total);
+  if(typeof r.franchise!=='undefined'&&num('franchise')===Number(base.franchise||0))setField('franchise',r.franchise);
+  if(typeof r.total!=='undefined'&&num('contract_total')===Number(base.total||0))setField('contract_total',r.total);
   var drawn=drawSignature(r.signature_data_url);
   var form=$('reservationForm');
   if(form){
@@ -143,20 +161,22 @@ function applyResponse(r){
     form.dataset.clientSignatureDataUrl=r.signature_data_url||'';
     form.dataset.clientSignatureDrawn=drawn?'1':'0';
   }
-  document.dispatchEvent(new CustomEvent('larios:client-tablet-completed',{detail:r}));
+  document.dispatchEvent(new CustomEvent('larios:client-tablet-completed',{detail:Object.assign({contract_id:activeContractId},r)}));
 }
+function ensureViewButton(){var b=$('lrViewTablet'),res=$('reservation'),tb=res&&res.querySelector('.toolbar');if(!tb)return;if(!b){b=document.createElement('button');b.type='button';b.id='lrViewTablet';b.className='lrViewTablet';b.textContent='Ver en directo';b.onclick=showLiveView;var send=$('lrSendTablet');if(send)send.insertAdjacentElement('afterend',b);else tb.appendChild(b)}b.disabled=!currentJob||String(window.LariosCurrentContractId||'')!==String(activeContractId);b.title=b.disabled?'Envía primero esta reserva a una tablet':'Ver los datos que está escribiendo el cliente';}
 function ensureButton(){
   var res=$('reservation');
   if(!res||res.classList.contains('hidden'))return;
   var tb=res.querySelector('.toolbar');
-  if(!tb||$('lrSendTablet'))return;
-  var b=document.createElement('button');b.type='button';b.id='lrSendTablet';b.className='lrSendTablet';b.textContent='Enviar a tablet';b.onclick=showTabletPicker;tb.appendChild(b);
+  if(!tb)return;
+  if(!$('lrSendTablet')){var b=document.createElement('button');b.type='button';b.id='lrSendTablet';b.className='lrSendTablet';b.textContent='Enviar a tablet';b.onclick=showTabletPicker;tb.appendChild(b)}
+  ensureViewButton();
 }
 var style=document.createElement('style');
-style.textContent='.lrSendTablet{margin-left:auto;border:0;border-radius:9px;padding:9px 12px;background:#2563eb;color:white;font-weight:800}.lrTabletShade{position:fixed;inset:0;background:rgba(17,24,39,.55)}#lrTabletModal{display:none;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;padding:20px}#lrTabletModal.show{display:flex}.lrTabletBox{position:relative;background:#fff;border-radius:18px;padding:24px;width:min(520px,100%);box-shadow:0 22px 55px rgba(0,0,0,.25)}.lrTabletX{position:absolute;right:12px;top:8px;border:0;background:none;font-size:30px}.lrTabletHint{color:#6b7280;font-size:13px;margin:8px 0}.lrTabletState{padding:12px;border-radius:10px;background:#f3f4f6;font-weight:700;margin-top:8px}.lrTabletDone{background:#ecfdf5;color:#065f46}.lrTabletError{background:#fef2f2;color:#991b1b;padding:12px;border-radius:10px}.lrTabletDevice{display:flex;justify-content:space-between;align-items:center;width:100%;padding:13px;margin:8px 0;border:1px solid #d1d5db;border-radius:10px;background:white;text-align:left}.lrTabletDevice span{font-size:12px;color:#6b7280}';
+style.textContent='.lrSendTablet,.lrViewTablet{border:0;border-radius:9px;padding:9px 12px;font-weight:800;white-space:nowrap}.lrSendTablet{margin-left:auto;background:#2563eb;color:white}.lrViewTablet{background:#0f766e;color:white}.lrViewTablet:disabled{background:#cbd5e1;color:#475569}.lrTabletShade{position:fixed;inset:0;background:rgba(17,24,39,.55)}#lrTabletModal{display:none;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;padding:20px}#lrTabletModal.show{display:flex}.lrTabletBox{position:relative;background:#fff;border-radius:18px;padding:24px;width:min(520px,100%);max-height:90dvh;overflow:auto;box-shadow:0 22px 55px rgba(0,0,0,.25)}.lrTabletX{position:absolute;right:12px;top:8px;border:0;background:none;font-size:30px}.lrTabletHint{color:#6b7280;font-size:13px;margin:8px 0}.lrTabletState{padding:12px;border-radius:10px;background:#f3f4f6;font-weight:700;margin-top:8px}.lrTabletDone{background:#ecfdf5;color:#065f46}.lrTabletError{background:#fef2f2;color:#991b1b;padding:12px;border-radius:10px}.lrTabletDevice{display:flex;justify-content:space-between;align-items:center;width:100%;padding:13px;margin:8px 0;border:1px solid #d1d5db;border-radius:10px;background:white;text-align:left}.lrTabletDevice span{font-size:12px;color:#6b7280}.lrTabletLiveTitle{font-size:20px;font-weight:900;margin:8px 38px 12px 0}.lrTabletLiveButton{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:#0f766e;color:#fff;font-weight:900}.lrTabletLiveRow{display:grid;grid-template-columns:38% 62%;gap:8px;padding:11px 4px;border-bottom:1px solid #e5e7eb;font-size:14px}.lrTabletLiveRow span{color:#64748b}.lrTabletLiveRow b{overflow-wrap:anywhere;text-align:right;color:#111827}.lrTabletLiveFoot{padding-top:12px;color:#64748b;font-size:12px}@media(max-width:520px){.lrSendTablet,.lrViewTablet{font-size:11px;padding:8px 7px}.lrTabletBox{padding:18px}}';
 document.head.appendChild(style);
 document.addEventListener('larios:reservation-opened',function(){setTimeout(ensureButton,50)});
 var ob=new MutationObserver(function(){ensureButton()});ob.observe(document.body,{subtree:true,attributes:true,attributeFilter:['class'],childList:true});
 setTimeout(ensureButton,700);
-window.LariosClientTablet={open:showTabletPicker,status:checkStatus};
+window.LariosClientTablet={open:showTabletPicker,status:checkStatus,viewLive:showLiveView};
 })();
