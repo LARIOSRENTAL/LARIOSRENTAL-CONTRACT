@@ -1,0 +1,17 @@
+{
+  "name": "larios-rental-client-tablet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicación de cliente para tablets Larios Rental",
+  "scripts": {
+    "android:add": "cap add android",
+    "android:sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.0.0",
+    "@capacitor/core": "8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.0.0"
+  }
+}
