@@ -6,6 +6,7 @@ on:
     branches: [agent/mobile-v84]
     paths:
       - "app-v84/tablet-cliente/**"
+      - "app-v84/www/cliente.html"
       - ".github/workflows/android-client-tablet-apk.yml"
 
 jobs:
