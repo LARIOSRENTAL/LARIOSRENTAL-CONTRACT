@@ -237,11 +237,21 @@ function install(){
       const isReturn=card&&/Devoluciones/i.test(card.closest('.agendaCol')?.querySelector('.agendaHead')?.textContent||'');
       if(!btn||!isReturn)return;
       const onclick=btn.getAttribute('onclick')||'';
-      if(/LariosReservations\.collected\(/.test(onclick)){
+      if(/LariosReservations\\.collected\\(/.test(onclick)){
         e.preventDefault();e.stopImmediatePropagation();
         if(window.LariosAccess?.isAdmin?.()!==true)return;
         const x=recordByNumber(card.querySelector('.agendaNumber')?.textContent);
         if(x)collected(x.id);
+        return;
+      }
+      const modify=onclick.match(/LariosLifecycle\\.(extend|changeVehicle)\\(['"]([0-9a-f-]{36})['"]\\)/i);
+      if(modify){
+        e.preventDefault();e.stopImmediatePropagation();
+        if(window.LariosAccess?.isAdmin?.()!==true)return;
+        const action=modify[1]==='extend'?'extend':'changeVehicle';
+        const handler=window.LariosLifecycle?.[action];
+        if(typeof handler!=='function'){alert('No está disponible la acción de '+(action==='extend'?'ampliar reserva':'cambiar vehículo')+'. Recarga la agenda e inténtalo de nuevo.');return}
+        Promise.resolve(handler(modify[2])).catch(err=>alert(err?.message||String(err)));
       }
     },true);
     new MutationObserver(records=>{
