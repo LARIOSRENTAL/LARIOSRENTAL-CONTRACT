@@ -65,7 +65,15 @@ async function webOCR(file){
  if(!reads.length)throw new Error('El lector local no detectó texto en la imagen');
  const rank=r=>{r=r||{};return(r.name?6:0)+(r.birth?3:0)+(r.issue?3:0)+(r.expiry?3:0)+(r.license?2:0)+(r.country?1:0)+(r.address?1:0)};reads.sort((a,b)=>rank(b.parsed)-rank(a.parsed));
  const merged={};for(const read of reads)for(const [key,value] of Object.entries(read.parsed||{}))if(value&&!merged[key])merged[key]=value;
- return{text:reads.map(x=>x.text).join('\\n\\n'),parsed:merged}
+ if(!merged.name){
+  const x=Math.round(cw*.22),y=Math.round(ch*.12),rw=Math.max(1,Math.round(cw*.60)),rh=Math.max(1,Math.round(ch*.48)),detail=document.createElement('canvas');detail.width=rw;detail.height=rh;
+  detail.getContext('2d',{willReadFrequently:true}).drawImage(base,x,y,rw,rh,0,0,rw,rh);
+  state('Afinando lectura de los datos personales…');
+  await ocr.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1',user_defined_dpi:'300'});
+  const extra=await ocr.recognize(detail),detailText=String(extra?.data?.text||'').trim();
+  if(detailText){const parsed=parseIdentity(detailText.split(/\r?\n/).map(line=>({text:line,score:1})));reads.push({text:detailText,parsed});for(const [key,value] of Object.entries(parsed))if(value&&!merged[key])merged[key]=value}
+ }
+ return{text:reads.map(x=>x.text).join('\n\n'),parsed:merged}
 }
 async function readIdentity(file,nativeText){
  let result;
