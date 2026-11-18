@@ -19,7 +19,7 @@ function dateFrom(v){const s=upper(v).normalize('NFD').replace(/[\u0300-\u036f]/
 function localISODate(date=new Date()){const x=new Date(date.getTime()-date.getTimezoneOffset()*60000);return x.toISOString().slice(0,10)}
 function minimumAdultBirthDate(){const d=new Date();d.setFullYear(d.getFullYear()-18);return localISODate(d)}
 function licenceDateCandidates(text){const out=new Set();for(const m of String(text||'').matchAll(/\b\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4}\b/g)){const d=dateFrom(m[0]);if(d)out.add(d)}return [...out].sort()}
-function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').replace(/\s+/g,' ').trim();if(s.length<2||s.length>60)return'';const words=s.split(/\s+/).filter(Boolean);if(words.length>4||words.some(w=>w.length>24))return'';if(/PERMISO|CONDUC|LICEN|FUHRER|FÜHRER|REINO|ESPANA|ESPAÑA|ARGENTINA|EUROP|FECHA|DATE|BIRTH|DOMICILIO|ADDRESS|SEGURIDAD|TRANSPORTE|RIJBEWIJS|BELGI|BELGIQUE|DRIVING|HEERLEN|GENK|MODEL|UNION|SUBJECT|CATEGOR|TITULAR|SIGNATURE|LICENCE|PERMIS/i.test(s))return'';return s;}
+function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').replace(/\s+/g,' ').trim();if(s.length<2||s.length>60)return'';let words=s.split(/\s+/).filter(Boolean);if(words.length>4||words.some(w=>w.length>24))return'';if(/PERMISO|CONDUC|LICEN|FUHRER|FÜHRER|REINO|ESPANA|ESPAÑA|ARGENTINA|EUROP|FECHA|DATE|BIRTH|DOMICILIO|ADDRESS|SEGURIDAD|TRANSPORTE|RIJBEWIJS|BELGI|BELGIQUE|DRIVING|HEERLEN|GENK|MODEL|UNION|SUBJECT|CATEGOR|TITULAR|SIGNATURE|LICENCE|PERMIS/i.test(s))return'';const particles=/^(?:de|del|la|las|los|van|der|den|von|di|da|do|dos|ten|ter|te|le|du|st)$/i;while(words.length>1&&words[words.length-1]===words[words.length-1].toLowerCase()&&!particles.test(words[words.length-1]))words.pop();s=words.join(' ');return s.length>=2?s:'';}
 function goodLicence(v){const raw=upper(v).replace(/[^A-Z0-9.\/-]/g,'');const compact=raw.replace(/[^A-Z0-9]/g,'');return compact.length>=5&&compact.length<=20&&/\d{4,}/.test(compact)?raw:'';}
 function rawLines(items){return(items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text)}function trustedLines(items){return rawLines(items).filter(x=>x.score>=0)}function joined(lines){return lines.map(x=>x.text).join('\n')}
 function numberMarker(label,anchored=true){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp((anchored?'^\\s*':'(?:^|\\s)')+escaped+'(?=\\s|[.):;-]|$)\\s*[.)]?\\s*[:;-]?\\s*','i')}
@@ -65,13 +65,18 @@ async function webOCR(file){
  if(!reads.length)throw new Error('El lector local no detectó texto en la imagen');
  const rank=r=>{r=r||{};return(r.name?6:0)+(r.birth?3:0)+(r.issue?3:0)+(r.expiry?3:0)+(r.license?2:0)+(r.country?1:0)+(r.address?1:0)};reads.sort((a,b)=>rank(b.parsed)-rank(a.parsed));
  const merged={};for(const read of reads)for(const [key,value] of Object.entries(read.parsed||{}))if(value&&!merged[key])merged[key]=value;
- if(!merged.name){
+ {
   const x=Math.round(cw*.22),y=Math.round(ch*.12),rw=Math.max(1,Math.round(cw*.60)),rh=Math.max(1,Math.round(ch*.48)),detail=document.createElement('canvas');detail.width=rw;detail.height=rh;
   detail.getContext('2d',{willReadFrequently:true}).drawImage(base,x,y,rw,rh,0,0,rw,rh);
-  state('Afinando lectura de los datos personales…');
+  state('Afinando la lectura de los datos personales…');
   await ocr.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1',user_defined_dpi:'300'});
   const extra=await ocr.recognize(detail),detailText=String(extra?.data?.text||'').trim();
-  if(detailText){const parsed=parseIdentity(detailText.split(/\r?\n/).map(line=>({text:line,score:1})));reads.push({text:detailText,parsed});for(const [key,value] of Object.entries(parsed))if(value&&!merged[key])merged[key]=value}
+  if(detailText){
+   const parsed=parseIdentity(detailText.split(/\r?\n/).map(line=>({text:line,score:1})));
+   reads.push({text:detailText,parsed});
+   if(parsed.name)merged.name=parsed.name;
+   for(const [key,value] of Object.entries(parsed))if(value&&!merged[key])merged[key]=value
+  }
  }
  return{text:reads.map(x=>x.text).join('\n\n'),parsed:merged}
 }
