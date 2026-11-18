@@ -30,7 +30,54 @@ function showResult(r){const b=$('scanResult');if(!b)return;if(!r||!Object.keys(
 function loadScript(src){return new Promise((ok,no)=>{const found=[...document.scripts].find(s=>s.src===src);if(found&&window.Tesseract)return ok();const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar el motor OCR'));document.head.appendChild(s)})}
 async function getEngine(){if(engine)return engine;state('Cargando OCR de llaveros…');await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');if(!window.Tesseract)throw new Error('El motor OCR no se cargó');engine=await window.Tesseract.createWorker('spa+eng',1,{logger:m=>{if(m&&m.status==='recognizing text')state('Leyendo llavero… '+Math.round((m.progress||0)*100)+'%')}});return engine}
 async function compressForWeb(file){const bmp=await createImageBitmap(file);let w=bmp.width,h=bmp.height;const maxSide=1800;if(Math.max(w,h)>maxSide){const scale=maxSide/Math.max(w,h);w=Math.round(w*scale);h=Math.round(h*scale)}const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,w,h);let quality=.84,blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));while(blob&&blob.size>950000&&quality>.44){quality-=.1;blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality))}if(!blob)throw new Error('No se pudo preparar la fotografía');return new File([blob],'permiso.jpg',{type:'image/jpeg'})}
-async function webOCR(file){state('Preparando lectura OCR.Space…');const small=await compressForWeb(file),form=new FormData();form.append('file',small,'permiso.jpg');form.append('apikey','helloworld');form.append('OCREngine','2');form.append('language','auto');form.append('scale','true');form.append('detectOrientation','true');form.append('isOverlayRequired','false');state('Enviando permiso al OCR gratuito…');let response;try{response=await fetch('https://api.ocr.space/parse/image',{method:'POST',body:form})}catch(e){throw new Error('No se pudo conectar con OCR.Space (red/CORS): '+(e?.message||String(e)))}const raw=await response.text();let payload=null;try{payload=JSON.parse(raw)}catch(_){}if(!response.ok)throw new Error('OCR.Space respondió HTTP '+response.status+(raw?' · '+raw.slice(0,240):''));if(!payload)throw new Error('OCR.Space devolvió una respuesta no JSON'+(raw?' · '+raw.slice(0,240):''));if(payload.IsErroredOnProcessing){const detail=payload.ErrorMessage||payload.ErrorDetails||'Error de lectura';throw new Error('OCR.Space rechazó la lectura: '+(Array.isArray(detail)?detail.join(' '):String(detail)))}const text=(payload.ParsedResults||[]).map(item=>item.ParsedText||'').join('\\n').trim();if(!text)throw new Error('OCR.Space respondió correctamente, pero no detectó texto');return text}async function readIdentity(file,nativeText){const text=nativeText||await webOCR(file);$('scanRaw').textContent=text;const parsed=parseIdentity(text.split(/\r?\n/).map(line=>({text:line,score:1})));const useful=['name','license','birth','issue','expiry','address'].some(k=>Boolean(parsed[k]));if(!useful)throw new Error('No se pudieron identificar campos del permiso. Revisa la foto y vuelve a intentarlo; el contrato no se ha modificado.');return parsed}
+async function webOCR(file){
+ state('Preparando lectura local del permiso…');
+ const bmp=await createImageBitmap(file);
+ let w=bmp.width,h=bmp.height;
+ const maxSide=2600;
+ if(Math.max(w,h)>maxSide){const scale=maxSide/Math.max(w,h);w=Math.round(w*scale);h=Math.round(h*scale)}
+ const base=document.createElement('canvas');base.width=w;base.height=h;
+ const bctx=base.getContext('2d',{willReadFrequently:true});
+ bctx.fillStyle='#fff';bctx.fillRect(0,0,w,h);bctx.imageSmoothingEnabled=true;bctx.imageSmoothingQuality='high';bctx.drawImage(bmp,0,0,w,h);
+ const variants=[base];
+ const contrast=document.createElement('canvas');contrast.width=w;contrast.height=h;
+ const cctx=contrast.getContext('2d',{willReadFrequently:true});cctx.drawImage(base,0,0);
+ const image=cctx.getImageData(0,0,w,h),data=image.data,hist=new Uint32Array(256);let sum=0,count=0;
+ for(let i=0;i<data.length;i+=4){const gray=Math.round(.299*data[i]+.587*data[i+1]+.114*data[i+2]);hist[gray]++;sum+=gray;count++}
+ const mean=sum/Math.max(1,count);let total=0;for(let i=0;i<256;i++)total+=i*hist[i];
+ let wb=0,sb=0,best=-1,threshold=150;
+ for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=count-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(total-sb)/wf,between=wb*wf*(mb-mf)*(mb-mf);if(between>best){best=between;threshold=i}}
+ for(let i=0;i<data.length;i+=4){const gray=.299*data[i]+.587*data[i+1]+.114*data[i+2];const boosted=Math.max(0,Math.min(255,(gray-mean)*1.45+mean));data[i]=data[i+1]=data[i+2]=boosted;data[i+3]=255}
+ cctx.putImageData(image,0,0);variants.push(contrast);
+ const binary=document.createElement('canvas');binary.width=w;binary.height=h;
+ const xctx=binary.getContext('2d',{willReadFrequently:true});xctx.drawImage(base,0,0);
+ const bi=xctx.getImageData(0,0,w,h),bd=bi.data;
+ for(let i=0;i<bd.length;i+=4){const gray=.299*bd[i]+.587*bd[i+1]+.114*bd[i+2],v=gray>threshold?255:0;bd[i]=bd[i+1]=bd[i+2]=v;bd[i+3]=255}
+ xctx.putImageData(bi,0,0);variants.push(binary);
+ const ocr=await getEngine(),reads=[];
+ const modes=['6','11','6'];
+ for(let i=0;i<variants.length;i++){
+  state('Leyendo permiso local… pasada '+(i+1)+' de '+variants.length);
+  await ocr.setParameters({tessedit_pageseg_mode:modes[i],preserve_interword_spaces:'1',user_defined_dpi:'300'});
+  const result=await ocr.recognize(variants[i]),text=String(result?.data?.text||'').trim();
+  if(text)reads.push({text,parsed:parseIdentity(text.split(/\\r?\\n/).map(line=>({text:line,score:1})))});
+ }
+ if(!reads.length)throw new Error('El lector local no detectó texto en la imagen');
+ reads.sort((a,b)=>Object.keys(b.parsed||{}).length-Object.keys(a.parsed||{}).length);
+ const merged={};for(const read of reads)for(const [key,value] of Object.entries(read.parsed||{}))if(value&&!merged[key])merged[key]=value;
+ window.__lariosLastOcrPasses=reads.length;
+ return {text:reads.map(x=>x.text).join('\\n\\n'),parsed:merged};
+}
+async function readIdentity(file,nativeText){
+ let result;
+ if(nativeText){const text=String(nativeText||'');result={text,parsed:parseIdentity(text.split(/\\r?\\n/).map(line=>({text:line,score:1})))}}
+ else result=await webOCR(file);
+ const text=String(result.text||'');$('scanRaw').textContent=text;
+ const parsed=result.parsed||parseIdentity(text.split(/\\r?\\n/).map(line=>({text:line,score:1})));
+ const useful=['name','license','birth','issue','expiry','address'].some(k=>Boolean(parsed[k]));
+ if(!useful)throw new Error('No se pudieron identificar campos del permiso. Revisa la foto y vuelve a intentarlo; el contrato no se ha modificado.');
+ return parsed
+}
 function vehicleLines(text){return String(text||'').replace(/\r/g,'').split('\n').map(clean).filter(Boolean)}
 function labelRegex(labels){return new RegExp('(?:'+labels.join('|')+')\\s*[:;=._-]*\\s*(.*)$','i')}
 function vehicleValues(text,labels){const values=[],ls=vehicleLines(text),re=labelRegex(labels),any=/(?:MATR[IÍ1L]CULA|MATR.CULA|PLATE|REGISTRATION|MARCA|MAKE|BRAND|MODELO|MODEL|FUEL|FUE[L1I]|COMBUSTIBLE|CARBURANTE)/i;for(let i=0;i<ls.length;i++){const m=ls[i].match(re);if(!m)continue;let tail=clean(m[1]||'').replace(/^[:;=._-]+/,'').trim();if(tail)values.push(tail);else for(let j=i+1;j<ls.length&&j<=i+2;j++){const c=clean(ls[j]);if(c&&!any.test(c)&&c.length<=45){values.push(c);break}}}return[...new Set(values)]}
