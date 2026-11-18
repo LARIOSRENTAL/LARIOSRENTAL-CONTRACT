@@ -2,6 +2,7 @@ name: Publish V8.4 Web Preview
 
 # Production stays at root. Isolated test branch is published under /pruebas/.
 # The PaddleOCR pilot lives in test/mobile-v84 and does not change the live scanner.
+# The pilot includes retryable model CDN loading for Safari private browsing.
 on:
   workflow_dispatch:
   push:
