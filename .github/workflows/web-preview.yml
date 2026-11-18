@@ -1,7 +1,7 @@
 name: Publish V8.4 Web Preview
 
 # Production stays at root. Isolated test branch is published under /pruebas/.
-# The isolated OCR pilot in test/mobile-v84 adds structured field extraction; it does not change the live scanner.
+# The isolated OCR pilot in test/mobile-v84 adds structured field extraction and safe result rendering; it does not change the live scanner.
 # The isolated previews include stage-specific diagnostics and a free Tesseract OCR comparison page.
 on:
   workflow_dispatch:
