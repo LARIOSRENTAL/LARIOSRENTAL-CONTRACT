@@ -92,7 +92,7 @@ async function resolveCollaborator(raw,p){
   return p.agency
  }catch(e){return p.agency||collaborator(raw)||''}
 }
-async function savePayload(p){');
+async function savePayload(p){
   const place=String(p.pickup_location||'').replace(new RegExp('\\b'+escape(match.alias)+'\\b','ig'),' ').replace(/\\bcity\\s+expert\\b/ig,' ').replace(/\\s+/g,' ').replace(/^[\\s,;:+-]+|[\\s,;:+-]+$/g,'');
   if(/\\b(?:ofi|oficina)\\b/i.test(raw)){p.pickup_location='OFICINA';p.return_location='OFICINA'}
   else if(place){p.pickup_location=place;p.return_location=place}
