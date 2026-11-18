@@ -20,11 +20,12 @@ function goodLicence(v){const raw=upper(v).replace(/[^A-Z0-9.\/-]/g,'');const co
 function rawLines(items){return(items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text)}function trustedLines(items){return rawLines(items).filter(x=>x.score>=0)}function joined(lines){return lines.map(x=>x.text).join('\n')}
 function numberMarker(label,anchored=true){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp((anchored?'^\\s*':'(?:^|\\s)')+escaped+'(?=\\s|[.):;-]|$)\\s*[.)]?\\s*[:;-]?\\s*','i')}
 function findNumbered(lines,label){
- const labels=['1','2','3','4a','4b','4c','5','7','8','9'],stops=labels.filter(x=>x!==label).map(numberMarker),marker=numberMarker(label),inline=numberMarker(label,false);
+ const labels=['1','2','3','4a','4b','4c','5','7','8','9'],stops=labels.filter(x=>x!==label).map(numberMarker),marker=numberMarker(label),inline=numberMarker(label,false),values=[];
  function cut(text,hit){let end=text.length;for(const re of stops){const m=re.exec(text);if(m&&m.index>hit.index&&m.index<end)end=m.index}return clean(text.slice(hit.index+hit[0].length,end))}
- for(let i=0;i<lines.length;i++){const hit=marker.exec(lines[i].text);if(!hit)continue;const parts=[cut(lines[i].text,hit)];for(let j=i+1;j<lines.length&&j<=i+2;j++){if(stops.some(re=>re.test(lines[j].text)))break;parts.push(clean(lines[j].text))}return clean(parts.filter(Boolean).join(' '))}
- for(const line of lines){const hit=inline.exec(line.text);if(hit){const value=cut(line.text,hit);if(value)return value}}
- return''
+ function acceptable(value){if(/^(?:3|4a|4b)$/i.test(label))return Boolean(dateFrom(value));if(label==='5')return Boolean(goodLicence(value));if(label==='1'||label==='2')return Boolean(goodName(value));return Boolean(value)}
+ for(const line of lines){const hit=marker.exec(line.text)||inline.exec(line.text);if(hit){const value=cut(line.text,hit);if(value)values.push(value)}}
+ for(const value of values)if(acceptable(value))return value;
+ return values[0]||''
 }
 function findInlineNumbered(lines,label){const marker=numberMarker(label,false);for(const line of lines){const hit=marker.exec(line.text);if(hit)return clean(line.text.slice(hit.index+hit[0].length))}return''}
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab),p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text}}}return''}
