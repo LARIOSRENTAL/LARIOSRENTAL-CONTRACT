@@ -19,7 +19,13 @@ function goodName(v){let s=clean(v).replace(/\d+/g,' ').replace(/[^A-Za-zÀ-ÿ' 
 function goodLicence(v){const raw=upper(v).replace(/[^A-Z0-9.\/-]/g,'');const compact=raw.replace(/[^A-Z0-9]/g,'');return compact.length>=5&&compact.length<=20&&/\d{4,}/.test(compact)?raw:'';}
 function rawLines(items){return(items||[]).map(x=>({text:clean(x.text),score:Number(x.score||0)})).filter(x=>x.text)}function trustedLines(items){return rawLines(items).filter(x=>x.score>=0)}function joined(lines){return lines.map(x=>x.text).join('\n')}
 function numberMarker(label,anchored=true){const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/a/i,'\\s*a').replace(/b/i,'\\s*b').replace(/c/i,'\\s*c');return new RegExp((anchored?'^\\s*':'(?:^|\\s)')+escaped+'(?=\\s|[.):;-]|$)\\s*[.)]?\\s*[:;-]?\\s*','i')}
-function findNumbered(lines,label){const marker=numberMarker(label),stops=['1','2','3','4a','4b','4c','5','7','8','9'].filter(x=>x!==label).map(numberMarker);for(let i=0;i<lines.length;i++){const hit=marker.exec(lines[i].text);if(!hit)continue;const parts=[clean(lines[i].text.slice(hit.index+hit[0].length))];for(let j=i+1;j<lines.length&&j<=i+2;j++){if(stops.some(re=>re.test(lines[j].text)))break;parts.push(clean(lines[j].text))}return clean(parts.filter(Boolean).join(' '))}return''}
+function findNumbered(lines,label){
+ const labels=['1','2','3','4a','4b','4c','5','7','8','9'],stops=labels.filter(x=>x!==label).map(numberMarker),marker=numberMarker(label),inline=numberMarker(label,false);
+ function cut(text,hit){let end=text.length;for(const re of stops){const m=re.exec(text);if(m&&m.index>hit.index&&m.index<end)end=m.index}return clean(text.slice(hit.index+hit[0].length,end))}
+ for(let i=0;i<lines.length;i++){const hit=marker.exec(lines[i].text);if(!hit)continue;const parts=[cut(lines[i].text,hit)];for(let j=i+1;j<lines.length&&j<=i+2;j++){if(stops.some(re=>re.test(lines[j].text)))break;parts.push(clean(lines[j].text))}return clean(parts.filter(Boolean).join(' '))}
+ for(const line of lines){const hit=inline.exec(line.text);if(hit){const value=cut(line.text,hit);if(value)return value}}
+ return''
+}
 function findInlineNumbered(lines,label){const marker=numberMarker(label,false);for(const line of lines){const hit=marker.exec(line.text);if(hit)return clean(line.text.slice(hit.index+hit[0].length))}return''}
 function findLabel(lines,labels){for(let i=0;i<lines.length;i++){const line=upper(lines[i].text);for(const lab of labels){const L=upper(lab),p=line.indexOf(L);if(p>=0){const tail=clean(lines[i].text.slice(p+lab.length).replace(/^\s*[:#º°./-]+\s*/,''));if(tail)return tail;if(lines[i+1])return lines[i+1].text}}}return''}
 function licenceAfterLabel(lines){for(let i=0;i<lines.length;i++){if(!/LICEN[CS](?:IA|E)/i.test(lines[i].text))continue;for(let j=i;j<lines.length&&j<=i+3;j++){const candidates=String(lines[j].text||'').match(/[A-Z0-9][A-Z0-9.\/-]{4,24}/gi)||[];for(const candidate of candidates){if(/LICEN[CS]|NACIONAL|CONDUCIR/i.test(candidate))continue;const value=goodLicence(candidate);if(value)return value}}}return''}
@@ -32,32 +38,21 @@ async function getEngine(){if(engine)return engine;state('Cargando motor OCR loc
 async function compressForWeb(file){const bmp=await createImageBitmap(file);let w=bmp.width,h=bmp.height;const maxSide=1800;if(Math.max(w,h)>maxSide){const scale=maxSide/Math.max(w,h);w=Math.round(w*scale);h=Math.round(h*scale)}const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,w,h);let quality=.84,blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality));while(blob&&blob.size>950000&&quality>.44){quality-=.1;blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality))}if(!blob)throw new Error('No se pudo preparar la fotografía');return new File([blob],'permiso.jpg',{type:'image/jpeg'})}
 async function webOCR(file){
  state('Preparando lectura local del permiso…');
- const bmp=await createImageBitmap(file);
- let w=bmp.width,h=bmp.height;
- const maxSide=2600;
- if(Math.max(w,h)>maxSide){const scale=maxSide/Math.max(w,h);w=Math.round(w*scale);h=Math.round(h*scale)}
- const base=document.createElement('canvas');base.width=w;base.height=h;
- const bctx=base.getContext('2d',{willReadFrequently:true});
- bctx.fillStyle='#fff';bctx.fillRect(0,0,w,h);bctx.imageSmoothingEnabled=true;bctx.imageSmoothingQuality='high';bctx.drawImage(bmp,0,0,w,h);
- const variants=[base];
- const contrast=document.createElement('canvas');contrast.width=w;contrast.height=h;
- const cctx=contrast.getContext('2d',{willReadFrequently:true});cctx.drawImage(base,0,0);
- const image=cctx.getImageData(0,0,w,h),data=image.data,hist=new Uint32Array(256);let sum=0,count=0;
- for(let i=0;i<data.length;i+=4){const gray=Math.round(.299*data[i]+.587*data[i+1]+.114*data[i+2]);hist[gray]++;sum+=gray;count++}
- const mean=sum/Math.max(1,count);let total=0;for(let i=0;i<256;i++)total+=i*hist[i];
- let wb=0,sb=0,best=-1,threshold=150;
- for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=count-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(total-sb)/wf,between=wb*wf*(mb-mf)*(mb-mf);if(between>best){best=between;threshold=i}}
- for(let i=0;i<data.length;i+=4){const gray=.299*data[i]+.587*data[i+1]+.114*data[i+2];const boosted=Math.max(0,Math.min(255,(gray-mean)*1.45+mean));data[i]=data[i+1]=data[i+2]=boosted;data[i+3]=255}
- cctx.putImageData(image,0,0);variants.push(contrast);
- const binary=document.createElement('canvas');binary.width=w;binary.height=h;
- const xctx=binary.getContext('2d',{willReadFrequently:true});xctx.drawImage(base,0,0);
- const bi=xctx.getImageData(0,0,w,h),bd=bi.data;
- for(let i=0;i<bd.length;i+=4){const gray=.299*bd[i]+.587*bd[i+1]+.114*bd[i+2],v=gray>threshold?255:0;bd[i]=bd[i+1]=bd[i+2]=v;bd[i+3]=255}
- xctx.putImageData(bi,0,0);variants.push(binary);
- const ocr=await getEngine(),reads=[];
- const modes=['6','11','6'];
+ const bmp=await createImageBitmap(file);let w=bmp.width,h=bmp.height;
+ const crop={x:Math.round(bmp.width*.06),y:Math.round(bmp.height*.10),w:Math.round(bmp.width*.88),h:Math.round(bmp.height*.80)};
+ const maxSide=2600,scale=Math.min(1,maxSide/Math.max(crop.w,crop.h)),cw=Math.max(1,Math.round(crop.w*scale)),ch=Math.max(1,Math.round(crop.h*scale));
+ const base=document.createElement('canvas');base.width=cw;base.height=ch;
+ const ctx=base.getContext('2d',{willReadFrequently:true});ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,crop.x,crop.y,crop.w,crop.h,0,0,cw,ch);
+ const enhanced=document.createElement('canvas');enhanced.width=cw;enhanced.height=ch;
+ const ectx=enhanced.getContext('2d',{willReadFrequently:true});ectx.drawImage(base,0,0);
+ const im=ectx.getImageData(0,0,cw,ch),d=im.data;let mean=0,n=0;
+ for(let i=0;i<d.length;i+=4){mean+=.299*d[i]+.587*d[i+1]+.114*d[i+2];n++}
+ mean/=Math.max(1,n);
+ for(let i=0;i<d.length;i+=4){const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2],v=Math.max(0,Math.min(255,(gray-mean)*1.55+mean));d[i]=d[i+1]=d[i+2]=v;d[i+3]=255}
+ ectx.putImageData(im,0,0);
+ const ocr=await getEngine(),reads=[],variants=[base,enhanced],modes=['11','6'];
  for(let i=0;i<variants.length;i++){
-  state('Leyendo permiso local… pasada '+(i+1)+' de '+variants.length);
+  state('Leyendo permiso local… pasada '+(i+1)+' de 2');
   await ocr.setParameters({tessedit_pageseg_mode:modes[i],preserve_interword_spaces:'1',user_defined_dpi:'300'});
   const result=await ocr.recognize(variants[i]),text=String(result?.data?.text||'').trim();
   if(text)reads.push({text,parsed:parseIdentity(text.split(/\\r?\\n/).map(line=>({text:line,score:1})))});
@@ -65,8 +60,7 @@ async function webOCR(file){
  if(!reads.length)throw new Error('El lector local no detectó texto en la imagen');
  reads.sort((a,b)=>Object.keys(b.parsed||{}).length-Object.keys(a.parsed||{}).length);
  const merged={};for(const read of reads)for(const [key,value] of Object.entries(read.parsed||{}))if(value&&!merged[key])merged[key]=value;
- window.__lariosLastOcrPasses=reads.length;
- return {text:reads.map(x=>x.text).join('\\n\\n'),parsed:merged};
+ return{text:reads.map(x=>x.text).join('\\n\\n'),parsed:merged}
 }
 async function readIdentity(file,nativeText){
  let result;
