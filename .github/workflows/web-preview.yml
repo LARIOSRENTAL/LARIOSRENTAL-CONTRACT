@@ -14,6 +14,7 @@ on:
       - ".github/workflows/web-preview.yml"
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -96,6 +97,20 @@ jobs:
         with:
           name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: app-v84/www
+      - name: Wait for the Pages artifact to appear in the Actions API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          for attempt in {1..12}; do
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              -f name="$PAGES_ARTIFACT" --method GET --jq '.artifacts | length' | grep -qx 1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::The Pages artifact was uploaded but is still absent from the Actions API."
+          exit 1
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
