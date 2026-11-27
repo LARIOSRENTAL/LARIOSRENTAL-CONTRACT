@@ -12,6 +12,7 @@ const context = {
 };
 vm.runInNewContext(source, context);
 const parse = context.window.LariosScanner.__testParseIdentityText;
+const parseWeb = context.window.LariosScanner.__testParseWebIdentity;
 const parseVehicle = context.window.LariosScanner.__testParseVehicleText;
 const bestFleetVehicle = context.window.LariosScanner.__testBestFleetVehicle;
 
@@ -30,6 +31,32 @@ assert.equal(spanish.issue, '2025-12-01');
 assert.equal(spanish.expiry, '2035-12-03');
 assert.equal(spanish.license, '25728989-Q');
 assert.equal(spanish.country, 'ESPAÑA');
+
+const quebecText = `Québec — Permis de conduire
+P5678-170290-03
+1. MARCHAND
+2. ÉLODIE
+Date de naissance (A-M-J) : 1990-02-17
+12 RUE DES ÉRABLES
+
+APP. 2
+LAVAL
+(QC) H7A 1A1
+5. N° de référence : H8K123456
+Valide le : 2022-08-22 Expire le : 2030-02-17`;
+const quebec = parseWeb(quebecText);
+assert.deepEqual({ ...quebec }, {
+  country: 'CANADÁ',
+  license: 'P5678-170290-03',
+  name: 'ÉLODIE MARCHAND',
+  birth: '1990-02-17',
+  issue: '2022-08-22',
+  expiry: '2030-02-17',
+  address: '12 RUE DES ÉRABLES APP. 2 LAVAL (QC) H7A 1A1',
+});
+assert.equal(parseWeb(quebecText.replace('P5678-170290-03', '')).license, undefined);
+assert.equal(parseWeb(quebecText.replace('1990-02-17', '1998-02-17')).birth, undefined);
+assert.equal(parseWeb('FÜHRERSCHEIN\n4a. 12.08.1990\n4b. 14.11.2035').birth, undefined);
 
 const uk = parse(`UK DRIVING LICENCE
 1. GEAL

@@ -8,11 +8,12 @@ const html = readFileSync(join(__dirname, '..', 'app-v84', 'www', 'index.html'),
 
 assert.match(scanner, /ESCÁNER NATIVO ML KIT/);
 assert.doesNotMatch(scanner, /api\.ocr\.space/);
-assert.match(scanner, /worker\.recognize\(file\)/);
+assert.match(scanner, /worker\.recognize\(canvas\)/);
 assert.match(scanner, /SCANNER WEB DE PERMISOS ACTIVO/);
 assert.match(scanner, /OCR DE LLAVEROS ACTIVO/);
 assert.doesNotMatch(scanner, /assigned_vehicle_group|result\.group|v\.category/);
-assert.match(scanner, /tesseract\.js@5/);
+assert.match(scanner, /vendor\/tesseract-v5\//);
+assert.match(scanner, /workerBlobURL:false/);
 
 const identity=scanner.slice(scanner.indexOf('async function readIdentity('),scanner.indexOf('function normalizePlate('));
 const vehicle=scanner.slice(scanner.indexOf('async function readVehicle('),scanner.indexOf('async function selected('));
@@ -28,7 +29,7 @@ assert.match(vehicle, /vehicles\?select=/);
 for (const field of ["'1'", "'2'", "'3'", "'4a'", "'4b'", "'5'", "'8'"]) assert.ok(scanner.includes(field), `Falta el campo europeo ${field}`);
 assert.match(scanner, /result\.name=`\$\{given\} \$\{sur\}`/);
 assert.match(scanner, /findNumbered\(lines,'8'\)/);
-assert.match(html, /scanner-v5\.js\?v=20261104-native-local/);
+assert.match(html, /scanner-v5\.js\?v=/);
 assert.match(html, /scanner-lock-v6\.js\?v=4/);
 assert.match(form, /Precio alquiler \(editable\)<input id="rental_price"/);
 assert.doesNotMatch(form, /id="rental_price"[^>]*readonly/);

@@ -5,6 +5,8 @@
   "description": "Aplicacion web y nativa de gestion de Larios Rental",
   "scripts": {
     "test": "node ../tests/run-all.js",
+    "prepare:web-ocr": "node scripts/prepare-web-ocr.mjs",
+    "preserve": "npm run prepare:web-ocr",
     "serve": "python3 -m http.server 4173 --directory www",
     "sync": "npx cap sync",
     "android:add": "npx cap add android",
@@ -29,6 +31,9 @@
   },
   "devDependencies": {
     "@capacitor/cli": "8.0.0",
-    "esbuild": "0.25.12"
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/spa": "1.0.0",
+    "esbuild": "0.25.12",
+    "tesseract.js": "5.1.1"
   }
 }
